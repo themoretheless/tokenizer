@@ -1,0 +1,16 @@
+[package]
+name = "themoretheless-tokenizer"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Denis Mezhov"]
+description = "A small, dependency-free tokenizer for structured text"
+repository = "https://github.com/themoretheless/tokenizer"
+readme = "README.md"
+keywords = ["tokenizer", "lexer", "json", "syntax-highlighting"]
+categories = ["parsing", "text-processing"]
+
+[lib]
+name = "themoretheless_tokenizer"
+path = "src/lib.rs"
+
