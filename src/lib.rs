@@ -5,8 +5,14 @@
 //! convert them to UTF-16 code-unit offsets at their boundary.
 
 #![forbid(unsafe_code)]
+#![doc = include_str!("../README.md")]
 
 use std::ops::Range;
+
+pub mod json;
+pub mod source;
+
+pub use source::{ColumnEncoding, LineColumn, LineIndex, PositionError};
 
 /// Half-open UTF-8 byte range in the source string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -29,6 +35,50 @@ impl Span {
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.start == self.end
+    }
+
+    /// Returns this span as a standard half-open range.
+    #[must_use]
+    pub const fn range(self) -> Range<usize> {
+        self.start..self.end
+    }
+
+    /// Whether the half-open span contains a byte offset.
+    #[must_use]
+    pub const fn contains(self, offset: usize) -> bool {
+        self.start <= offset && offset < self.end
+    }
+
+    /// The smallest span covering both inputs.
+    #[must_use]
+    pub const fn cover(self, other: Self) -> Self {
+        Self::new(
+            if self.start < other.start {
+                self.start
+            } else {
+                other.start
+            },
+            if self.end > other.end {
+                self.end
+            } else {
+                other.end
+            },
+        )
+    }
+
+    /// Whether both endpoints can safely index the given UTF-8 source.
+    #[must_use]
+    pub fn is_valid_for(self, source: &str) -> bool {
+        self.start <= self.end
+            && self.end <= source.len()
+            && source.is_char_boundary(self.start)
+            && source.is_char_boundary(self.end)
+    }
+
+    /// Returns the covered source text when the span is valid.
+    #[must_use]
+    pub fn slice(self, source: &str) -> Option<&str> {
+        source.get(self.range())
     }
 }
 
