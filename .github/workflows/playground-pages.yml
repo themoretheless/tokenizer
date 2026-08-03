@@ -38,9 +38,6 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci --prefix playground
 
-      - name: Fetch Rust dependencies
-        run: cargo fetch --locked
-
       - name: Build GitHub Pages site
         run: npm --prefix playground run build:pages
 
