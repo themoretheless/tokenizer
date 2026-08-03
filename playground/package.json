@@ -7,8 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "build:wasm": "wasm-pack build ../wasm --target web --release --out-dir ../playground/public/wasm",
+    "build:wasm:test": "wasm-pack build ../wasm --target nodejs --dev --out-dir ../playground/.wasm-test",
     "build:pages": "npm run build:wasm && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "npm run build:wasm:test && node --test tests/*.test.js"
   },
   "dependencies": { "@vitejs/plugin-vue": "6.0.8", "vite": "8.2.0", "vue": "3.5.40" },
   "devDependencies": {}
