@@ -23,14 +23,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Vue
-        uses: themoretheless/.github/.github/actions/setup-vue@345346381f30bbcdb6ba4899f29af8925fd4b6d3 # PR #11
+        uses: themoretheless/.github/.github/actions/setup-vue@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
         with:
           node-version: 22.13.0
           npm-cache-dependency-path: playground/package-lock.json
           working-directory: playground
 
       - name: Set up Rust and WebAssembly
-        uses: themoretheless/.github/.github/actions/setup-rust@345346381f30bbcdb6ba4899f29af8925fd4b6d3 # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
         with:
           rust-toolchain: 1.96.0
           targets: wasm32-unknown-unknown

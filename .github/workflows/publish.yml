@@ -42,39 +42,23 @@ jobs:
           persist-credentials: false
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@345346381f30bbcdb6ba4899f29af8925fd4b6d3 # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
         with:
           rust-toolchain: beta
 
       - name: Resolve package version
         id: package
-        uses: themoretheless/.github/.github/actions/cargo-package-version@345346381f30bbcdb6ba4899f29af8925fd4b6d3 # PR #11
+        uses: themoretheless/.github/.github/actions/cargo-package-version@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
         with:
           package-name: themoretheless-tokenizer
 
       - name: Validate ref and version
-        env:
-          PRERELEASE: ${{ steps.package.outputs.prerelease }}
-          REQUESTED_VERSION: ${{ inputs.version }}
-          VERSION: ${{ steps.package.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ "${GITHUB_REF_TYPE}" != "branch" ]]; then
-            echo "::error::Run this workflow against a branch, not a tag"
-            exit 1
-          fi
-
-          if [[ "${REQUESTED_VERSION}" != "${VERSION}" ]]; then
-            echo "::error::Requested version ${REQUESTED_VERSION} does not match Cargo.toml ${VERSION}"
-            exit 1
-          fi
-
-          if [[ "${GITHUB_REF_NAME}" != "main" && "${PRERELEASE}" != "true" ]]; then
-            echo "::error::Only prerelease versions may be published outside main (for example, ${VERSION}-preview.1)"
-            exit 1
-          fi
+        uses: themoretheless/.github/.github/actions/validate-package-release@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
+        with:
+          version: ${{ steps.package.outputs.version }}
+          tag: ${{ steps.package.outputs.tag }}
+          prerelease: ${{ steps.package.outputs.prerelease }}
+          requested-version: ${{ inputs.version }}
 
       - name: Verify publishable package
         run: >-
@@ -97,22 +81,18 @@ jobs:
           persist-credentials: false
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@345346381f30bbcdb6ba4899f29af8925fd4b6d3 # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
         with:
           rust-toolchain: beta
 
       - name: Validate explicit confirmation
-        env:
-          CONFIRMATION: ${{ inputs.confirmation }}
-          TAG: ${{ needs.dry-run.outputs.tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          expected="publish ${TAG}"
-          if [[ "${CONFIRMATION}" != "${expected}" ]]; then
-            echo "::error::Confirmation must be exactly: ${expected}"
-            exit 1
-          fi
+        uses: themoretheless/.github/.github/actions/validate-package-release@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
+        with:
+          version: ${{ needs.dry-run.outputs.version }}
+          tag: ${{ needs.dry-run.outputs.tag }}
+          prerelease: ${{ needs.dry-run.outputs.prerelease }}
+          confirmation: ${{ inputs.confirmation }}
+          confirmation-prefix: publish
 
       - name: Publish to crates.io
         env:

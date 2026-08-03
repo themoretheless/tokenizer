@@ -28,40 +28,24 @@ jobs:
           fetch-depth: 0
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@345346381f30bbcdb6ba4899f29af8925fd4b6d3 # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
         with:
           rust-toolchain: beta
 
       - name: Resolve package version
         id: package
-        uses: themoretheless/.github/.github/actions/cargo-package-version@345346381f30bbcdb6ba4899f29af8925fd4b6d3 # PR #11
+        uses: themoretheless/.github/.github/actions/cargo-package-version@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
         with:
           package-name: themoretheless-tokenizer
 
       - name: Validate release version
-        env:
-          CONFIRMATION: ${{ inputs.confirmation }}
-          PRERELEASE: ${{ steps.package.outputs.prerelease }}
-          TAG: ${{ steps.package.outputs.tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ "${GITHUB_REF_TYPE}" != "branch" ]]; then
-            echo "::error::Run this workflow against a branch, not a tag"
-            exit 1
-          fi
-
-          if [[ "${GITHUB_REF_NAME}" != "main" && "${PRERELEASE}" != "true" ]]; then
-            echo "::error::Only prerelease versions may be released outside main"
-            exit 1
-          fi
-
-          expected="release ${TAG}"
-          if [[ "${CONFIRMATION}" != "${expected}" ]]; then
-            echo "::error::Confirmation must be exactly: ${expected}"
-            exit 1
-          fi
+        uses: themoretheless/.github/.github/actions/validate-package-release@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
+        with:
+          version: ${{ steps.package.outputs.version }}
+          tag: ${{ steps.package.outputs.tag }}
+          prerelease: ${{ steps.package.outputs.prerelease }}
+          confirmation: ${{ inputs.confirmation }}
+          confirmation-prefix: release
 
       - name: Verify package
         run: cargo package --locked --package themoretheless-tokenizer
