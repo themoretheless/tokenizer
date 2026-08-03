@@ -60,16 +60,5 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Checkout pinned JSONTestSuite corpus
-        uses: actions/checkout@v7
-        with:
-          repository: nst/JSONTestSuite
-          ref: 1ef36fa01286573e846ac449e8683f8833c5b26a
-          path: json-test-suite
-          sparse-checkout: test_parsing
-          persist-credentials: false
-
-      - name: Run JSON conformance corpus
-        env:
-          JSON_TEST_SUITE: ${{ github.workspace }}/json-test-suite
+      - name: Run vendored JSON conformance corpus
         run: cargo test --locked --test json_conformance -- --nocapture

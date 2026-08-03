@@ -1,40 +1,14 @@
-//! Opt-in conformance test for <https://github.com/nst/JSONTestSuite>.
-//!
-//! Set `JSON_TEST_SUITE` to either the repository root or its
-//! `test_parsing` directory to run the corpus locally.
+//! Conformance test using the vendored <https://github.com/nst/JSONTestSuite>
+//! corpus in `tests/fixtures/json-test-suite/test_parsing`.
 
-use std::{env, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 
 use themoretheless_tokenizer::json::parse;
 
 #[test]
 fn json_test_suite_conformance() {
-    let Some(configured_path) = env::var_os("JSON_TEST_SUITE") else {
-        eprintln!("JSON_TEST_SUITE is not set; skipping JSONTestSuite conformance test");
-        return;
-    };
-
-    let configured_path = configured_path.into_string().unwrap_or_else(|path| {
-        panic!("JSON_TEST_SUITE is not valid UTF-8: {path:?}");
-    });
-    assert!(
-        !configured_path.trim().is_empty(),
-        "JSON_TEST_SUITE must not be empty"
-    );
-
-    let configured_path = PathBuf::from(configured_path);
-    assert!(
-        configured_path.is_dir(),
-        "JSON_TEST_SUITE must point to a directory, got {}",
-        configured_path.display()
-    );
-
-    let nested_test_directory = configured_path.join("test_parsing");
-    let test_directory = if nested_test_directory.is_dir() {
-        nested_test_directory
-    } else {
-        configured_path
-    };
+    let test_directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/json-test-suite/test_parsing");
 
     let mut cases = fs::read_dir(&test_directory)
         .unwrap_or_else(|error| {
