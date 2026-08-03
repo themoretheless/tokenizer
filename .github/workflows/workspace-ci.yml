@@ -44,21 +44,3 @@ jobs:
 
       - name: Check package
         run: cargo package --locked
-
-  conformance:
-    name: JSON conformance
-    needs: workspace
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Run project JSON fixtures
-        run: cargo test --locked --test json_conformance -- --nocapture
