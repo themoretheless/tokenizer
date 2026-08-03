@@ -28,18 +28,18 @@ jobs:
           fetch-depth: 0
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@220991c6faf65c51341b252151aaf89954dead6a # PR #11
         with:
           rust-toolchain: beta
 
       - name: Resolve package version
         id: package
-        uses: themoretheless/.github/.github/actions/cargo-package-version@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
+        uses: themoretheless/.github/.github/actions/cargo-package-version@220991c6faf65c51341b252151aaf89954dead6a # PR #11
         with:
           package-name: themoretheless-tokenizer
 
       - name: Validate release version
-        uses: themoretheless/.github/.github/actions/validate-package-release@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
+        uses: themoretheless/.github/.github/actions/validate-package-release@220991c6faf65c51341b252151aaf89954dead6a # PR #11
         with:
           version: ${{ steps.package.outputs.version }}
           tag: ${{ steps.package.outputs.tag }}
@@ -49,31 +49,14 @@ jobs:
 
       - name: Validate existing tag state
         id: tag
-        uses: themoretheless/.github/.github/actions/validate-release-tag@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
+        uses: themoretheless/.github/.github/actions/validate-release-tag@220991c6faf65c51341b252151aaf89954dead6a # PR #11
         with:
           tag: ${{ steps.package.outputs.tag }}
 
       - name: Create tag and GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PRERELEASE: ${{ steps.package.outputs.prerelease }}
-          TAG: ${{ steps.package.outputs.tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if [[ "${{ steps.tag.outputs.exists }}" != "true" ]]; then
-            git tag -a "$TAG" -m "Release $TAG"
-            git push origin "$TAG"
-          fi
-
-          release_flags=(--verify-tag --generate-notes)
-          if [[ "$PRERELEASE" == "true" ]]; then
-            release_flags+=(--prerelease)
-          fi
-
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" "${release_flags[@]}"
-          fi
+        uses: themoretheless/.github/.github/actions/create-github-release@220991c6faf65c51341b252151aaf89954dead6a # PR #11
+        with:
+          tag: ${{ steps.package.outputs.tag }}
+          prerelease: ${{ steps.package.outputs.prerelease }}
+          tag-exists: ${{ steps.tag.outputs.exists }}
+          github-token: ${{ github.token }}
