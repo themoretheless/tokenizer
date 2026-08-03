@@ -42,18 +42,18 @@ jobs:
           persist-credentials: false
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@0afac90f53505a2c179a4b04f1b0c35ff341c7c0 # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@65a4a57f604db081a440923b1be1abb06664c54d # v1
         with:
           rust-toolchain: beta
 
       - name: Resolve package version
         id: package
-        uses: themoretheless/.github/.github/actions/cargo-package-version@0afac90f53505a2c179a4b04f1b0c35ff341c7c0 # PR #11
+        uses: themoretheless/.github/.github/actions/cargo-package-version@65a4a57f604db081a440923b1be1abb06664c54d # v1
         with:
           package-name: themoretheless-tokenizer
 
       - name: Validate ref and version
-        uses: themoretheless/.github/.github/actions/validate-package-release@0afac90f53505a2c179a4b04f1b0c35ff341c7c0 # PR #11
+        uses: themoretheless/.github/.github/actions/validate-package-release@65a4a57f604db081a440923b1be1abb06664c54d # v1
         with:
           version: ${{ steps.package.outputs.version }}
           tag: ${{ steps.package.outputs.tag }}
@@ -61,7 +61,7 @@ jobs:
           requested-version: ${{ inputs.version }}
 
       - name: Verify publishable package
-        uses: themoretheless/.github/.github/actions/publish-crate@0afac90f53505a2c179a4b04f1b0c35ff341c7c0 # PR #11
+        uses: themoretheless/.github/.github/actions/publish-crate@65a4a57f604db081a440923b1be1abb06664c54d # v1
         with:
           package-name: themoretheless-tokenizer
           dry-run: true
@@ -81,12 +81,12 @@ jobs:
           persist-credentials: false
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@0afac90f53505a2c179a4b04f1b0c35ff341c7c0 # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@65a4a57f604db081a440923b1be1abb06664c54d # v1
         with:
           rust-toolchain: beta
 
       - name: Validate explicit confirmation
-        uses: themoretheless/.github/.github/actions/validate-package-release@0afac90f53505a2c179a4b04f1b0c35ff341c7c0 # PR #11
+        uses: themoretheless/.github/.github/actions/validate-package-release@65a4a57f604db081a440923b1be1abb06664c54d # v1
         with:
           version: ${{ needs.dry-run.outputs.version }}
           tag: ${{ needs.dry-run.outputs.tag }}
@@ -95,7 +95,7 @@ jobs:
           confirmation-prefix: publish
 
       - name: Publish to crates.io
-        uses: themoretheless/.github/.github/actions/publish-crate@0afac90f53505a2c179a4b04f1b0c35ff341c7c0 # PR #11
+        uses: themoretheless/.github/.github/actions/publish-crate@65a4a57f604db081a440923b1be1abb06664c54d # v1
         with:
           package-name: themoretheless-tokenizer
           registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
