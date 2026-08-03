@@ -22,12 +22,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Rust and WebAssembly
-        uses: themoretheless/.github/.github/actions/setup-rust-web@33719d025b6879e6a828c4938bf7b9ec323f0937 # v1
+      - name: Set up Vue
+        uses: themoretheless/.github/.github/actions/setup-vue@3c98211e3401beaec88776ef5901f45ed6565692 # v1
         with:
           node-version: 22.13.0
-          rust-version: 1.96.0
           npm-cache-dependency-path: playground/package-lock.json
+
+      - name: Set up Rust and WebAssembly
+        uses: themoretheless/.github/.github/actions/setup-rust-wasm@3c98211e3401beaec88776ef5901f45ed6565692 # v1
+        with:
+          rust-version: 1.96.0
           wasm-pack-version: 0.14.0
           wasm-bindgen-cli-version: 0.2.126
 
@@ -53,4 +57,4 @@ jobs:
     permissions:
       pages: write
       id-token: write
-    uses: themoretheless/.github/.github/workflows/deploy-github-pages.yml@33719d025b6879e6a828c4938bf7b9ec323f0937 # v1
+    uses: themoretheless/.github/.github/workflows/deploy-github-pages.yml@3c98211e3401beaec88776ef5901f45ed6565692 # v1
