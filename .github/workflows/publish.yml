@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Exact Cargo package version to validate or publish (for example, 0.2.0)
+        description: Exact Cargo package version (for example, 0.2.0 or 0.3.0-preview.1)
         required: true
         type: string
       publish:
@@ -42,21 +42,26 @@ jobs:
         with:
           rust-toolchain: beta
 
-      - name: Validate branch and version
+      - name: Validate ref and version
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_REF_TYPE}" != "branch" || "${GITHUB_REF_NAME}" != "main" ]]; then
-            echo "::error::Run this workflow against the main branch"
+          if [[ "${GITHUB_REF_TYPE}" != "branch" ]]; then
+            echo "::error::Run this workflow against a branch, not a tag"
             exit 1
           fi
 
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
           if [[ "${REQUESTED_VERSION}" != "${version}" ]]; then
             echo "::error::Requested version ${REQUESTED_VERSION} does not match Cargo.toml ${version}"
+            exit 1
+          fi
+
+          if [[ "${GITHUB_REF_NAME}" != "main" && "${version}" != *-* ]]; then
+            echo "::error::Only prerelease versions may be published outside main (for example, ${version}-preview.1)"
             exit 1
           fi
 
