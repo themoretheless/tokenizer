@@ -30,11 +30,11 @@ jobs:
           npm-cache-dependency-path: playground/package-lock.json
 
       - name: Set up Rust and WebAssembly
-        uses: themoretheless/.github/.github/actions/setup-rust-wasm@3cce368a1c5c4a117495646794d7f89fd5d6efa3 # v1
+        uses: themoretheless/.github/.github/actions/setup-rust@717b828b99c6cac8a99e53974111233a38124625 # PR #11
         with:
-          rust-version: 1.96.0
-          wasm-pack-version: 0.14.0
-          wasm-bindgen-cli-version: 0.2.126
+          rust-toolchain: 1.96.0
+          targets: wasm32-unknown-unknown
+          tools: wasm-pack@0.14.0,wasm-bindgen-cli@0.2.126
 
       - name: Install JavaScript dependencies
         run: npm ci --prefix playground
@@ -61,11 +61,11 @@ jobs:
           npm-cache-dependency-path: playground/package-lock.json
 
       - name: Set up Rust and WebAssembly
-        uses: themoretheless/.github/.github/actions/setup-rust-wasm@3cce368a1c5c4a117495646794d7f89fd5d6efa3 # v1
+        uses: themoretheless/.github/.github/actions/setup-rust@717b828b99c6cac8a99e53974111233a38124625 # PR #11
         with:
-          rust-version: 1.96.0
-          wasm-pack-version: 0.14.0
-          wasm-bindgen-cli-version: 0.2.126
+          rust-toolchain: 1.96.0
+          targets: wasm32-unknown-unknown
+          tools: wasm-pack@0.14.0,wasm-bindgen-cli@0.2.126
 
       - name: Install JavaScript dependencies
         run: npm ci --prefix playground
