@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@a6c40a906bc786a3668362d270ca95212b5bffce # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Vue
         uses: themoretheless/.github/.github/actions/setup-vue@a6c40a906bc786a3668362d270ca95212b5bffce # v1
@@ -47,7 +47,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@a6c40a906bc786a3668362d270ca95212b5bffce # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Vue
         uses: themoretheless/.github/.github/actions/setup-vue@a6c40a906bc786a3668362d270ca95212b5bffce # v1
