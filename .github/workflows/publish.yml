@@ -29,6 +29,10 @@ jobs:
     name: Validate branch and package
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      prerelease: ${{ steps.package.outputs.prerelease }}
+      tag: ${{ steps.package.outputs.tag }}
+      version: ${{ steps.package.outputs.version }}
 
     steps:
       - name: Checkout selected ref
@@ -38,13 +42,21 @@ jobs:
           persist-credentials: false
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@1911218e4f2afdff96901fdbc3d570192bb0cca9 # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@345346381f30bbcdb6ba4899f29af8925fd4b6d3 # PR #11
         with:
           rust-toolchain: beta
 
+      - name: Resolve package version
+        id: package
+        uses: themoretheless/.github/.github/actions/cargo-package-version@345346381f30bbcdb6ba4899f29af8925fd4b6d3 # PR #11
+        with:
+          package-name: themoretheless-tokenizer
+
       - name: Validate ref and version
         env:
+          PRERELEASE: ${{ steps.package.outputs.prerelease }}
           REQUESTED_VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.package.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -54,17 +66,13 @@ jobs:
             exit 1
           fi
 
-          version=$(
-            cargo metadata --no-deps --format-version 1 |
-              jq -er '.packages[] | select(.name == "themoretheless-tokenizer") | .version'
-          )
-          if [[ "${REQUESTED_VERSION}" != "${version}" ]]; then
-            echo "::error::Requested version ${REQUESTED_VERSION} does not match Cargo.toml ${version}"
+          if [[ "${REQUESTED_VERSION}" != "${VERSION}" ]]; then
+            echo "::error::Requested version ${REQUESTED_VERSION} does not match Cargo.toml ${VERSION}"
             exit 1
           fi
 
-          if [[ "${GITHUB_REF_NAME}" != "main" && "${version}" != *-* ]]; then
-            echo "::error::Only prerelease versions may be published outside main (for example, ${version}-preview.1)"
+          if [[ "${GITHUB_REF_NAME}" != "main" && "${PRERELEASE}" != "true" ]]; then
+            echo "::error::Only prerelease versions may be published outside main (for example, ${VERSION}-preview.1)"
             exit 1
           fi
 
@@ -89,18 +97,18 @@ jobs:
           persist-credentials: false
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@1911218e4f2afdff96901fdbc3d570192bb0cca9 # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@345346381f30bbcdb6ba4899f29af8925fd4b6d3 # PR #11
         with:
           rust-toolchain: beta
 
       - name: Validate explicit confirmation
         env:
           CONFIRMATION: ${{ inputs.confirmation }}
-          REQUESTED_VERSION: ${{ inputs.version }}
+          TAG: ${{ needs.dry-run.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
-          expected="publish v${REQUESTED_VERSION}"
+          expected="publish ${TAG}"
           if [[ "${CONFIRMATION}" != "${expected}" ]]; then
             echo "::error::Confirmation must be exactly: ${expected}"
             exit 1

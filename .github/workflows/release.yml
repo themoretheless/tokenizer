@@ -28,14 +28,21 @@ jobs:
           fetch-depth: 0
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@1911218e4f2afdff96901fdbc3d570192bb0cca9 # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@345346381f30bbcdb6ba4899f29af8925fd4b6d3 # PR #11
         with:
           rust-toolchain: beta
 
+      - name: Resolve package version
+        id: package
+        uses: themoretheless/.github/.github/actions/cargo-package-version@345346381f30bbcdb6ba4899f29af8925fd4b6d3 # PR #11
+        with:
+          package-name: themoretheless-tokenizer
+
       - name: Validate release version
-        id: version
         env:
           CONFIRMATION: ${{ inputs.confirmation }}
+          PRERELEASE: ${{ steps.package.outputs.prerelease }}
+          TAG: ${{ steps.package.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -45,22 +52,16 @@ jobs:
             exit 1
           fi
 
-          new_version=$(
-            cargo metadata --no-deps --format-version 1 |
-              jq -er '.packages[] | select(.name == "themoretheless-tokenizer") | .version'
-          )
-          if [[ "${GITHUB_REF_NAME}" != "main" && "${new_version}" != *-* ]]; then
+          if [[ "${GITHUB_REF_NAME}" != "main" && "${PRERELEASE}" != "true" ]]; then
             echo "::error::Only prerelease versions may be released outside main"
             exit 1
           fi
 
-          expected="release v${new_version}"
+          expected="release ${TAG}"
           if [[ "${CONFIRMATION}" != "${expected}" ]]; then
             echo "::error::Confirmation must be exactly: ${expected}"
             exit 1
           fi
-
-          echo "new=${new_version}" >> "$GITHUB_OUTPUT"
 
       - name: Verify package
         run: cargo package --locked --package themoretheless-tokenizer
@@ -68,7 +69,7 @@ jobs:
       - name: Validate existing tag state
         id: tag
         env:
-          TAG: v${{ steps.version.outputs.new }}
+          TAG: ${{ steps.package.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -87,7 +88,7 @@ jobs:
 
       - name: Confirm version exists on crates.io
         env:
-          VERSION: ${{ steps.version.outputs.new }}
+          VERSION: ${{ steps.package.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -117,7 +118,8 @@ jobs:
       - name: Create tag and GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v${{ steps.version.outputs.new }}
+          PRERELEASE: ${{ steps.package.outputs.prerelease }}
+          TAG: ${{ steps.package.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -130,7 +132,7 @@ jobs:
           fi
 
           release_flags=(--verify-tag --generate-notes)
-          if [[ "$TAG" == *-* ]]; then
+          if [[ "$PRERELEASE" == "true" ]]; then
             release_flags+=(--prerelease)
           fi
 
