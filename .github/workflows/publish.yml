@@ -37,10 +37,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Install stable Rust
+      - name: Install beta Rust
         uses: themoretheless/.github/.github/actions/setup-rust@1911218e4f2afdff96901fdbc3d570192bb0cca9 # PR #11
         with:
-          rust-toolchain: stable
+          rust-toolchain: beta
 
       - name: Validate branch and version
         env:
@@ -80,10 +80,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install stable Rust
+      - name: Install beta Rust
         uses: themoretheless/.github/.github/actions/setup-rust@1911218e4f2afdff96901fdbc3d570192bb0cca9 # PR #11
         with:
-          rust-toolchain: stable
+          rust-toolchain: beta
 
       - name: Validate explicit confirmation
         env:
