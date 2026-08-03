@@ -128,6 +128,7 @@ jobs:
           node-version: 22.13.0
           rust-version: 1.96.0
           npm-cache-dependency-path: playground/package-lock.json
+          wasm-pack-version: 0.14.0
           wasm-bindgen-cli-version: 0.2.126
 
       - name: Install JavaScript dependencies
@@ -154,6 +155,7 @@ jobs:
           node-version: 22.13.0
           rust-version: 1.96.0
           npm-cache-dependency-path: playground/package-lock.json
+          wasm-pack-version: 0.14.0
           wasm-bindgen-cli-version: 0.2.126
 
       - name: Install JavaScript dependencies
