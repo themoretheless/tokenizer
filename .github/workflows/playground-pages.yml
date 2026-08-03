@@ -20,17 +20,17 @@ jobs:
       pages: read
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@a6c40a906bc786a3668362d270ca95212b5bffce # v7.0.1
 
       - name: Set up Vue
-        uses: themoretheless/.github/.github/actions/setup-vue@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        uses: themoretheless/.github/.github/actions/setup-vue@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           node-version: 22.13.0
           npm-cache-dependency-path: playground/package-lock.json
           working-directory: playground
 
       - name: Set up Rust and WebAssembly
-        uses: themoretheless/.github/.github/actions/setup-rust@bb3377f2f424201379ab4e47e147f164f4014b38 # v1
+        uses: themoretheless/.github/.github/actions/setup-rust@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           rust-toolchain: beta
           targets: wasm32-unknown-unknown
@@ -40,10 +40,10 @@ jobs:
         run: npm --prefix playground run build:pages
 
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+        uses: actions/configure-pages@a6c40a906bc786a3668362d270ca95212b5bffce # v6.0.0
 
       - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        uses: actions/upload-pages-artifact@a6c40a906bc786a3668362d270ca95212b5bffce # v5.0.0
         with:
           path: playground/dist
 
@@ -52,4 +52,4 @@ jobs:
     permissions:
       pages: write
       id-token: write
-    uses: themoretheless/.github/.github/workflows/deploy-github-pages.yml@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+    uses: themoretheless/.github/.github/workflows/deploy-github-pages.yml@a6c40a906bc786a3668362d270ca95212b5bffce # v1
