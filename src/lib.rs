@@ -12,6 +12,10 @@ use std::ops::Range;
 pub mod json;
 pub mod source;
 
+#[cfg(feature = "web-bridge")]
+#[doc(hidden)]
+pub mod web_bridge;
+
 pub use source::{ColumnEncoding, LineColumn, LineIndex, PositionError};
 
 /// Half-open UTF-8 byte range in the source string.

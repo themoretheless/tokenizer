@@ -1,2 +1,5 @@
 /target/
-
+/playground/node_modules/
+/playground/dist/
+/playground/public/wasm/
+/wasm/target/

@@ -1,0 +1,15 @@
+{
+  "name": "tokenizer-playground",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:wasm": "wasm-pack build ../wasm --target web --release --out-dir ../playground/public/wasm",
+    "build:pages": "npm run build:wasm && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": { "@vitejs/plugin-vue": "6.0.8", "vite": "8.2.0", "vue": "3.5.40" },
+  "devDependencies": {}
+}
