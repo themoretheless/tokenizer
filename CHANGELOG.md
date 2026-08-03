@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-03
+
 ### Added
 
 - JSONTestSuite conformance coverage, deterministic property and differential
@@ -16,6 +18,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Offset-based AST navigation with stable paths through duplicate object keys.
 - A deterministic, object-safe AST visitor with subtree skipping and early exit.
 - A lossless, AST-backed concrete syntax tree plus validated batch text edits.
+- A Vue and WebAssembly playground for visually inspecting JSON tokenization.
+- GitHub Pages deployment through the shared organization workflow templates.
 
 ### Changed
 
@@ -47,6 +51,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Initial dependency-free JSON tokenizer with UTF-8 byte spans, diagnostics,
   semantic token categories, and the `JsonTokenizer` compatibility facade.
 
-[Unreleased]: https://github.com/themoretheless/tokenizer/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/themoretheless/tokenizer/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/themoretheless/tokenizer/compare/v0.2.0...v0.3.1
 [0.2.0]: https://github.com/themoretheless/tokenizer/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/themoretheless/tokenizer/releases/tag/v0.1.0
