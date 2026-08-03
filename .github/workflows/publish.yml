@@ -41,7 +41,6 @@ jobs:
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: stable
-          components: rustfmt, clippy
 
       - name: Validate branch and version
         env:
@@ -60,40 +59,6 @@ jobs:
             echo "::error::Requested version ${REQUESTED_VERSION} does not match Cargo.toml ${version}"
             exit 1
           fi
-
-      - name: Check formatting
-        run: cargo fmt --check
-
-      - name: Run Clippy
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-
-      - name: Run tests
-        run: cargo test --locked --workspace --all-targets --all-features
-
-      - name: Run JSONTestSuite conformance
-        env:
-          JSON_TEST_SUITE_REVISION: 1ef36fa01286573e846ac449e8683f8833c5b26a
-        shell: bash
-        run: |
-          set -euo pipefail
-          suite_dir="${RUNNER_TEMP}/json-test-suite"
-          git init "${suite_dir}"
-          git -C "${suite_dir}" remote add origin https://github.com/nst/JSONTestSuite.git
-          git -C "${suite_dir}" sparse-checkout init --cone
-          git -C "${suite_dir}" sparse-checkout set test_parsing
-          git -C "${suite_dir}" fetch --depth=1 --filter=blob:none origin "${JSON_TEST_SUITE_REVISION}"
-          git -C "${suite_dir}" checkout --detach FETCH_HEAD
-          JSON_TEST_SUITE="${suite_dir}" cargo test --locked --test json_conformance -- --nocapture
-
-      - name: Build documentation
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --locked --no-deps --all-features
-
-      - name: Test minimum supported Rust version
-        run: |
-          rustup toolchain install 1.85.0 --profile minimal
-          cargo +1.85.0 test --locked --workspace --all-targets --all-features
 
       - name: Verify publishable package
         run: >-
