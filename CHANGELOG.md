@@ -10,7 +10,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- JSONTestSuite conformance coverage, deterministic property and differential
+- JSON fixture conformance coverage, deterministic property and differential
   tests, and reproducible benchmarks.
 - CI checks on stable Rust.
 - Dual licensing under MIT or Apache-2.0.

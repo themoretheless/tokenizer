@@ -60,5 +60,5 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Run vendored JSON conformance corpus
+      - name: Run project JSON fixtures
         run: cargo test --locked --test json_conformance -- --nocapture
