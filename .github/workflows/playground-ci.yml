@@ -24,14 +24,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Vue
-        uses: themoretheless/.github/.github/actions/setup-vue@63222b3cb4e128dc06cc9d060c744ebb3545c5ef # PR #11
+        uses: themoretheless/.github/.github/actions/setup-vue@1911218e4f2afdff96901fdbc3d570192bb0cca9 # PR #11
         with:
           node-version: 22.13.0
           npm-cache-dependency-path: playground/package-lock.json
           working-directory: playground
 
       - name: Set up Rust and WebAssembly
-        uses: themoretheless/.github/.github/actions/setup-rust@63222b3cb4e128dc06cc9d060c744ebb3545c5ef # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@1911218e4f2afdff96901fdbc3d570192bb0cca9 # PR #11
         with:
           rust-toolchain: 1.96.0
           targets: wasm32-unknown-unknown
@@ -50,14 +50,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Vue
-        uses: themoretheless/.github/.github/actions/setup-vue@63222b3cb4e128dc06cc9d060c744ebb3545c5ef # PR #11
+        uses: themoretheless/.github/.github/actions/setup-vue@1911218e4f2afdff96901fdbc3d570192bb0cca9 # PR #11
         with:
           node-version: 22.13.0
           npm-cache-dependency-path: playground/package-lock.json
           working-directory: playground
 
       - name: Set up Rust and WebAssembly
-        uses: themoretheless/.github/.github/actions/setup-rust@63222b3cb4e128dc06cc9d060c744ebb3545c5ef # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@1911218e4f2afdff96901fdbc3d570192bb0cca9 # PR #11
         with:
           rust-toolchain: 1.96.0
           targets: wasm32-unknown-unknown

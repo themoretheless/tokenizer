@@ -38,9 +38,9 @@ jobs:
           persist-credentials: false
 
       - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: themoretheless/.github/.github/actions/setup-rust@1911218e4f2afdff96901fdbc3d570192bb0cca9 # PR #11
         with:
-          toolchain: stable
+          rust-toolchain: stable
 
       - name: Validate branch and version
         env:
@@ -81,9 +81,9 @@ jobs:
           persist-credentials: false
 
       - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: themoretheless/.github/.github/actions/setup-rust@1911218e4f2afdff96901fdbc3d570192bb0cca9 # PR #11
         with:
-          toolchain: stable
+          rust-toolchain: stable
 
       - name: Validate explicit confirmation
         env:
