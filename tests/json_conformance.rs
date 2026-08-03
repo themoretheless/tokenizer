@@ -61,8 +61,10 @@ fn fixture_paths(directory: &Path) -> Vec<std::path::PathBuf> {
                 .path()
         })
         .filter(|path| {
-            path.extension()
-                .is_some_and(|extension| extension == "json")
+            path.is_file()
+                && path
+                    .extension()
+                    .is_some_and(|extension| extension == "json")
         })
         .collect::<Vec<_>>();
     paths.sort();
