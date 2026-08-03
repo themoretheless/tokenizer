@@ -27,12 +27,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Rust
-        run: >-
-          rustup toolchain install stable
-          --profile minimal
-          --component rustfmt
-          --component clippy
+      - name: Install beta Rust
+        uses: themoretheless/.github/.github/actions/setup-rust@1911218e4f2afdff96901fdbc3d570192bb0cca9 # PR #11
+        with:
+          rust-toolchain: beta
 
       - name: Validate release version
         id: version
@@ -42,15 +40,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_REF_TYPE}" != "branch" || "${GITHUB_REF_NAME}" != "main" ]]; then
-            echo "::error::Run this workflow against the main branch"
+          if [[ "${GITHUB_REF_TYPE}" != "branch" ]]; then
+            echo "::error::Run this workflow against a branch, not a tag"
             exit 1
           fi
 
           new_version=$(
             cargo metadata --no-deps --format-version 1 |
-              jq -r '.packages[0].version'
+              jq -er '.packages[] | select(.name == "themoretheless-tokenizer") | .version'
           )
+          if [[ "${GITHUB_REF_NAME}" != "main" && "${new_version}" != *-* ]]; then
+            echo "::error::Only prerelease versions may be released outside main"
+            exit 1
+          fi
+
           expected="release v${new_version}"
           if [[ "${CONFIRMATION}" != "${expected}" ]]; then
             echo "::error::Confirmation must be exactly: ${expected}"
@@ -58,55 +61,12 @@ jobs:
           fi
 
           echo "new=${new_version}" >> "$GITHUB_OUTPUT"
-          echo "changed=true" >> "$GITHUB_OUTPUT"
-
-      - name: Check formatting
-        if: steps.version.outputs.changed == 'true'
-        run: cargo +stable fmt --check
-
-      - name: Run Clippy
-        if: steps.version.outputs.changed == 'true'
-        run: cargo +stable clippy --workspace --all-targets --all-features --locked -- -D warnings
-
-      - name: Run tests
-        if: steps.version.outputs.changed == 'true'
-        run: cargo +stable test --workspace --all-targets --all-features --locked
-
-      - name: Run JSONTestSuite conformance
-        if: steps.version.outputs.changed == 'true'
-        env:
-          JSON_TEST_SUITE_REVISION: 1ef36fa01286573e846ac449e8683f8833c5b26a
-        shell: bash
-        run: |
-          set -euo pipefail
-          suite_dir="${RUNNER_TEMP}/json-test-suite"
-          git init "${suite_dir}"
-          git -C "${suite_dir}" remote add origin https://github.com/nst/JSONTestSuite.git
-          git -C "${suite_dir}" sparse-checkout init --cone
-          git -C "${suite_dir}" sparse-checkout set test_parsing
-          git -C "${suite_dir}" fetch --depth=1 --filter=blob:none origin "${JSON_TEST_SUITE_REVISION}"
-          git -C "${suite_dir}" checkout --detach FETCH_HEAD
-          JSON_TEST_SUITE="${suite_dir}" cargo +stable test --locked --test json_conformance -- --nocapture
-
-      - name: Build documentation
-        if: steps.version.outputs.changed == 'true'
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo +stable doc --locked --no-deps --all-features
 
       - name: Verify package
-        if: steps.version.outputs.changed == 'true'
-        run: cargo +stable package --locked
-
-      - name: Test minimum supported Rust version
-        if: steps.version.outputs.changed == 'true'
-        run: |
-          rustup toolchain install 1.85.0 --profile minimal
-          cargo +1.85.0 test --locked --workspace --all-targets --all-features
+        run: cargo package --locked --package themoretheless-tokenizer
 
       - name: Validate existing tag state
         id: tag
-        if: steps.version.outputs.changed == 'true'
         env:
           TAG: v${{ steps.version.outputs.new }}
         shell: bash
@@ -126,7 +86,6 @@ jobs:
           fi
 
       - name: Confirm version exists on crates.io
-        if: steps.version.outputs.changed == 'true'
         env:
           VERSION: ${{ steps.version.outputs.new }}
         shell: bash
@@ -156,7 +115,6 @@ jobs:
           fi
 
       - name: Create tag and GitHub Release
-        if: steps.version.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v${{ steps.version.outputs.new }}
