@@ -1,4 +1,4 @@
-name: CI
+name: Workspace CI
 
 on:
   pull_request:
@@ -10,11 +10,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: workspace-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  workspace_quality:
+  quality:
     name: Workspace quality
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -43,7 +43,7 @@ jobs:
       - name: Check package
         run: cargo package --locked
 
-  workspace_build:
+  build:
     name: Workspace build
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -60,7 +60,7 @@ jobs:
       - name: Build workspace
         run: cargo build --locked --workspace --all-targets --all-features
 
-  workspace_tests:
+  tests:
     name: Workspace tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -96,7 +96,7 @@ jobs:
           JSON_TEST_SUITE: ${{ runner.temp }}/json-test-suite
         run: cargo test --locked --test json_conformance -- --nocapture
 
-  workspace_msrv_tests:
+  msrv_tests:
     name: Workspace tests (MSRV 1.85)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -112,57 +112,3 @@ jobs:
 
       - name: Run workspace tests
         run: cargo test --locked --workspace --all-targets --all-features
-
-  playground_build:
-    name: Playground build
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Rust and WebAssembly
-        uses: themoretheless/.github/.github/actions/setup-rust-web@d2e8edc4ed469aa70e8aa5ea0ef14038ab6ec957 # v1
-        with:
-          node-version: 22.13.0
-          rust-version: 1.96.0
-          npm-cache-dependency-path: playground/package-lock.json
-          wasm-pack-version: 0.14.0
-          wasm-bindgen-cli-version: 0.2.126
-
-      - name: Install JavaScript dependencies
-        run: npm ci --prefix playground
-
-      - name: Fetch Rust dependencies
-        run: cargo fetch --locked
-
-      - name: Build playground
-        run: npm --prefix playground run build:pages
-
-  playground_tests:
-    name: Playground tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Rust and WebAssembly
-        uses: themoretheless/.github/.github/actions/setup-rust-web@d2e8edc4ed469aa70e8aa5ea0ef14038ab6ec957 # v1
-        with:
-          node-version: 22.13.0
-          rust-version: 1.96.0
-          npm-cache-dependency-path: playground/package-lock.json
-          wasm-pack-version: 0.14.0
-          wasm-bindgen-cli-version: 0.2.126
-
-      - name: Install JavaScript dependencies
-        run: npm ci --prefix playground
-
-      - name: Fetch Rust dependencies
-        run: cargo fetch --locked
-
-      - name: Run playground tests
-        run: npm test --prefix playground
