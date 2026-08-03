@@ -18,7 +18,7 @@ jobs:
     name: Workspace
     uses: themoretheless/.github/.github/workflows/rust-ci.yml@v1
     with:
-      rust_toolchain: stable
+      rust_toolchain: beta
       clippy_args: --locked --workspace --all-targets --all-features
       build_args: --locked --workspace --all-targets --all-features
       test_args: --locked --workspace --all-targets --all-features
