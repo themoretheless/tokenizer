@@ -10,9 +10,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- JSONTestSuite conformance coverage, deterministic property and differential
-  tests, scheduled fuzzing, and reproducible benchmarks.
-- CI checks on stable Rust and the declared Rust 1.85 minimum version.
+- JSON fixture conformance coverage, deterministic property and differential
+  tests, and reproducible benchmarks.
+- CI checks on stable Rust.
 - Dual licensing under MIT or Apache-2.0.
 - Crates.io publication checks and a checksum-verified release workflow.
 - Offset-based AST navigation with stable paths through duplicate object keys.

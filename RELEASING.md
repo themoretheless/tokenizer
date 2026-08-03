@@ -8,7 +8,7 @@ before publishing.
 ## Prerequisites
 
 - Work from the `main` branch with all intended changes committed and pushed.
-- Confirm the CI, MSRV, conformance, and scheduled/manual fuzz checks are green.
+- Confirm the CI and conformance checks are green.
 - Configure the `crates-io` GitHub environment, preferably with required
   reviewers, and provide `CARGO_REGISTRY_TOKEN` as an environment or repository
   secret.

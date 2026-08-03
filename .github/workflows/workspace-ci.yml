@@ -14,26 +14,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Workspace quality
+  workspace:
+    name: Workspace
+    uses: themoretheless/.github/.github/workflows/rust-ci.yml@v1
+    with:
+      rust_toolchain: stable
+      clippy_args: --locked --workspace --all-targets --all-features
+      build_args: --locked --workspace --all-targets --all-features
+      test_args: --locked --workspace --all-targets --all-features
+
+  library:
+    name: Library checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
 
       - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          components: rustfmt, clippy
-
-      - name: Check formatting
-        run: cargo fmt --check
-
-      - name: Run Clippy
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Build documentation
         env:
@@ -43,67 +45,20 @@ jobs:
       - name: Check package
         run: cargo package --locked
 
-  build:
-    name: Workspace build
+  conformance:
+    name: JSON conformance
+    needs: workspace
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
 
       - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
 
-      - name: Build workspace
-        run: cargo build --locked --workspace --all-targets --all-features
-
-  tests:
-    name: Workspace tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
-        with:
-          toolchain: stable
-
-      - name: Run workspace tests
-        run: cargo test --locked --workspace --all-targets --all-features
-
-      - name: Checkout pinned JSONTestSuite corpus
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: nst/JSONTestSuite
-          ref: 1ef36fa01286573e846ac449e8683f8833c5b26a
-          path: json-test-suite
-          sparse-checkout: test_parsing
-          persist-credentials: false
-
-      - name: Run JSON conformance corpus
-        env:
-          JSON_TEST_SUITE: ${{ github.workspace }}/json-test-suite
+      - name: Run project JSON fixtures
         run: cargo test --locked --test json_conformance -- --nocapture
-
-  msrv_tests:
-    name: Workspace tests (MSRV 1.85)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install Rust 1.85
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
-        with:
-          toolchain: 1.85.0
-
-      - name: Run workspace tests
-        run: cargo test --locked --workspace --all-targets --all-features
