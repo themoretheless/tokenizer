@@ -22,25 +22,7 @@ jobs:
       clippy_args: --locked --workspace --all-targets --all-features
       build_args: --locked --workspace --all-targets --all-features
       test_args: --locked --workspace --all-targets --all-features
-
-  library:
-    name: Library checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Build documentation
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --locked --no-deps --all-features
-
-      - name: Check package
-        run: cargo package --locked
+      run_docs: true
+      doc_args: --locked --no-deps --all-features
+      run_package: true
+      package_args: --locked
