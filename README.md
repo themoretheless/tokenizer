@@ -1,17 +1,27 @@
 # themoretheless-tokenizer
 
+[![CI](https://github.com/themoretheless/tokenizer/actions/workflows/ci.yml/badge.svg)](https://github.com/themoretheless/tokenizer/actions/workflows/ci.yml)
+
 Dependency-free JSON engine for Rust: a strict lossless lexer, recovering
 parser, parser-aware tokenizer, JSONC options, borrowing AST and source-position
-utilities. The crate does not depend on
-`serde`, JavaScript, WebAssembly or a UI framework, so it works in native,
-server-side and WASM code.
+utilities. The published library has no runtime dependencies and does not
+integrate with `serde`, JavaScript, WebAssembly or a UI framework, so it works
+in native, server-side and WASM code. `serde_json` is used only by development
+tests and benchmarks as an independent reference implementation.
 
 All public spans are half-open UTF-8 byte ranges. They can be used directly to
 slice the original Rust string.
 
 ## Installation
 
-From Git:
+From crates.io:
+
+```toml
+[dependencies]
+themoretheless-tokenizer = "0.3"
+```
+
+The latest unreleased revision can instead be used directly from Git:
 
 ```toml
 [dependencies]
@@ -268,3 +278,12 @@ The legacy API is retained for compatibility.
 - JSONC support is limited to comments, BOM handling and trailing commas; it is
   not JSON5.
 - The crate does not serialize JSON and does not integrate with `serde`.
+
+## License
+
+Licensed under either of the [Apache License, Version 2.0](LICENSE-APACHE) or
+the [MIT license](LICENSE-MIT), at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this project shall be dual licensed as above, without any
+additional terms or conditions.

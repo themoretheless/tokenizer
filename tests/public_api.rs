@@ -1,8 +1,10 @@
 use themoretheless_tokenizer::{
     ColumnEncoding, JsonTokenizer, LineColumn, LineIndex, Span, TokenKind, Tokenizer,
     json::{
-        LexerOptions, NumberError, ParseOptions, SemanticKind, SyntaxKind, Value, lex_with, parse,
-        parse_with, tokenize,
+        AstPathSegment, AstVisitor, LexerOptions, NodeRef, NumberError, Parse, ParseOptions,
+        SemanticKind, SyntaxElement, SyntaxKind, SyntaxNodeKind, TextEdit, Value, VisitContext,
+        VisitControl, VisitOutcome, apply_edits, lex_with, node_at_offset, parse, parse_with,
+        path_at_offset, syntax_tree, tokenize, visit_parse,
     },
 };
 
@@ -74,4 +76,94 @@ fn source_and_semantic_apis_use_safe_spans() {
             && token.span == Span::new(1, 4)
             && token.text(semantic_source) == Some("\"x\"")
     }));
+}
+
+#[test]
+fn navigation_api_exposes_sound_borrowed_nodes_and_paths() {
+    fn navigate<'ast, 'source>(
+        parsed: &'ast Parse<'source>,
+        offset: usize,
+    ) -> (NodeRef<'ast, 'source>, Vec<AstPathSegment<'ast, 'source>>) {
+        (
+            node_at_offset(parsed, offset).unwrap().unwrap(),
+            path_at_offset(parsed, offset)
+                .unwrap()
+                .unwrap()
+                .into_segments(),
+        )
+    }
+
+    let source = r#"{"x":[{"name":"first"}],"x":2}"#;
+    let parsed = parse(source);
+    let offset = source.find("first").unwrap();
+    let (node, path) = navigate(&parsed, offset);
+
+    assert_eq!(node.as_value().and_then(Value::as_str), Some("first"));
+    assert!(matches!(
+        path.as_slice(),
+        [
+            AstPathSegment::ObjectMember {
+                member_index: 0,
+                ..
+            },
+            AstPathSegment::ArrayElement { index: 0 },
+            AstPathSegment::ObjectMember {
+                member_index: 0,
+                ..
+            },
+        ]
+    ));
+}
+
+#[test]
+fn visitor_api_is_usable_from_downstream_code() {
+    #[derive(Default)]
+    struct Keys(Vec<String>);
+
+    impl<'ast, 'source: 'ast> AstVisitor<'ast, 'source> for Keys {
+        fn enter_value(
+            &mut self,
+            _value: &'ast Value<'source>,
+            context: VisitContext<'ast, 'source>,
+        ) -> VisitControl {
+            if let VisitContext::ObjectMember { member, .. } = context {
+                self.0
+                    .push(member.key().decoded().unwrap_or("invalid").to_owned());
+            }
+            VisitControl::Continue
+        }
+    }
+
+    let parsed = parse(r#"{"a":1,"a":{"b":2}}"#);
+    let mut keys = Keys::default();
+    assert_eq!(visit_parse(&parsed, &mut keys), VisitOutcome::Completed);
+    assert_eq!(keys.0, ["a", "a", "b"]);
+}
+
+#[test]
+fn syntax_tree_and_edit_api_are_usable_downstream() {
+    let source = r#"{"name":"Мир"}"#;
+    let tree = syntax_tree(source);
+    assert_eq!(tree.source(), source);
+    assert_eq!(tree.root().kind(), SyntaxNodeKind::Root);
+
+    let root_value = tree
+        .root()
+        .elements()
+        .iter()
+        .find_map(|element| match element {
+            SyntaxElement::Node(id) => tree.node(*id),
+            SyntaxElement::Token(_) => None,
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(root_value.kind(), SyntaxNodeKind::Object);
+    assert_eq!(root_value.parent(), Some(tree.root_id()));
+
+    let start = source.find("Мир").unwrap();
+    let edited = tree
+        .apply_edits(&[TextEdit::new(Span::new(start, start + "Мир".len()), "世界")])
+        .unwrap();
+    assert_eq!(edited, r#"{"name":"世界"}"#);
+    assert_eq!(apply_edits("abc", &[]).unwrap(), "abc");
 }

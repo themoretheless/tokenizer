@@ -1,15 +1,28 @@
 [package]
 name = "themoretheless-tokenizer"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Denis Mezhov"]
-description = "A small, dependency-free tokenizer for structured text"
+description = "Lossless, fault-tolerant JSON and JSONC lexer, parser, AST, semantic tokens, and source positions"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/themoretheless/tokenizer"
+documentation = "https://docs.rs/themoretheless-tokenizer"
 readme = "README.md"
-keywords = ["tokenizer", "lexer", "json", "syntax-highlighting"]
+publish = ["crates-io"]
+keywords = ["tokenizer", "lexer", "json", "jsonc", "syntax-highlighting"]
 categories = ["parsing", "text-processing"]
 
 [lib]
 name = "themoretheless_tokenizer"
 path = "src/lib.rs"
+
+[dev-dependencies]
+serde_json = "1"
+
+[[bench]]
+name = "json_bench"
+harness = false
+
+[package.metadata.docs.rs]
+all-features = true
