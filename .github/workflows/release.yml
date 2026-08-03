@@ -28,18 +28,18 @@ jobs:
           fetch-depth: 0
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@220991c6faf65c51341b252151aaf89954dead6a # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@0afac90f53505a2c179a4b04f1b0c35ff341c7c0 # PR #11
         with:
           rust-toolchain: beta
 
       - name: Resolve package version
         id: package
-        uses: themoretheless/.github/.github/actions/cargo-package-version@220991c6faf65c51341b252151aaf89954dead6a # PR #11
+        uses: themoretheless/.github/.github/actions/cargo-package-version@0afac90f53505a2c179a4b04f1b0c35ff341c7c0 # PR #11
         with:
           package-name: themoretheless-tokenizer
 
       - name: Validate release version
-        uses: themoretheless/.github/.github/actions/validate-package-release@220991c6faf65c51341b252151aaf89954dead6a # PR #11
+        uses: themoretheless/.github/.github/actions/validate-package-release@0afac90f53505a2c179a4b04f1b0c35ff341c7c0 # PR #11
         with:
           version: ${{ steps.package.outputs.version }}
           tag: ${{ steps.package.outputs.tag }}
@@ -49,12 +49,12 @@ jobs:
 
       - name: Validate existing tag state
         id: tag
-        uses: themoretheless/.github/.github/actions/validate-release-tag@220991c6faf65c51341b252151aaf89954dead6a # PR #11
+        uses: themoretheless/.github/.github/actions/validate-release-tag@0afac90f53505a2c179a4b04f1b0c35ff341c7c0 # PR #11
         with:
           tag: ${{ steps.package.outputs.tag }}
 
       - name: Create tag and GitHub Release
-        uses: themoretheless/.github/.github/actions/create-github-release@220991c6faf65c51341b252151aaf89954dead6a # PR #11
+        uses: themoretheless/.github/.github/actions/create-github-release@0afac90f53505a2c179a4b04f1b0c35ff341c7c0 # PR #11
         with:
           tag: ${{ steps.package.outputs.tag }}
           prerelease: ${{ steps.package.outputs.prerelease }}
