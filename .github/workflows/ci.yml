@@ -16,7 +16,7 @@ concurrency:
 jobs:
   workspace:
     name: Workspace
-    uses: themoretheless/.github/.github/workflows/rust-ci.yml@3c98211e3401beaec88776ef5901f45ed6565692 # v1
+    uses: themoretheless/.github/.github/workflows/rust-ci.yml@6f88a5d9f0e953894ff6a2f779fb05ebec9f6c4e # v1
     with:
       rust_toolchain: beta
       clippy_args: --locked --workspace --all-targets --all-features
