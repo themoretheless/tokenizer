@@ -44,7 +44,10 @@ async function tokenize() {
     const payload = await runTokenizer({ source: source.value, mode: mode.value, layer: layer.value })
     if (id === requestId) result.value = payload
   } catch (cause) {
-    if (id === requestId) error.value = cause.message
+    if (id === requestId) {
+      result.value = null
+      error.value = cause.message
+    }
   } finally {
     if (id === requestId) loading.value = false
   }
@@ -52,7 +55,7 @@ async function tokenize() {
 
 function loadExample(name) {
   source.value = examples[name]
-  if (name === 'jsonc') mode.value = 'jsonc'
+  mode.value = name === 'jsonc' ? 'jsonc' : 'strict'
 }
 
 function focusSpan(start, end) {

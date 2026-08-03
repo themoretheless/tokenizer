@@ -17,6 +17,14 @@ categories = ["parsing", "text-processing"]
 name = "themoretheless_tokenizer"
 path = "src/lib.rs"
 
+[features]
+web-bridge = []
+
+[[bin]]
+name = "tokenizer-web-bridge"
+path = "src/bin/tokenizer-web-bridge.rs"
+required-features = ["web-bridge"]
+
 [dev-dependencies]
 serde_json = "1"
 

@@ -7,7 +7,7 @@ const repositoryRoot = fileURLToPath(new URL('..', import.meta.url))
 
 function tokenize(source, mode, layer) {
   return new Promise((resolve, reject) => {
-    const child = spawn('cargo', ['run', '--quiet', '--bin', 'tokenizer-web-bridge', '--', '--mode', mode, '--layer', layer], { cwd: repositoryRoot, stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn('cargo', ['run', '--quiet', '--features', 'web-bridge', '--bin', 'tokenizer-web-bridge', '--', '--mode', mode, '--layer', layer], { cwd: repositoryRoot, stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk })
