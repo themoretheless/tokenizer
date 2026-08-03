@@ -298,10 +298,14 @@ impl<'parse, 'source> ArenaBuilder<'parse, 'source> {
     }
 
     fn token_owner(&self, node: NodeId, token_span: Span) -> NodeId {
-        for child in &self.drafts[node.0].children {
+        let children = &self.drafts[node.0].children;
+        let index =
+            children.partition_point(|child| self.drafts[child.0].span.start <= token_span.start);
+        if index > 0 {
+            let child = children[index - 1];
             let child_span = self.drafts[child.0].span;
-            if child_span.start <= token_span.start && token_span.end <= child_span.end {
-                return self.token_owner(*child, token_span);
+            if token_span.end <= child_span.end {
+                return self.token_owner(child, token_span);
             }
         }
         node
@@ -607,6 +611,26 @@ mod tests {
             assert_eq!(tree.node(node.id()).unwrap(), node);
         }
         assert_eq!(tree.root().parent(), None);
+    }
+
+    #[test]
+    fn wide_arrays_assign_tokens_losslessly() {
+        let source = format!(
+            "[{}]",
+            (0..4096).map(|_| "null").collect::<Vec<_>>().join(",")
+        );
+        let tree = syntax_tree(&source);
+        assert!(tree.parse().is_valid());
+
+        let mut token_ids = Vec::new();
+        let mut rebuilt = String::new();
+        flatten(&tree, tree.root_id(), &mut token_ids, &mut rebuilt);
+        assert_eq!(rebuilt, source);
+        assert_eq!(
+            token_ids,
+            (0..tree.parse().lexed().tokens().len()).collect::<Vec<_>>()
+        );
+        assert_geometry(&tree, tree.root_id());
     }
 
     #[test]

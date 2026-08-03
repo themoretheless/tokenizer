@@ -27,7 +27,7 @@ impl ParseOptions {
         Self {
             lexer: LexerOptions::strict().max_diagnostics(128),
             allow_trailing_commas: false,
-            max_depth: 128,
+            max_depth: MAX_SUPPORTED_DEPTH,
             max_diagnostics: 128,
         }
     }
@@ -37,7 +37,7 @@ impl ParseOptions {
         Self {
             lexer: LexerOptions::jsonc().max_diagnostics(128),
             allow_trailing_commas: true,
-            max_depth: 128,
+            max_depth: MAX_SUPPORTED_DEPTH,
             max_diagnostics: 128,
         }
     }
