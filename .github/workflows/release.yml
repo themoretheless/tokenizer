@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: Enter "release vX.Y.Z" after crates.io confirms the version
+        description: Enter "release vX.Y.Z"
         required: true
         type: string
 
@@ -23,159 +23,40 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - name: Install Rust
-        run: >-
-          rustup toolchain install stable
-          --profile minimal
-          --component rustfmt
-          --component clippy
+      - name: Install beta Rust
+        uses: themoretheless/.github/.github/actions/setup-rust@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        with:
+          rust-toolchain: beta
+
+      - name: Resolve package version
+        id: package
+        uses: themoretheless/.github/.github/actions/cargo-package-version@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        with:
+          package-name: themoretheless-tokenizer
 
       - name: Validate release version
-        id: version
-        env:
-          CONFIRMATION: ${{ inputs.confirmation }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ "${GITHUB_REF_TYPE}" != "branch" || "${GITHUB_REF_NAME}" != "main" ]]; then
-            echo "::error::Run this workflow against the main branch"
-            exit 1
-          fi
-
-          new_version=$(
-            cargo metadata --no-deps --format-version 1 |
-              jq -r '.packages[0].version'
-          )
-          expected="release v${new_version}"
-          if [[ "${CONFIRMATION}" != "${expected}" ]]; then
-            echo "::error::Confirmation must be exactly: ${expected}"
-            exit 1
-          fi
-
-          echo "new=${new_version}" >> "$GITHUB_OUTPUT"
-          echo "changed=true" >> "$GITHUB_OUTPUT"
-
-      - name: Check formatting
-        if: steps.version.outputs.changed == 'true'
-        run: cargo +stable fmt --check
-
-      - name: Run Clippy
-        if: steps.version.outputs.changed == 'true'
-        run: cargo +stable clippy --workspace --all-targets --all-features --locked -- -D warnings
-
-      - name: Run tests
-        if: steps.version.outputs.changed == 'true'
-        run: cargo +stable test --workspace --all-targets --all-features --locked
-
-      - name: Run JSONTestSuite conformance
-        if: steps.version.outputs.changed == 'true'
-        env:
-          JSON_TEST_SUITE_REVISION: 1ef36fa01286573e846ac449e8683f8833c5b26a
-        shell: bash
-        run: |
-          set -euo pipefail
-          suite_dir="${RUNNER_TEMP}/json-test-suite"
-          git init "${suite_dir}"
-          git -C "${suite_dir}" remote add origin https://github.com/nst/JSONTestSuite.git
-          git -C "${suite_dir}" sparse-checkout init --cone
-          git -C "${suite_dir}" sparse-checkout set test_parsing
-          git -C "${suite_dir}" fetch --depth=1 --filter=blob:none origin "${JSON_TEST_SUITE_REVISION}"
-          git -C "${suite_dir}" checkout --detach FETCH_HEAD
-          JSON_TEST_SUITE="${suite_dir}" cargo +stable test --locked --test json_conformance -- --nocapture
-
-      - name: Build documentation
-        if: steps.version.outputs.changed == 'true'
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo +stable doc --locked --no-deps --all-features
-
-      - name: Verify package
-        if: steps.version.outputs.changed == 'true'
-        run: cargo +stable package --locked
-
-      - name: Test minimum supported Rust version
-        if: steps.version.outputs.changed == 'true'
-        run: |
-          rustup toolchain install 1.85.0 --profile minimal
-          cargo +1.85.0 test --locked --workspace --all-targets --all-features
+        uses: themoretheless/.github/.github/actions/validate-package-release@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        with:
+          version: ${{ steps.package.outputs.version }}
+          tag: ${{ steps.package.outputs.tag }}
+          prerelease: ${{ steps.package.outputs.prerelease }}
+          confirmation: ${{ inputs.confirmation }}
+          confirmation-prefix: release
 
       - name: Validate existing tag state
         id: tag
-        if: steps.version.outputs.changed == 'true'
-        env:
-          TAG: v${{ steps.version.outputs.new }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
-            tag_commit=$(git rev-parse "${TAG}^{commit}")
-            head_commit=$(git rev-parse HEAD)
-            if [[ "${tag_commit}" != "${head_commit}" ]]; then
-              echo "::error::Existing ${TAG} points to ${tag_commit}, not ${head_commit}"
-              exit 1
-            fi
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Confirm version exists on crates.io
-        if: steps.version.outputs.changed == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.new }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          response=$(
-            curl --fail --retry 5 --retry-all-errors --silent --show-error \
-              --user-agent "themoretheless-tokenizer-release/1.0" \
-              "https://crates.io/api/v1/crates/themoretheless-tokenizer/${VERSION}"
-          )
-          actual=$(jq -r '.version.num' <<<"${response}")
-          if [[ "${actual}" != "${VERSION}" ]]; then
-            echo "::error::crates.io returned version ${actual}, expected ${VERSION}"
-            exit 1
-          fi
-          if [[ "$(jq -r '.version.yanked' <<<"${response}")" == "true" ]]; then
-            echo "::error::crates.io version ${VERSION} is yanked"
-            exit 1
-          fi
-
-          archive="target/package/themoretheless-tokenizer-${VERSION}.crate"
-          local_checksum=$(sha256sum "${archive}" | awk '{print $1}')
-          registry_checksum=$(jq -r '.version.checksum' <<<"${response}")
-          if [[ "${local_checksum}" != "${registry_checksum}" ]]; then
-            echo "::error::Local package checksum does not match crates.io; refusing to tag a different commit"
-            exit 1
-          fi
+        uses: themoretheless/.github/.github/actions/validate-release-tag@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        with:
+          tag: ${{ steps.package.outputs.tag }}
 
       - name: Create tag and GitHub Release
-        if: steps.version.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: v${{ steps.version.outputs.new }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if [[ "${{ steps.tag.outputs.exists }}" != "true" ]]; then
-            git tag -a "$TAG" -m "Release $TAG"
-            git push origin "$TAG"
-          fi
-
-          release_flags=(--verify-tag --generate-notes)
-          if [[ "$TAG" == *-* ]]; then
-            release_flags+=(--prerelease)
-          fi
-
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" "${release_flags[@]}"
-          fi
+        uses: themoretheless/.github/.github/actions/create-github-release@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        with:
+          tag: ${{ steps.package.outputs.tag }}
+          prerelease: ${{ steps.package.outputs.prerelease }}
+          tag-exists: ${{ steps.tag.outputs.exists }}
+          github-token: ${{ github.token }}

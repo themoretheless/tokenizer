@@ -6,7 +6,6 @@ resolver = "3"
 name = "themoretheless-tokenizer"
 version = "0.3.1"
 edition = "2024"
-rust-version = "1.85"
 authors = ["Denis Mezhov"]
 description = "Lossless, fault-tolerant JSON and JSONC lexer, parser, AST, semantic tokens, and source positions"
 license = "MIT OR Apache-2.0"
