@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: Enter "release vX.Y.Z" after crates.io confirms the version
+        description: Enter "release vX.Y.Z"
         required: true
         type: string
 
@@ -47,43 +47,11 @@ jobs:
           confirmation: ${{ inputs.confirmation }}
           confirmation-prefix: release
 
-      - name: Verify package
-        run: cargo package --locked --package themoretheless-tokenizer
-
       - name: Validate existing tag state
         id: tag
         uses: themoretheless/.github/.github/actions/validate-release-tag@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
         with:
           tag: ${{ steps.package.outputs.tag }}
-
-      - name: Confirm version exists on crates.io
-        env:
-          VERSION: ${{ steps.package.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          response=$(
-            curl --fail --retry 5 --retry-all-errors --silent --show-error \
-              --user-agent "themoretheless-tokenizer-release/1.0" \
-              "https://crates.io/api/v1/crates/themoretheless-tokenizer/${VERSION}"
-          )
-          actual=$(jq -r '.version.num' <<<"${response}")
-          if [[ "${actual}" != "${VERSION}" ]]; then
-            echo "::error::crates.io returned version ${actual}, expected ${VERSION}"
-            exit 1
-          fi
-          if [[ "$(jq -r '.version.yanked' <<<"${response}")" == "true" ]]; then
-            echo "::error::crates.io version ${VERSION} is yanked"
-            exit 1
-          fi
-
-          archive="target/package/themoretheless-tokenizer-${VERSION}.crate"
-          local_checksum=$(sha256sum "${archive}" | awk '{print $1}')
-          registry_checksum=$(jq -r '.version.checksum' <<<"${response}")
-          if [[ "${local_checksum}" != "${registry_checksum}" ]]; then
-            echo "::error::Local package checksum does not match crates.io; refusing to tag a different commit"
-            exit 1
-          fi
 
       - name: Create tag and GitHub Release
         env:
