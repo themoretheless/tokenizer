@@ -21,10 +21,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
 
       - name: Set up Rust and WebAssembly
-        uses: themoretheless/.github/.github/actions/setup-rust-web@d2e8edc4ed469aa70e8aa5ea0ef14038ab6ec957 # v1
+        uses: themoretheless/.github/.github/actions/setup-rust-web@v1
         with:
           node-version: 22.13.0
           rust-version: 1.96.0
@@ -48,10 +48,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
 
       - name: Set up Rust and WebAssembly
-        uses: themoretheless/.github/.github/actions/setup-rust-web@d2e8edc4ed469aa70e8aa5ea0ef14038ab6ec957 # v1
+        uses: themoretheless/.github/.github/actions/setup-rust-web@v1
         with:
           node-version: 22.13.0
           rust-version: 1.96.0
