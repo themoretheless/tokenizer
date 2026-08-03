@@ -268,6 +268,29 @@ assert!(result.tokens.iter().any(|token| {
 For new syntax tooling, prefer `json::lex`, `json::parse` or `json::tokenize`.
 The legacy API is retained for compatibility.
 
+## Local tokenization playground
+
+An isolated Vue test UI in `playground/` visualizes output from the actual Rust
+lexer and parser-aware tokenizer. It switches between strict JSON and JSONC,
+exact syntax and semantic tokens, and shows UTF-8 byte spans plus recovery
+diagnostics.
+
+```sh
+cd playground
+npm install
+npm run dev
+```
+
+Open `http://localhost:4173`. Vite invokes the `tokenizer-web-bridge` binary for
+each local analysis request. Vue dependencies stay in `playground/`, and the
+Rust bridge uses only the standard library and the crate's public API.
+
+The same playground is published at
+[`themoretheless.github.io/tokenizer`](https://themoretheless.github.io/tokenizer/).
+GitHub Pages builds the adapter in `wasm/`, so production runs the actual Rust
+tokenizer as WebAssembly entirely in the browser. The deployment workflow is
+`.github/workflows/pages.yml` and runs after pushes to `main`.
+
 ## Current limits
 
 - Input is a complete UTF-8 `&str`; there is no streaming/chunked lexer API.
