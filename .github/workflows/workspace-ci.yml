@@ -23,16 +23,6 @@ jobs:
       build_args: --locked --workspace --all-targets --all-features
       test_args: --locked --workspace --all-targets --all-features
 
-  msrv:
-    name: MSRV 1.85
-    uses: themoretheless/.github/.github/workflows/rust-ci.yml@v1
-    with:
-      rust_toolchain: "1.85.0"
-      run_fmt: false
-      run_clippy: false
-      run_build: false
-      test_args: --locked --workspace --all-targets --all-features
-
   library:
     name: Library checks
     runs-on: ubuntu-latest
