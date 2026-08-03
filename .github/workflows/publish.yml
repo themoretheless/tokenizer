@@ -65,10 +65,10 @@ jobs:
         run: cargo fmt --check
 
       - name: Run Clippy
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        run: cargo test --locked --all-targets --all-features
+        run: cargo test --locked --workspace --all-targets --all-features
 
       - name: Run JSONTestSuite conformance
         env:
@@ -93,7 +93,7 @@ jobs:
       - name: Test minimum supported Rust version
         run: |
           rustup toolchain install 1.85.0 --profile minimal
-          cargo +1.85.0 test --locked --all-targets --all-features
+          cargo +1.85.0 test --locked --workspace --all-targets --all-features
 
       - name: Verify publishable package
         run: >-

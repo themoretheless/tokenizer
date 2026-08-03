@@ -28,8 +28,8 @@ before publishing.
 
    ```console
    cargo fmt --check
-   cargo clippy --locked --all-targets --all-features -- -D warnings
-   cargo test --locked --all-targets --all-features
+   cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+   cargo test --locked --workspace --all-targets --all-features
    RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --all-features
    cargo package --locked
    ```

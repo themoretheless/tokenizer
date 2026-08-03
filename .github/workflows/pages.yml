@@ -28,14 +28,13 @@ jobs:
           node-version: 22.13.0
           rust-version: 1.96.0
           npm-cache-dependency-path: playground/package-lock.json
-          cargo-workspaces: wasm -> target
           wasm-bindgen-cli-version: 0.2.126
 
       - name: Install JavaScript dependencies
         run: npm ci --prefix playground
 
       - name: Fetch Rust dependencies
-        run: cargo fetch --manifest-path wasm/Cargo.toml --locked
+        run: cargo fetch --locked
 
       - name: Build GitHub Pages site
         run: npm --prefix playground run build:pages
