@@ -14,15 +14,71 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  workspace:
-    name: Workspace
-    uses: themoretheless/.github/.github/workflows/rust-ci.yml@65a4a57f604db081a440923b1be1abb06664c54d # v1
-    with:
-      rust_toolchain: beta
-      clippy_args: --locked --workspace --all-targets --all-features
-      build_args: --locked --workspace --all-targets --all-features
-      test_args: --locked --workspace --all-targets --all-features
-      run_docs: true
-      doc_args: --locked --no-deps --all-features
-      run_package: true
-      package_args: --locked
+  quality:
+    name: Format, Clippy, docs, and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: themoretheless/.github/.github/actions/setup-rust@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        with:
+          rust-toolchain: beta
+          components: rustfmt,clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Build documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --no-deps --all-features
+
+      - name: Check package
+        run: cargo package --locked
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: themoretheless/.github/.github/actions/setup-rust@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        with:
+          rust-toolchain: beta
+
+      - name: Build workspace
+        run: cargo build --locked --workspace --all-targets --all-features
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: themoretheless/.github/.github/actions/setup-rust@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        with:
+          rust-toolchain: beta
+
+      - name: Run workspace tests
+        run: cargo test --locked --workspace --all-targets --all-features
