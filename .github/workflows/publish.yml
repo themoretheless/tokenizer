@@ -42,18 +42,18 @@ jobs:
           persist-credentials: false
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
         with:
           rust-toolchain: beta
 
       - name: Resolve package version
         id: package
-        uses: themoretheless/.github/.github/actions/cargo-package-version@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
+        uses: themoretheless/.github/.github/actions/cargo-package-version@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
         with:
           package-name: themoretheless-tokenizer
 
       - name: Validate ref and version
-        uses: themoretheless/.github/.github/actions/validate-package-release@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
+        uses: themoretheless/.github/.github/actions/validate-package-release@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
         with:
           version: ${{ steps.package.outputs.version }}
           tag: ${{ steps.package.outputs.tag }}
@@ -81,12 +81,12 @@ jobs:
           persist-credentials: false
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
         with:
           rust-toolchain: beta
 
       - name: Validate explicit confirmation
-        uses: themoretheless/.github/.github/actions/validate-package-release@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
+        uses: themoretheless/.github/.github/actions/validate-package-release@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
         with:
           version: ${{ needs.dry-run.outputs.version }}
           tag: ${{ needs.dry-run.outputs.tag }}

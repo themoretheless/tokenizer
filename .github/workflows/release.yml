@@ -28,18 +28,18 @@ jobs:
           fetch-depth: 0
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
         with:
           rust-toolchain: beta
 
       - name: Resolve package version
         id: package
-        uses: themoretheless/.github/.github/actions/cargo-package-version@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
+        uses: themoretheless/.github/.github/actions/cargo-package-version@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
         with:
           package-name: themoretheless-tokenizer
 
       - name: Validate release version
-        uses: themoretheless/.github/.github/actions/validate-package-release@ce5ccbbc5c165b8519ff1c859c0f05845001d9aa # PR #11
+        uses: themoretheless/.github/.github/actions/validate-package-release@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
         with:
           version: ${{ steps.package.outputs.version }}
           tag: ${{ steps.package.outputs.tag }}
@@ -52,23 +52,9 @@ jobs:
 
       - name: Validate existing tag state
         id: tag
-        env:
-          TAG: ${{ steps.package.outputs.tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
-            tag_commit=$(git rev-parse "${TAG}^{commit}")
-            head_commit=$(git rev-parse HEAD)
-            if [[ "${tag_commit}" != "${head_commit}" ]]; then
-              echo "::error::Existing ${TAG} points to ${tag_commit}, not ${head_commit}"
-              exit 1
-            fi
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
+        uses: themoretheless/.github/.github/actions/validate-release-tag@a428a5fcc587a8a0e5d0b747123bed19968fa326 # PR #11
+        with:
+          tag: ${{ steps.package.outputs.tag }}
 
       - name: Confirm version exists on crates.io
         env:
