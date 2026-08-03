@@ -24,20 +24,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Vue
-        uses: themoretheless/.github/.github/actions/setup-vue@3cce368a1c5c4a117495646794d7f89fd5d6efa3 # v1
+        uses: themoretheless/.github/.github/actions/setup-vue@63222b3cb4e128dc06cc9d060c744ebb3545c5ef # PR #11
         with:
           node-version: 22.13.0
           npm-cache-dependency-path: playground/package-lock.json
+          working-directory: playground
 
       - name: Set up Rust and WebAssembly
-        uses: themoretheless/.github/.github/actions/setup-rust@717b828b99c6cac8a99e53974111233a38124625 # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@63222b3cb4e128dc06cc9d060c744ebb3545c5ef # PR #11
         with:
           rust-toolchain: 1.96.0
           targets: wasm32-unknown-unknown
           tools: wasm-pack@0.14.0,wasm-bindgen-cli@0.2.126
-
-      - name: Install JavaScript dependencies
-        run: npm ci --prefix playground
 
       - name: Build playground
         run: npm --prefix playground run build:pages
@@ -52,20 +50,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Vue
-        uses: themoretheless/.github/.github/actions/setup-vue@3cce368a1c5c4a117495646794d7f89fd5d6efa3 # v1
+        uses: themoretheless/.github/.github/actions/setup-vue@63222b3cb4e128dc06cc9d060c744ebb3545c5ef # PR #11
         with:
           node-version: 22.13.0
           npm-cache-dependency-path: playground/package-lock.json
+          working-directory: playground
 
       - name: Set up Rust and WebAssembly
-        uses: themoretheless/.github/.github/actions/setup-rust@717b828b99c6cac8a99e53974111233a38124625 # PR #11
+        uses: themoretheless/.github/.github/actions/setup-rust@63222b3cb4e128dc06cc9d060c744ebb3545c5ef # PR #11
         with:
           rust-toolchain: 1.96.0
           targets: wasm32-unknown-unknown
           tools: wasm-pack@0.14.0,wasm-bindgen-cli@0.2.126
-
-      - name: Install JavaScript dependencies
-        run: npm ci --prefix playground
 
       - name: Run playground tests
         run: npm test --prefix playground
