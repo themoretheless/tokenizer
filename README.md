@@ -29,7 +29,7 @@ themoretheless-tokenizer = { git = "https://github.com/themoretheless/tokenizer.
 ```
 
 The Cargo package uses hyphens, while the Rust crate name uses underscores:
-`themoretheless_tokenizer`. The minimum supported Rust version is 1.85.
+`themoretheless_tokenizer`.
 
 ## Strict lossless lexer
 

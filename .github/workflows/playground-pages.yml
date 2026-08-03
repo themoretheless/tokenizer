@@ -32,7 +32,7 @@ jobs:
       - name: Set up Rust and WebAssembly
         uses: themoretheless/.github/.github/actions/setup-rust@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
         with:
-          rust-toolchain: 1.96.0
+          rust-toolchain: beta
           targets: wasm32-unknown-unknown
           tools: wasm-pack@0.14.0,wasm-bindgen-cli@0.2.126
 
