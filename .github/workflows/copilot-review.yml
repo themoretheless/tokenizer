@@ -14,6 +14,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: themoretheless/.github/.github/workflows/copilot-review.yml@0e1f87dda0310901d9db8c0cb0b21b640fc4d85a # v1
+    uses: themoretheless/.github/.github/workflows/copilot-review.yml@2d3bc163ca57318e89e801795a0b0356d5a9d941 # first-party actions
     with:
       fail_on_comments: true
