@@ -8,7 +8,9 @@ permissions: {}
 
 jobs:
   review:
-    if: ${{ github.event.pull_request.draft == false }}
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -16,7 +18,7 @@ jobs:
 
     steps:
       - name: Request and collect Copilot review
-        uses: themoretheless/.github/.github/actions/copilot-review@03333cf03e343cd096218e8df076a3c3fa097c49 # v1
+        uses: themoretheless/.github/.github/actions/copilot-review@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           github-token: ${{ github.token }}
           # Copilot always emits an overview body; gate only actionable inline comments.

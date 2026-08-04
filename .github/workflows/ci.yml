@@ -26,7 +26,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@bb3377f2f424201379ab4e47e147f164f4014b38 # v1
+        uses: themoretheless/.github/.github/actions/setup-rust@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           rust-toolchain: beta
           components: rustfmt,clippy
@@ -57,7 +57,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@bb3377f2f424201379ab4e47e147f164f4014b38 # v1
+        uses: themoretheless/.github/.github/actions/setup-rust@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           rust-toolchain: beta
 
@@ -76,7 +76,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@bb3377f2f424201379ab4e47e147f164f4014b38 # v1
+        uses: themoretheless/.github/.github/actions/setup-rust@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           rust-toolchain: beta
 

@@ -13,8 +13,8 @@ on:
         type: boolean
         default: false
       confirmation:
-        description: For publishing, enter "publish vX.Y.Z"
-        required: false
+        description: For publishing, enter the exact version (for example, 0.3.1)
+        required: true
         type: string
 
 permissions:
@@ -42,18 +42,18 @@ jobs:
           persist-credentials: false
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@bb3377f2f424201379ab4e47e147f164f4014b38 # v1
+        uses: themoretheless/.github/.github/actions/setup-rust@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           rust-toolchain: beta
 
       - name: Resolve package version
         id: package
-        uses: themoretheless/.github/.github/actions/cargo-package-version@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        uses: themoretheless/.github/.github/actions/cargo-package-version@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           package-name: themoretheless-tokenizer
 
       - name: Validate ref and version
-        uses: themoretheless/.github/.github/actions/validate-package-release@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        uses: themoretheless/.github/.github/actions/validate-package-release@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           version: ${{ steps.package.outputs.version }}
           tag: ${{ steps.package.outputs.tag }}
@@ -61,7 +61,7 @@ jobs:
           requested-version: ${{ inputs.version }}
 
       - name: Verify publishable package
-        uses: themoretheless/.github/.github/actions/publish-crate@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        uses: themoretheless/.github/.github/actions/publish-crate@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           package-name: themoretheless-tokenizer
           dry-run: true
@@ -81,21 +81,26 @@ jobs:
           persist-credentials: false
 
       - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@bb3377f2f424201379ab4e47e147f164f4014b38 # v1
+        uses: themoretheless/.github/.github/actions/setup-rust@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           rust-toolchain: beta
 
+      - name: Enforce exact confirmation input
+        if: ${{ inputs.confirmation != needs.dry-run.outputs.version }}
+        run: |
+          echo "For publishing, confirmation must exactly match version '${{ needs.dry-run.outputs.version }}'." >&2
+          exit 1
+
       - name: Validate explicit confirmation
-        uses: themoretheless/.github/.github/actions/validate-package-release@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        uses: themoretheless/.github/.github/actions/validate-package-release@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           version: ${{ needs.dry-run.outputs.version }}
           tag: ${{ needs.dry-run.outputs.tag }}
           prerelease: ${{ needs.dry-run.outputs.prerelease }}
           confirmation: ${{ inputs.confirmation }}
-          confirmation-prefix: publish
 
       - name: Publish to crates.io
-        uses: themoretheless/.github/.github/actions/publish-crate@eb557370f9aae2547ddbbdce8bf2a8798e68dad2 # v1
+        uses: themoretheless/.github/.github/actions/publish-crate@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           package-name: themoretheless-tokenizer
           registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
