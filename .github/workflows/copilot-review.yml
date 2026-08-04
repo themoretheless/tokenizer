@@ -11,15 +11,9 @@ jobs:
     if: >-
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
     permissions:
+      contents: read
       pull-requests: write
-
-    steps:
-      - name: Request and collect Copilot review
-        uses: themoretheless/.github/.github/actions/copilot-review@a6c40a906bc786a3668362d270ca95212b5bffce # v1
-        with:
-          github-token: ${{ github.token }}
-          # Copilot always emits an overview body; gate only actionable inline comments.
-          fail-on-comments: true
+    uses: themoretheless/.github/.github/workflows/copilot-review.yml@0e1f87dda0310901d9db8c0cb0b21b640fc4d85a # v1
+    with:
+      fail_on_comments: true
