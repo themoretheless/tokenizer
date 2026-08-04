@@ -14,7 +14,7 @@ on:
         default: false
       confirmation:
         description: For publishing, enter the exact version (for example, 0.3.1)
-        required: false
+        required: true
         type: string
 
 permissions:
