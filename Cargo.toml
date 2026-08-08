@@ -13,7 +13,7 @@ repository = "https://github.com/themoretheless/tokenizer"
 documentation = "https://docs.rs/themoretheless-tokenizer"
 readme = "README.md"
 publish = ["crates-io"]
-keywords = ["tokenizer", "lexer", "json", "jsonc", "syntax-highlighting"]
+keywords = ["tokenizer", "lexer", "json", "jsonc", "url", "syntax-highlighting"]
 categories = ["parsing", "text-processing"]
 
 [lib]

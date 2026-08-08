@@ -11,12 +11,14 @@ use std::ops::Range;
 
 pub mod json;
 pub mod source;
+pub mod url;
 
 #[cfg(feature = "web-bridge")]
 #[doc(hidden)]
 pub mod web_bridge;
 
 pub use source::{ColumnEncoding, LineColumn, LineIndex, PositionError};
+pub use url::{UrlKind, UrlToken, UrlTokenization, tokenize as tokenize_url, tokenize_and_validate as tokenize_url_validated, validate as validate_url};
 
 /// Half-open UTF-8 byte range in the source string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
