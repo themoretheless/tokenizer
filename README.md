@@ -18,7 +18,7 @@ From crates.io:
 
 ```toml
 [dependencies]
-themoretheless-tokenizer = "0.3"
+themoretheless-tokenizer = "0.4"
 ```
 
 The latest unreleased revision can instead be used directly from Git:

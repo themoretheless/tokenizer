@@ -2,7 +2,7 @@
 
 use std::{error::Error, fmt};
 
-use crate::Span;
+use themoretheless_tokenizer_core::Span;
 
 use super::{Member, Parse, StringValue, Value};
 
@@ -132,7 +132,7 @@ impl<'ast, 'source> AstPath<'ast, 'source> {
 /// node when it has no more specific node of its own.
 ///
 /// ```
-/// use themoretheless_tokenizer::json::{NodeRef, node_at_offset, parse};
+/// use themoretheless_tokenizer_json::{NodeRef, node_at_offset, parse};
 ///
 /// let source = r#"{"items":[10, 20]}"#;
 /// let parsed = parse(source);
@@ -257,7 +257,7 @@ fn locate<'ast, 'source>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::json::{ValueKind, parse};
+    use crate::{ValueKind, parse};
 
     #[test]
     fn finds_deepest_keys_and_values_with_exact_boundaries() {

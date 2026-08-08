@@ -1,0 +1,19 @@
+[package]
+name = "themoretheless-tokenizer-core"
+version = "0.4.0"
+edition = "2024"
+authors = ["Denis Mezhov"]
+description = "Shared spans, diagnostics, language ids, and host registry for themoretheless-tokenizer plugins"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/themoretheless/tokenizer"
+readme = "README.md"
+publish = ["crates-io"]
+keywords = ["tokenizer", "lexer", "span", "parser", "plugin"]
+categories = ["parsing", "text-processing"]
+
+[lib]
+name = "themoretheless_tokenizer_core"
+path = "src/lib.rs"
+
+[package.metadata.docs.rs]
+all-features = true

@@ -8,7 +8,7 @@
 //! Class names in [`UrlKind::class_name`] match the Proxima inspector CSS
 //! (`u-scheme`, `u-host`, `u-key`, …).
 
-use crate::{Diagnostic, Span};
+use themoretheless_tokenizer_core::{Diagnostic, Span};
 
 /// Semantic highlight class for one URL fragment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -261,7 +261,7 @@ pub fn validate(source: &str) -> Vec<Diagnostic> {
     let has_host = tokens
         .tokens
         .iter()
-        .any(|t| t.kind == UrlKind::Host && t.span.len() > 0);
+        .any(|t| t.kind == UrlKind::Host && !t.span.is_empty());
     let has_path = tokens.tokens.iter().any(|t| t.kind == UrlKind::Path);
     let path_only = source.starts_with('/');
 
@@ -300,14 +300,14 @@ pub fn validate(source: &str) -> Vec<Diagnostic> {
             });
             continue;
         }
-        if let Ok(port) = text.parse::<u32>() {
-            if port > 65535 {
-                diagnostics.push(Diagnostic {
-                    span: token.span,
-                    code: "url-port-range",
-                    message: "Port must be between 0 and 65535",
-                });
-            }
+        if let Ok(port) = text.parse::<u32>()
+            && port > 65535
+        {
+            diagnostics.push(Diagnostic {
+                span: token.span,
+                code: "url-port-range",
+                message: "Port must be between 0 and 65535",
+            });
         }
     }
 
@@ -317,14 +317,14 @@ pub fn validate(source: &str) -> Vec<Diagnostic> {
     }
 
     // Unclosed {{var
-    if let Some(open) = source.find("{{") {
-        if !source[open..].contains("}}") {
-            diagnostics.push(Diagnostic {
-                span: Span::new(open, source.len()),
-                code: "url-unclosed-var",
-                message: "Unclosed {{var}} placeholder",
-            });
-        }
+    if let Some(open) = source.find("{{")
+        && !source[open..].contains("}}")
+    {
+        diagnostics.push(Diagnostic {
+            span: Span::new(open, source.len()),
+            code: "url-unclosed-var",
+            message: "Unclosed {{var}} placeholder",
+        });
     }
 
     diagnostics
@@ -435,11 +435,20 @@ mod tests {
     fn full_https_url_with_query() {
         let source = "https://api.example.com/v1/weather?q=Moscow&units=metric";
         let got = kinds(source);
-        assert!(got.iter().any(|(k, t)| *k == UrlKind::Scheme && *t == "https:"));
-        assert!(got.iter().any(|(k, t)| *k == UrlKind::Host && *t == "api.example.com"));
+        assert!(
+            got.iter()
+                .any(|(k, t)| *k == UrlKind::Scheme && *t == "https:")
+        );
+        assert!(
+            got.iter()
+                .any(|(k, t)| *k == UrlKind::Host && *t == "api.example.com")
+        );
         assert!(got.iter().any(|(k, t)| *k == UrlKind::Path && *t == "v1"));
         assert!(got.iter().any(|(k, t)| *k == UrlKind::Key && *t == "q"));
-        assert!(got.iter().any(|(k, t)| *k == UrlKind::Val && *t == "Moscow"));
+        assert!(
+            got.iter()
+                .any(|(k, t)| *k == UrlKind::Val && *t == "Moscow")
+        );
         assert!(got.iter().any(|(k, t)| *k == UrlKind::Key && *t == "units"));
         assert!(tokenize(source).is_lossless(source));
     }
@@ -457,8 +466,14 @@ mod tests {
     fn userinfo_and_port() {
         let source = "https://user:pass@host.example:8443/x";
         let got = kinds(source);
-        assert!(got.iter().any(|(k, t)| *k == UrlKind::User && t.starts_with("user")));
-        assert!(got.iter().any(|(k, t)| *k == UrlKind::Host && *t == "host.example"));
+        assert!(
+            got.iter()
+                .any(|(k, t)| *k == UrlKind::User && t.starts_with("user"))
+        );
+        assert!(
+            got.iter()
+                .any(|(k, t)| *k == UrlKind::Host && *t == "host.example")
+        );
         assert!(got.iter().any(|(k, t)| *k == UrlKind::Port && *t == "8443"));
         assert!(tokenize(source).is_lossless(source));
     }
@@ -467,8 +482,14 @@ mod tests {
     fn env_var_placeholder_wins() {
         let source = "https://{{host}}/v1?key={{token}}";
         let got = kinds(source);
-        assert!(got.iter().any(|(k, t)| *k == UrlKind::Var && *t == "{{host}}"));
-        assert!(got.iter().any(|(k, t)| *k == UrlKind::Var && *t == "{{token}}"));
+        assert!(
+            got.iter()
+                .any(|(k, t)| *k == UrlKind::Var && *t == "{{host}}")
+        );
+        assert!(
+            got.iter()
+                .any(|(k, t)| *k == UrlKind::Var && *t == "{{token}}")
+        );
         assert!(tokenize(source).is_lossless(source));
     }
 
@@ -476,7 +497,10 @@ mod tests {
     fn fragment() {
         let source = "https://ex.test/a#section";
         let got = kinds(source);
-        assert!(got.iter().any(|(k, t)| *k == UrlKind::Frag && *t == "section"));
+        assert!(
+            got.iter()
+                .any(|(k, t)| *k == UrlKind::Frag && *t == "section")
+        );
         assert!(tokenize(source).is_lossless(source));
     }
 

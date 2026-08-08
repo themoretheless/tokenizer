@@ -3,95 +3,50 @@
 //! Spans are UTF-8 byte offsets. This makes [`Token::text`] safe and keeps the
 //! crate independent from a particular editor protocol. Browser adapters can
 //! convert them to UTF-16 code-unit offsets at their boundary.
+//!
+//! Shared plugin primitives live in [`themoretheless_tokenizer_core`] and are
+//! re-exported here. Language engines currently ship as modules of this facade
+//! crate; they will move to separate crates per `docs/plugin-api-design.md`.
 
 #![forbid(unsafe_code)]
 #![doc = include_str!("../README.md")]
 
-use std::ops::Range;
+#[cfg(feature = "json")]
+pub use themoretheless_tokenizer_json as json;
 
-pub mod json;
-pub mod source;
-pub mod url;
+#[cfg(feature = "url")]
+pub use themoretheless_tokenizer_url as url;
+
+pub mod api;
+pub mod plugins;
 
 #[cfg(feature = "web-bridge")]
 #[doc(hidden)]
 pub mod web_bridge;
 
-pub use source::{ColumnEncoding, LineColumn, LineIndex, PositionError};
-pub use url::{UrlKind, UrlToken, UrlTokenization, tokenize as tokenize_url, tokenize_and_validate as tokenize_url_validated, validate as validate_url};
+pub use api::{Analysis, Source};
+pub use plugins::{analyze_host, builtin_registry, register_builtins};
 
-/// Half-open UTF-8 byte range in the source string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
-}
+// Plugin core (spans, diagnostics, registry, host facade).
+pub use themoretheless_tokenizer_core as core;
+pub use themoretheless_tokenizer_core::{
+    Capabilities, Capability, CapabilityError, ColumnEncoding, Diagnostic, DiagnosticKind,
+    DialectDescriptor, DialectId, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage,
+    HostSpan, HostToken, HostTokenization, InputLimits, LanguageDescriptor, LanguageId,
+    LanguageKey, LanguageRegistry, LimitExceeded, LineColumn, LineIndex, LosslessViolation,
+    PositionError, RegisterError, RegistryBuilder, Severity, Span, TokenLayer,
+    verify_lossless_spans,
+};
 
-impl Span {
-    #[must_use]
-    pub const fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
-    }
+#[cfg(feature = "url")]
+pub use themoretheless_tokenizer_url::{
+    UrlKind, UrlToken, UrlTokenization, tokenize as tokenize_url,
+    tokenize_and_validate as tokenize_url_validated, validate as validate_url,
+};
 
-    #[must_use]
-    pub const fn len(self) -> usize {
-        self.end.saturating_sub(self.start)
-    }
-
-    #[must_use]
-    pub const fn is_empty(self) -> bool {
-        self.start == self.end
-    }
-
-    /// Returns this span as a standard half-open range.
-    #[must_use]
-    pub const fn range(self) -> Range<usize> {
-        self.start..self.end
-    }
-
-    /// Whether the half-open span contains a byte offset.
-    #[must_use]
-    pub const fn contains(self, offset: usize) -> bool {
-        self.start <= offset && offset < self.end
-    }
-
-    /// The smallest span covering both inputs.
-    #[must_use]
-    pub const fn cover(self, other: Self) -> Self {
-        Self::new(
-            if self.start < other.start {
-                self.start
-            } else {
-                other.start
-            },
-            if self.end > other.end {
-                self.end
-            } else {
-                other.end
-            },
-        )
-    }
-
-    /// Whether both endpoints can safely index the given UTF-8 source.
-    #[must_use]
-    pub fn is_valid_for(self, source: &str) -> bool {
-        self.start <= self.end
-            && self.end <= source.len()
-            && source.is_char_boundary(self.start)
-            && source.is_char_boundary(self.end)
-    }
-
-    /// Returns the covered source text when the span is valid.
-    #[must_use]
-    pub fn slice(self, source: &str) -> Option<&str> {
-        source.get(self.range())
-    }
-}
-
-impl From<Span> for Range<usize> {
-    fn from(span: Span) -> Self {
-        span.start..span.end
-    }
+/// Compatibility alias for the previous `source` module path.
+pub mod source {
+    pub use themoretheless_tokenizer_core::{ColumnEncoding, LineColumn, LineIndex, PositionError};
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -118,13 +73,6 @@ impl Token {
     pub fn text(self, source: &str) -> Option<&str> {
         source.get(self.span.start..self.span.end)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Diagnostic {
-    pub span: Span,
-    pub code: &'static str,
-    pub message: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

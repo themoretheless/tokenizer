@@ -2,7 +2,7 @@
 
 use std::{error::Error, fmt};
 
-use crate::Span;
+use themoretheless_tokenizer_core::Span;
 
 /// Exact lexical categories emitted by the JSON lexer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -824,6 +824,7 @@ fn validate_number(text: &str) -> Result<(), (NumberIssue, usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use themoretheless_tokenizer_core::{ColumnEncoding, LineIndex};
 
     fn kinds(source: &str) -> Vec<SyntaxKind> {
         lex(source).tokens.iter().map(|token| token.kind).collect()
@@ -980,16 +981,16 @@ mod tests {
     fn diagnostic_endpoints_never_split_crlf() {
         let source = "\"x\r\n";
         let result = lex(source);
-        let index = crate::LineIndex::new(source);
+        let index = LineIndex::new(source);
         for diagnostic in result.diagnostics() {
             assert!(
                 index
-                    .line_column(diagnostic.span.start, crate::ColumnEncoding::Utf8Bytes)
+                    .line_column(diagnostic.span.start, ColumnEncoding::Utf8Bytes)
                     .is_ok()
             );
             assert!(
                 index
-                    .line_column(diagnostic.span.end, crate::ColumnEncoding::Utf8Bytes)
+                    .line_column(diagnostic.span.end, ColumnEncoding::Utf8Bytes)
                     .is_ok()
             );
         }

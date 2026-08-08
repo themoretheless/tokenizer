@@ -66,10 +66,18 @@ fn url_tokenizer_is_on_the_public_surface() {
     let source = "https://api.example.com/v1?q=1&x=2#top";
     let tokens = tokenize_url(source);
     assert!(tokens.is_lossless(source));
-    assert!(tokens.tokens.iter().any(|t| {
-        t.kind == UrlKind::Host && t.text(source) == Some("api.example.com")
-    }));
-    assert!(tokens.tokens.iter().any(|t| t.kind == UrlKind::Key && t.text(source) == Some("q")));
+    assert!(
+        tokens
+            .tokens
+            .iter()
+            .any(|t| { t.kind == UrlKind::Host && t.text(source) == Some("api.example.com") })
+    );
+    assert!(
+        tokens
+            .tokens
+            .iter()
+            .any(|t| t.kind == UrlKind::Key && t.text(source) == Some("q"))
+    );
     let diagnostics = validate_url("https://h:70000/ path");
     assert!(diagnostics.iter().any(|d| d.code == "url-whitespace"));
     assert!(diagnostics.iter().any(|d| d.code == "url-port-range"));

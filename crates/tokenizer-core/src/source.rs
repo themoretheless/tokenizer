@@ -2,11 +2,13 @@
 
 use std::{error::Error, fmt};
 
+use crate::Span;
+
 /// The unit used for a [`LineColumn::column`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ColumnEncoding {
-    /// UTF-8 bytes, matching [`crate::Span`].
+    /// UTF-8 bytes, matching [`Span`].
     Utf8Bytes,
     /// Unicode scalar values (`char`s), not grapheme clusters.
     UnicodeScalars,
@@ -193,6 +195,17 @@ impl<'source> LineIndex<'source> {
                 }
             }
         }
+    }
+
+    /// Convert a UTF-8 span to start/end line-columns.
+    pub fn span_line_columns(
+        &self,
+        span: Span,
+        encoding: ColumnEncoding,
+    ) -> Result<(LineColumn, LineColumn), PositionError> {
+        let start = self.line_column(span.start, encoding)?;
+        let end = self.line_column(span.end, encoding)?;
+        Ok((start, end))
     }
 
     #[must_use]

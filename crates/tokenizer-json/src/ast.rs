@@ -2,7 +2,7 @@
 
 use std::{borrow::Cow, error::Error, fmt};
 
-use crate::Span;
+use themoretheless_tokenizer_core::Span;
 
 /// The broad category of a parsed JSON value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

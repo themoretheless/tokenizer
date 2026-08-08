@@ -6,6 +6,30 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-08
+
+### Added
+
+- Workspace crate `themoretheless-tokenizer-core` with shared `Span`, source
+  positions, diagnostics, language/dialect ids, capability flags, input limits,
+  lossless helpers, object-safe `HostLanguage`, and a static language registry.
+- Workspace crates `themoretheless-tokenizer-json` and
+  `themoretheless-tokenizer-url` as the first language plugins.
+- Facade helpers `register_builtins`, `builtin_registry`, and `analyze_host`.
+- Multi-language playground bridge `tokenization(language, source, mode, layer)`
+  plus WASM `tokenize`; JSON-only entry remains for compatibility.
+- Convenience API `api::Source` / `Analysis` (`syntax`, `highlight`, `errors`)
+  plus `api::quick` helpers and `api::prelude`.
+- Concepts glossary: `docs/concepts-and-api.md`.
+- Design contract for multi-language Cargo plugins in `docs/plugin-api-design.md`.
+
+### Changed
+
+- Facade re-exports core primitives and language crates behind features
+  `json` (default) and `url` (default).
+- Package layout is a multi-crate workspace; consumers can still depend on the
+  facade crate alone.
+
 ## [0.3.1] - 2026-08-03
 
 ### Added
@@ -51,7 +75,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Initial dependency-free JSON tokenizer with UTF-8 byte spans, diagnostics,
   semantic token categories, and the `JsonTokenizer` compatibility facade.
 
-[Unreleased]: https://github.com/themoretheless/tokenizer/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/themoretheless/tokenizer/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/themoretheless/tokenizer/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/themoretheless/tokenizer/compare/v0.2.0...v0.3.1
 [0.2.0]: https://github.com/themoretheless/tokenizer/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/themoretheless/tokenizer/releases/tag/v0.1.0

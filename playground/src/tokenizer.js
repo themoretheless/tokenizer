@@ -1,6 +1,6 @@
 let wasmModulePromise
 
-async function tokenizeWithWasm({ source, mode, layer }) {
+async function tokenizeWithWasm({ source, language = 'json', mode, layer }) {
   if (!wasmModulePromise) {
     const base = import.meta.env.BASE_URL
     wasmModulePromise = import(/* @vite-ignore */ `${base}wasm/tokenizer_wasm.js`)
@@ -14,6 +14,9 @@ async function tokenizeWithWasm({ source, mode, layer }) {
       })
   }
   const module = await wasmModulePromise
+  if (typeof module.tokenize === 'function') {
+    return JSON.parse(module.tokenize(language, source, mode, layer))
+  }
   return JSON.parse(module.tokenize_json(source, mode, layer))
 }
 

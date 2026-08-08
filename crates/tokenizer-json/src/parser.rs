@@ -2,7 +2,7 @@
 
 use std::{borrow::Cow, error::Error, fmt};
 
-use crate::Span;
+use themoretheless_tokenizer_core::Span;
 
 use super::{
     ast::{Array, Boolean, Member, Null, Number, Object, StringValue, Value},
@@ -1087,7 +1087,7 @@ mod tests {
             assert!(!number.is_valid(), "{source}");
             assert_eq!(
                 number.as_f64(),
-                Err(crate::json::NumberError::InvalidJsonNumber),
+                Err(crate::NumberError::InvalidJsonNumber),
                 "{source}"
             );
         }
