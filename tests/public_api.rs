@@ -1,11 +1,12 @@
 use themoretheless_tokenizer::{
-    ColumnEncoding, JsonTokenizer, LineColumn, LineIndex, Span, TokenKind, Tokenizer,
+    ColumnEncoding, JsonTokenizer, LineColumn, LineIndex, Span, TokenKind, Tokenizer, UrlKind,
     json::{
         AstPathSegment, AstVisitor, LexerOptions, NodeRef, NumberError, Parse, ParseOptions,
         SemanticKind, SyntaxElement, SyntaxKind, SyntaxNodeKind, TextEdit, Value, VisitContext,
         VisitControl, VisitOutcome, apply_edits, lex_with, node_at_offset, parse, parse_with,
         path_at_offset, syntax_tree, tokenize, visit_parse,
     },
+    tokenize_url, validate_url,
 };
 
 #[test]
@@ -58,6 +59,20 @@ fn malformed_numbers_are_not_convertible() {
     let parsed = parse("01");
     let number = parsed.value().and_then(Value::as_number).unwrap();
     assert_eq!(number.as_i64(), Err(NumberError::InvalidJsonNumber));
+}
+
+#[test]
+fn url_tokenizer_is_on_the_public_surface() {
+    let source = "https://api.example.com/v1?q=1&x=2#top";
+    let tokens = tokenize_url(source);
+    assert!(tokens.is_lossless(source));
+    assert!(tokens.tokens.iter().any(|t| {
+        t.kind == UrlKind::Host && t.text(source) == Some("api.example.com")
+    }));
+    assert!(tokens.tokens.iter().any(|t| t.kind == UrlKind::Key && t.text(source) == Some("q")));
+    let diagnostics = validate_url("https://h:70000/ path");
+    assert!(diagnostics.iter().any(|d| d.code == "url-whitespace"));
+    assert!(diagnostics.iter().any(|d| d.code == "url-port-range"));
 }
 
 #[test]
