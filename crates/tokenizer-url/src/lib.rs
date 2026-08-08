@@ -300,14 +300,13 @@ pub fn validate(source: &str) -> Vec<Diagnostic> {
             });
             continue;
         }
-        if let Ok(port) = text.parse::<u32>()
-            && port > 65535
-        {
-            diagnostics.push(Diagnostic {
+        match text.parse::<u32>() {
+            Ok(port) if port <= 65535 => {}
+            _ => diagnostics.push(Diagnostic {
                 span: token.span,
                 code: "url-port-range",
                 message: "Port must be between 0 and 65535",
-            });
+            }),
         }
     }
 
@@ -316,15 +315,21 @@ pub fn validate(source: &str) -> Vec<Diagnostic> {
         // "mailto:user" style — allow.
     }
 
-    // Unclosed {{var
-    if let Some(open) = source.find("{{")
-        && !source[open..].contains("}}")
-    {
-        diagnostics.push(Diagnostic {
-            span: Span::new(open, source.len()),
-            code: "url-unclosed-var",
-            message: "Unclosed {{var}} placeholder",
-        });
+    // Unclosed {{var}} placeholders (scan every open).
+    let mut search = 0usize;
+    while let Some(rel) = source[search..].find("{{") {
+        let open = search + rel;
+        let rest = &source[open..];
+        if let Some(close_rel) = rest.find("}}") {
+            search = open + close_rel + 2;
+        } else {
+            diagnostics.push(Diagnostic {
+                span: Span::new(open, source.len()),
+                code: "url-unclosed-var",
+                message: "Unclosed {{var}} placeholder",
+            });
+            break;
+        }
     }
 
     diagnostics
@@ -358,7 +363,17 @@ fn last_index_of(bytes: &[u8], needle: u8, start: usize, end: usize) -> Option<u
 
 /// Push `kind` for `[from, to)`, splitting out `{{var}}` runs as [`UrlKind::Var`].
 fn push_range(out: &mut UrlTokenization, source: &str, kind: UrlKind, from: usize, to: usize) {
-    if to <= from || to > source.len() || from > source.len() {
+    if to < from || to > source.len() || from > source.len() {
+        return;
+    }
+    // Allow zero-width Port spans so trailing `host:` is still representable.
+    if to == from {
+        if kind == UrlKind::Port {
+            out.tokens.push(UrlToken {
+                kind,
+                span: Span::new(from, to),
+            });
+        }
         return;
     }
     if !source.is_char_boundary(from) || !source.is_char_boundary(to) {
@@ -522,6 +537,29 @@ mod tests {
     fn validate_unclosed_var() {
         let d = validate("https://ex.test/{{open");
         assert!(d.iter().any(|x| x.code == "url-unclosed-var"));
+        let later = validate("https://ex/{{ok}}/x/{{oops");
+        assert!(later.iter().any(|x| x.code == "url-unclosed-var"));
+    }
+
+    #[test]
+    fn validate_oversized_digit_port() {
+        let d = validate("https://h:99999999999999999999/");
+        assert!(d.iter().any(|x| x.code == "url-port-range"));
+    }
+
+    #[test]
+    fn trailing_colon_emits_empty_port() {
+        let source = "https://h:";
+        let tokens = tokenize(source);
+        assert!(tokens.is_lossless(source));
+        assert!(
+            tokens
+                .tokens
+                .iter()
+                .any(|t| t.kind == UrlKind::Port && t.span.is_empty())
+        );
+        let d = validate(source);
+        assert!(d.iter().any(|x| x.code == "url-empty-port"));
     }
 
     #[test]
