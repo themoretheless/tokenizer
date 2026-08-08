@@ -2,7 +2,7 @@
 
 use std::{error::Error, fmt};
 
-use crate::Span;
+use themoretheless_tokenizer_core::Span;
 
 use super::{LexToken, Member, Parse, ParseOptions, Value, parse, parse_with};
 
@@ -108,7 +108,7 @@ impl SyntaxNode {
 /// reparsing it creates a new snapshot and invalidates all prior IDs.
 ///
 /// ```
-/// use themoretheless_tokenizer::json::{
+/// use themoretheless_tokenizer_json::{
 ///     ParseOptions, SyntaxElement, SyntaxNodeKind, syntax_tree_with,
 /// };
 ///
@@ -429,7 +429,8 @@ impl Error for EditError {}
 /// replacement ranges are allowed.
 ///
 /// ```
-/// use themoretheless_tokenizer::{Span, json::{TextEdit, apply_edits}};
+/// use themoretheless_tokenizer_core::Span;
+/// use themoretheless_tokenizer_json::{TextEdit, apply_edits};
 ///
 /// let source = "[\"old\", true]";
 /// let edits = [
@@ -504,7 +505,7 @@ pub fn apply_edits(source: &str, edits: &[TextEdit]) -> Result<String, EditError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::json::SyntaxKind;
+    use crate::SyntaxKind;
 
     fn flatten<'source>(
         tree: &SyntaxTree<'source>,

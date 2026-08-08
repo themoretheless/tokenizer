@@ -1,7 +1,8 @@
-//! Production-oriented JSON lexing and parsing.
+//! Production-oriented JSON and JSONC lexing and parsing.
 //!
-//! The legacy [`crate::tokenize_json`] API remains available for semantic
-//! highlighting. This module provides exact syntax tokens and a typed AST.
+//! Exact syntax tokens, a recovering parser, borrowing AST, semantic tokens,
+//! CST, navigation, and visitor APIs. The facade crate re-exports this module
+//! as `themoretheless_tokenizer::json`.
 
 mod ast;
 mod lexer;

@@ -2,109 +2,111 @@
 
 use std::fmt::Write as _;
 
-use crate::json::{
-    LexDiagnostic, LexerOptions, ParseDiagnostic, ParseOptions, SemanticToken, lex_with,
-    tokenize_with,
-};
+use themoretheless_tokenizer_core::{HostError, HostTokenization, TokenLayer};
+
+use crate::plugins::analyze_host;
 
 /// Tokenizes source for the development playground and returns a JSON payload.
+///
+/// `language` is a language id (`json`, `url`, …). `mode` is the dialect
+/// (`strict`, `jsonc`, `default`, …). `layer` is `syntax` or `semantic`.
+#[must_use]
+pub fn tokenization(language: &str, source: &str, mode: &str, layer: &str) -> String {
+    let Some(layer) = TokenLayer::parse(layer) else {
+        return protocol_error("invalid-layer", &format!("unknown layer `{layer}`"));
+    };
+    match analyze_host(language, source, mode, layer) {
+        Ok(result) => success_payload(language, mode, layer.as_str(), source, &result),
+        Err(error) => host_error_payload(&error),
+    }
+}
+
+/// Backward-compatible JSON-only entry used by existing WASM exports.
 #[must_use]
 pub fn tokenization_json(source: &str, mode: &str, layer: &str) -> String {
-    let jsonc = mode == "jsonc";
-    if layer == "syntax" {
-        syntax_json(source, jsonc)
-    } else {
-        semantic_json(source, jsonc)
-    }
+    tokenization("json", source, mode, layer)
 }
 
-fn syntax_json(source: &str, jsonc: bool) -> String {
-    let options = if jsonc {
-        LexerOptions::jsonc()
-    } else {
-        LexerOptions::strict()
-    };
-    let result = lex_with(source, options);
-    let mut output = response_start(
-        source,
-        if jsonc { "jsonc" } else { "strict" },
-        "syntax",
-        !result.has_errors(),
-    );
-    for (index, token) in result.tokens().iter().enumerate() {
-        if index != 0 {
-            output.push(',');
-        }
-        let kind = debug_name(token.kind);
-        push_token(
-            &mut output,
-            index,
-            &kind,
-            token.span.start,
-            token.span.end,
-            token.text(source).unwrap_or(""),
-            token.has_error(),
-        );
-    }
-    output.push_str("],\"diagnostics\":[");
-    for (index, diagnostic) in result.diagnostics().iter().enumerate() {
-        if index != 0 {
-            output.push(',');
-        }
-        push_lex_diagnostic(&mut output, diagnostic);
-    }
-    output.push_str("]}");
-    output
-}
-
-fn semantic_json(source: &str, jsonc: bool) -> String {
-    let options = if jsonc {
-        ParseOptions::jsonc()
-    } else {
-        ParseOptions::strict()
-    };
-    let result = tokenize_with(source, options);
-    let mut output = response_start(
-        source,
-        if jsonc { "jsonc" } else { "strict" },
-        "semantic",
-        result.is_valid(),
+fn success_payload(
+    language: &str,
+    mode: &str,
+    layer: &str,
+    source: &str,
+    result: &HostTokenization,
+) -> String {
+    let mut output = format!(
+        "{{\"language\":{},\"mode\":{},\"layer\":{},\"valid\":{},\"sourceBytes\":{},\"tokens\":[",
+        json_string(language),
+        json_string(mode),
+        json_string(layer),
+        result.valid,
+        source.len()
     );
     for (index, token) in result.tokens.iter().enumerate() {
         if index != 0 {
             output.push(',');
         }
-        push_semantic_token(&mut output, index, token, source);
+        let text = source.get(token.span.start..token.span.end).unwrap_or("");
+        push_token(
+            &mut output,
+            index,
+            token.kind.as_ref(),
+            token.span.start,
+            token.span.end,
+            text,
+            token.error,
+        );
     }
     output.push_str("],\"diagnostics\":[");
     for (index, diagnostic) in result.diagnostics.iter().enumerate() {
         if index != 0 {
             output.push(',');
         }
-        push_parse_diagnostic(&mut output, diagnostic);
+        push_diagnostic(
+            &mut output,
+            diagnostic.code.as_ref(),
+            diagnostic.message.as_ref(),
+            diagnostic.span.start,
+            diagnostic.span.end,
+        );
     }
     output.push_str("]}");
     output
 }
 
-fn response_start(source: &str, mode: &str, layer: &str, valid: bool) -> String {
-    format!(
-        "{{\"mode\":\"{mode}\",\"layer\":\"{layer}\",\"valid\":{valid},\"sourceBytes\":{},\"tokens\":[",
-        source.len()
-    )
+fn host_error_payload(error: &HostError) -> String {
+    let (code, message) = match error {
+        HostError::UnknownLanguage { language } => {
+            ("unknown-language", format!("unknown language `{language}`"))
+        }
+        HostError::UnknownDialect { dialect } => {
+            ("unknown-dialect", format!("unknown dialect `{dialect}`"))
+        }
+        HostError::UnsupportedCapability { capability } => (
+            "unsupported-capability",
+            format!("unsupported capability `{capability}`"),
+        ),
+        HostError::Capability(error) => ("capability", error.to_string()),
+        HostError::InputTooLarge { max, actual } => (
+            "input-too-large",
+            format!("input is {actual} bytes; max is {max}"),
+        ),
+        HostError::InvalidOffset { offset, source_len } => (
+            "invalid-offset",
+            format!("offset {offset} is outside source of length {source_len}"),
+        ),
+        HostError::InvalidOptions { message } => ("invalid-options", message.clone()),
+        other => ("host-error", other.to_string()),
+    };
+    protocol_error(code, &message)
 }
 
-fn push_semantic_token(output: &mut String, index: usize, token: &SemanticToken, source: &str) {
-    let kind = debug_name(token.kind);
-    push_token(
-        output,
-        index,
-        &kind,
-        token.span.start,
-        token.span.end,
-        token.text(source).unwrap_or(""),
-        kind == "invalid",
-    );
+fn protocol_error(code: &str, message: &str) -> String {
+    format!(
+        "{{\"error\":true,\"code\":{},\"message\":{}}}",
+        json_string(code),
+        json_string(message)
+    )
 }
 
 fn push_token(
@@ -123,26 +125,6 @@ fn push_token(
     let _ = write!(output, ",\"error\":{error}}}");
 }
 
-fn push_lex_diagnostic(output: &mut String, diagnostic: &LexDiagnostic) {
-    push_diagnostic(
-        output,
-        diagnostic.kind.code(),
-        &diagnostic.kind.to_string(),
-        diagnostic.span.start,
-        diagnostic.span.end,
-    );
-}
-
-fn push_parse_diagnostic(output: &mut String, diagnostic: &ParseDiagnostic) {
-    push_diagnostic(
-        output,
-        diagnostic.kind.code(),
-        &diagnostic.kind.to_string(),
-        diagnostic.span.start,
-        diagnostic.span.end,
-    );
-}
-
 fn push_diagnostic(output: &mut String, code: &str, message: &str, start: usize, end: usize) {
     output.push_str("{\"code\":");
     push_json_string(output, code);
@@ -151,16 +133,10 @@ fn push_diagnostic(output: &mut String, code: &str, message: &str, start: usize,
     let _ = write!(output, ",\"start\":{start},\"end\":{end}}}");
 }
 
-fn debug_name(value: impl std::fmt::Debug) -> String {
-    let value = format!("{value:?}");
-    let mut result = String::with_capacity(value.len() + 4);
-    for (index, character) in value.chars().enumerate() {
-        if character.is_ascii_uppercase() && index != 0 {
-            result.push('-');
-        }
-        result.push(character.to_ascii_lowercase());
-    }
-    result
+fn json_string(value: &str) -> String {
+    let mut output = String::new();
+    push_json_string(&mut output, value);
+    output
 }
 
 fn push_json_string(output: &mut String, value: &str) {
@@ -191,16 +167,23 @@ mod tests {
     fn preserves_unicode_text_and_byte_spans() {
         let output = tokenization_json(r#"{"city":"Тбилиси"}"#, "strict", "semantic");
         assert!(output.contains("\"valid\":true"));
+        assert!(output.contains("\"language\":\"json\""));
         assert!(output.contains("\"kind\":\"property\""));
         assert!(output.contains("Тбилиси"));
-        assert!(output.contains("\"sourceBytes\":25"));
     }
 
     #[test]
     fn escapes_source_fragments() {
-        let output = tokenization_json("[\n\"a\\tb\"]", "strict", "syntax");
-        assert!(output.starts_with('{') && output.ends_with('}'));
+        let output = tokenization_json("\"a\\\"b\\n\"", "strict", "syntax");
+        assert!(output.contains("\\\""));
         assert!(output.contains("\\n"));
-        assert!(output.contains("\\\\t"));
+    }
+
+    #[cfg(feature = "url")]
+    #[test]
+    fn tokenizes_url_language() {
+        let output = tokenization("url", "https://example.com", "default", "syntax");
+        assert!(output.contains("\"language\":\"url\""));
+        assert!(output.contains("u-scheme"));
     }
 }

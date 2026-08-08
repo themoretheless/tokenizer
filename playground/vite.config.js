@@ -5,9 +5,9 @@ import { defineConfig } from 'vite'
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url))
 
-function tokenize(source, mode, layer) {
+function tokenize(source, language, mode, layer) {
   return new Promise((resolve, reject) => {
-    const child = spawn('cargo', ['run', '--quiet', '--features', 'web-bridge', '--bin', 'tokenizer-web-bridge', '--', '--mode', mode, '--layer', layer], { cwd: repositoryRoot, stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn('cargo', ['run', '--quiet', '--features', 'web-bridge', '--bin', 'tokenizer-web-bridge', '--', '--language', language, '--mode', mode, '--layer', layer], { cwd: repositoryRoot, stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk })
@@ -34,9 +34,12 @@ function rustBridge() {
         try {
           const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'))
           const source = typeof payload.source === 'string' ? payload.source : ''
-          const mode = payload.mode === 'jsonc' ? 'jsonc' : 'strict'
+          const language = payload.language === 'url' ? 'url' : 'json'
+          const mode = language === 'url'
+            ? 'default'
+            : payload.mode === 'jsonc' ? 'jsonc' : 'strict'
           const layer = payload.layer === 'syntax' ? 'syntax' : 'semantic'
-          const result = await tokenize(source, mode, layer)
+          const result = await tokenize(source, language, mode, layer)
           response.setHeader('content-type', 'application/json; charset=utf-8')
           response.end(result)
         } catch (error) {

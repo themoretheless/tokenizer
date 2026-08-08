@@ -1,13 +1,18 @@
 [workspace]
-members = ["wasm"]
+members = [
+    "crates/tokenizer-core",
+    "crates/tokenizer-json",
+    "crates/tokenizer-url",
+    "wasm",
+]
 resolver = "3"
 
 [package]
 name = "themoretheless-tokenizer"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 authors = ["Denis Mezhov"]
-description = "Lossless, fault-tolerant JSON and JSONC lexer, parser, AST, semantic tokens, and source positions"
+description = "Plugin-oriented lossless tokenizers: JSON/JSONC engine, URL highlighter, shared host API"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/themoretheless/tokenizer"
 documentation = "https://docs.rs/themoretheless-tokenizer"
@@ -20,8 +25,16 @@ categories = ["parsing", "text-processing"]
 name = "themoretheless_tokenizer"
 path = "src/lib.rs"
 
+[dependencies]
+themoretheless-tokenizer-core = { path = "crates/tokenizer-core", version = "0.4.0" }
+themoretheless-tokenizer-json = { path = "crates/tokenizer-json", version = "0.4.0", optional = true }
+themoretheless-tokenizer-url = { path = "crates/tokenizer-url", version = "0.4.0", optional = true }
+
 [features]
-web-bridge = []
+default = ["json", "url"]
+json = ["dep:themoretheless-tokenizer-json"]
+url = ["dep:themoretheless-tokenizer-url"]
+web-bridge = ["json"]
 
 [[bin]]
 name = "tokenizer-web-bridge"

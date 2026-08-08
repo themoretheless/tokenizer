@@ -20,9 +20,11 @@ const examples = {
   "theme": "night",
   "features": ["tokens", "diagnostics",],
 }`,
+  url: 'https://user:pass@example.com:8443/path?q=1&lang=ru#frag',
 }
 
 const source = ref(examples.valid)
+const language = ref('json')
 const mode = ref('strict')
 const layer = ref('semantic')
 const result = ref(null)
@@ -35,13 +37,19 @@ let timer
 const visibleTokens = computed(() => result.value?.tokens ?? [])
 const diagnostics = computed(() => result.value?.diagnostics ?? [])
 const active = computed(() => visibleTokens.value.find((token) => token.index === activeToken.value))
+const effectiveMode = computed(() => (language.value === 'url' ? 'default' : mode.value))
 
 async function tokenize() {
   const id = ++requestId
   loading.value = true
   error.value = ''
   try {
-    const payload = await runTokenizer({ source: source.value, mode: mode.value, layer: layer.value })
+    const payload = await runTokenizer({
+      source: source.value,
+      language: language.value,
+      mode: effectiveMode.value,
+      layer: layer.value,
+    })
     if (id === requestId) result.value = payload
   } catch (cause) {
     if (id === requestId) {
@@ -55,6 +63,12 @@ async function tokenize() {
 
 function loadExample(name) {
   source.value = examples[name]
+  if (name === 'url') {
+    language.value = 'url'
+    mode.value = 'default'
+    return
+  }
+  language.value = 'json'
   mode.value = name === 'jsonc' ? 'jsonc' : 'strict'
 }
 
@@ -63,7 +77,7 @@ function focusSpan(start, end) {
   activeToken.value = token?.index ?? null
 }
 
-watch([source, mode, layer], () => {
+watch([source, language, mode, layer], () => {
   clearTimeout(timer)
   timer = setTimeout(tokenize, 180)
 }, { immediate: true })
@@ -84,7 +98,11 @@ onBeforeUnmount(() => clearTimeout(timer))
     </header>
 
     <section class="controls">
-      <div class="segmented" aria-label="JSON mode">
+      <div class="segmented" aria-label="Language">
+        <button :class="{ selected: language === 'json' }" @click="language = 'json'; mode = mode === 'jsonc' ? 'jsonc' : 'strict'">JSON</button>
+        <button :class="{ selected: language === 'url' }" @click="language = 'url'; mode = 'default'">URL</button>
+      </div>
+      <div v-if="language === 'json'" class="segmented" aria-label="JSON mode">
         <button :class="{ selected: mode === 'strict' }" @click="mode = 'strict'">Strict JSON</button>
         <button :class="{ selected: mode === 'jsonc' }" @click="mode = 'jsonc'">JSONC</button>
       </div>
@@ -97,6 +115,7 @@ onBeforeUnmount(() => clearTimeout(timer))
         <button @click="loadExample('valid')">Valid</button>
         <button @click="loadExample('recovery')">Recovery</button>
         <button @click="loadExample('jsonc')">JSONC</button>
+        <button @click="loadExample('url')">URL</button>
       </div>
     </section>
 

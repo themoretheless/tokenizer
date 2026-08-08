@@ -55,7 +55,7 @@ pub enum VisitContext<'ast, 'source> {
 /// index order. Every hook defaults to [`VisitControl::Continue`].
 ///
 /// ```
-/// use themoretheless_tokenizer::json::{
+/// use themoretheless_tokenizer_json::{
 ///     AstVisitor, Value, VisitContext, VisitControl, parse, visit_parse,
 /// };
 ///
@@ -259,7 +259,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::json::{ValueKind, parse};
+    use crate::{ValueKind, parse};
 
     #[derive(Default)]
     struct EventVisitor {

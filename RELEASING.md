@@ -39,15 +39,22 @@ before publishing.
 
 ## Publish to crates.io
 
+The workspace publishes four crates in order:
+
+1. `themoretheless-tokenizer-core`
+2. `themoretheless-tokenizer-json`
+3. `themoretheless-tokenizer-url`
+4. `themoretheless-tokenizer` (facade)
+
 1. In GitHub Actions, open **Publish to crates.io** and run it against `main`.
 2. Enter the exact Cargo version, leave **publish** disabled, and run the
-   workflow. This performs the full gate and `cargo publish --dry-run` without
+   workflow. This validates the version and dry-runs every package without
    exposing the registry token.
 3. Run the same workflow again on the same `main` commit with **publish**
-   enabled and confirmation `publish vX.Y.Z`.
+   enabled and confirmation equal to the Cargo version (for example `0.4.0`).
 4. Approve the protected `crates-io` environment when prompted, then wait until
-   the version is visible on crates.io. Never publish from an uncommitted local
-   checkout.
+   all four packages are visible on crates.io. Never publish from an uncommitted
+   local checkout.
 
 ## Create the GitHub release
 

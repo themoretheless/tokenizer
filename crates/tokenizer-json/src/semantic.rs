@@ -1,6 +1,6 @@
 //! Parser-aware semantic tokens for syntax highlighting.
 
-use crate::Span;
+use themoretheless_tokenizer_core::Span;
 
 use super::{Parse, ParseDiagnostic, ParseOptions, SyntaxKind, parse, parse_with};
 
