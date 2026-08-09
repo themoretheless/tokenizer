@@ -6,6 +6,15 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Full multi-language pipeline in `core::fullkit` (lex → recovering parse →
+  shared AST → semantic tokens) for programming/data languages.
+- Full markup AST pipeline in `core::markup_full` for HTML/XML.
+- 35 language crates + feature groups `wave1`…`wave6`, `top20`, `all-languages`.
+- TIOBE-style top 20 as first-class `top20` feature (full engines).
+- Docs: `docs/languages.md`.
+
 ## [0.4.0] - 2026-08-08
 
 ### Added
