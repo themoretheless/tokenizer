@@ -47,6 +47,26 @@ impl LanguageId {
     pub const OBJECTIVEC: Self = Self("objectivec");
     pub const JULIA: Self = Self("julia");
     pub const ASSEMBLY: Self = Self("assembly");
+    pub const GROOVY: Self = Self("groovy");
+    pub const HASKELL: Self = Self("haskell");
+    pub const ELIXIR: Self = Self("elixir");
+    pub const ERLANG: Self = Self("erlang");
+    pub const CLOJURE: Self = Self("clojure");
+    pub const FSHARP: Self = Self("fsharp");
+    pub const OCAML: Self = Self("ocaml");
+    pub const LISP: Self = Self("lisp");
+    pub const SCHEME: Self = Self("scheme");
+    pub const SOLIDITY: Self = Self("solidity");
+    pub const ZIG: Self = Self("zig");
+    pub const NIM: Self = Self("nim");
+    pub const DLANG: Self = Self("dlang");
+    pub const COBOL: Self = Self("cobol");
+    pub const ADA: Self = Self("ada");
+    pub const PROLOG: Self = Self("prolog");
+    pub const ABAP: Self = Self("abap");
+    pub const VHDL: Self = Self("vhdl");
+    pub const VERILOG: Self = Self("verilog");
+    pub const GRAPHQL: Self = Self("graphql");
 
     #[must_use]
     pub const fn as_str(self) -> &'static str {

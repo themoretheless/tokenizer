@@ -371,6 +371,86 @@ pub fn register_builtins(
     {
         builder.register(&themoretheless_tokenizer_assembly::ENGINE)?;
     }
+    #[cfg(feature = "groovy")]
+    {
+        builder.register(&themoretheless_tokenizer_groovy::ENGINE)?;
+    }
+    #[cfg(feature = "haskell")]
+    {
+        builder.register(&themoretheless_tokenizer_haskell::ENGINE)?;
+    }
+    #[cfg(feature = "elixir")]
+    {
+        builder.register(&themoretheless_tokenizer_elixir::ENGINE)?;
+    }
+    #[cfg(feature = "erlang")]
+    {
+        builder.register(&themoretheless_tokenizer_erlang::ENGINE)?;
+    }
+    #[cfg(feature = "clojure")]
+    {
+        builder.register(&themoretheless_tokenizer_clojure::ENGINE)?;
+    }
+    #[cfg(feature = "fsharp")]
+    {
+        builder.register(&themoretheless_tokenizer_fsharp::ENGINE)?;
+    }
+    #[cfg(feature = "ocaml")]
+    {
+        builder.register(&themoretheless_tokenizer_ocaml::ENGINE)?;
+    }
+    #[cfg(feature = "lisp")]
+    {
+        builder.register(&themoretheless_tokenizer_lisp::ENGINE)?;
+    }
+    #[cfg(feature = "scheme")]
+    {
+        builder.register(&themoretheless_tokenizer_scheme::ENGINE)?;
+    }
+    #[cfg(feature = "solidity")]
+    {
+        builder.register(&themoretheless_tokenizer_solidity::ENGINE)?;
+    }
+    #[cfg(feature = "zig")]
+    {
+        builder.register(&themoretheless_tokenizer_zig::ENGINE)?;
+    }
+    #[cfg(feature = "nim")]
+    {
+        builder.register(&themoretheless_tokenizer_nim::ENGINE)?;
+    }
+    #[cfg(feature = "dlang")]
+    {
+        builder.register(&themoretheless_tokenizer_dlang::ENGINE)?;
+    }
+    #[cfg(feature = "cobol")]
+    {
+        builder.register(&themoretheless_tokenizer_cobol::ENGINE)?;
+    }
+    #[cfg(feature = "ada")]
+    {
+        builder.register(&themoretheless_tokenizer_ada::ENGINE)?;
+    }
+    #[cfg(feature = "prolog")]
+    {
+        builder.register(&themoretheless_tokenizer_prolog::ENGINE)?;
+    }
+    #[cfg(feature = "abap")]
+    {
+        builder.register(&themoretheless_tokenizer_abap::ENGINE)?;
+    }
+    #[cfg(feature = "vhdl")]
+    {
+        builder.register(&themoretheless_tokenizer_vhdl::ENGINE)?;
+    }
+    #[cfg(feature = "verilog")]
+    {
+        builder.register(&themoretheless_tokenizer_verilog::ENGINE)?;
+    }
+    #[cfg(feature = "graphql")]
+    {
+        builder.register(&themoretheless_tokenizer_graphql::ENGINE)?;
+    }
     let _ = builder;
     Ok(())
 }
@@ -472,8 +552,8 @@ mod tests {
     #[cfg(feature = "all-languages")]
     #[test]
     fn all_languages_register() {
-        // json + url + 35 language crates
-        assert_eq!(builtin_registry().len(), 37);
+        // json + url + 55 language crates
+        assert_eq!(builtin_registry().len(), 57);
     }
 
     #[cfg(feature = "top20")]
@@ -503,6 +583,36 @@ mod tests {
             "assembly",
         ] {
             assert!(reg.get_str(id).is_some(), "missing top20 id {id}");
+        }
+    }
+
+    #[cfg(feature = "next20")]
+    #[test]
+    fn next20_register() {
+        let reg = builtin_registry();
+        for id in [
+            "groovy",
+            "haskell",
+            "elixir",
+            "erlang",
+            "clojure",
+            "fsharp",
+            "ocaml",
+            "lisp",
+            "scheme",
+            "solidity",
+            "zig",
+            "nim",
+            "dlang",
+            "cobol",
+            "ada",
+            "prolog",
+            "abap",
+            "vhdl",
+            "verilog",
+            "graphql",
+        ] {
+            assert!(reg.get_str(id).is_some(), "missing next20 id {id}");
         }
     }
 }

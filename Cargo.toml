@@ -38,6 +38,26 @@ members = [
     "crates/tokenizer-objectivec",
     "crates/tokenizer-julia",
     "crates/tokenizer-assembly",
+    "crates/tokenizer-groovy",
+    "crates/tokenizer-haskell",
+    "crates/tokenizer-elixir",
+    "crates/tokenizer-erlang",
+    "crates/tokenizer-clojure",
+    "crates/tokenizer-fsharp",
+    "crates/tokenizer-ocaml",
+    "crates/tokenizer-lisp",
+    "crates/tokenizer-scheme",
+    "crates/tokenizer-solidity",
+    "crates/tokenizer-zig",
+    "crates/tokenizer-nim",
+    "crates/tokenizer-dlang",
+    "crates/tokenizer-cobol",
+    "crates/tokenizer-ada",
+    "crates/tokenizer-prolog",
+    "crates/tokenizer-abap",
+    "crates/tokenizer-vhdl",
+    "crates/tokenizer-verilog",
+    "crates/tokenizer-graphql",
     "wasm",
 ]
 resolver = "3"
@@ -99,6 +119,26 @@ themoretheless-tokenizer-perl = { path = "crates/tokenizer-perl", version = "0.4
 themoretheless-tokenizer-objectivec = { path = "crates/tokenizer-objectivec", version = "0.4.0", optional = true }
 themoretheless-tokenizer-julia = { path = "crates/tokenizer-julia", version = "0.4.0", optional = true }
 themoretheless-tokenizer-assembly = { path = "crates/tokenizer-assembly", version = "0.4.0", optional = true }
+themoretheless-tokenizer-groovy = { path = "crates/tokenizer-groovy", version = "0.4.0", optional = true }
+themoretheless-tokenizer-haskell = { path = "crates/tokenizer-haskell", version = "0.4.0", optional = true }
+themoretheless-tokenizer-elixir = { path = "crates/tokenizer-elixir", version = "0.4.0", optional = true }
+themoretheless-tokenizer-erlang = { path = "crates/tokenizer-erlang", version = "0.4.0", optional = true }
+themoretheless-tokenizer-clojure = { path = "crates/tokenizer-clojure", version = "0.4.0", optional = true }
+themoretheless-tokenizer-fsharp = { path = "crates/tokenizer-fsharp", version = "0.4.0", optional = true }
+themoretheless-tokenizer-ocaml = { path = "crates/tokenizer-ocaml", version = "0.4.0", optional = true }
+themoretheless-tokenizer-lisp = { path = "crates/tokenizer-lisp", version = "0.4.0", optional = true }
+themoretheless-tokenizer-scheme = { path = "crates/tokenizer-scheme", version = "0.4.0", optional = true }
+themoretheless-tokenizer-solidity = { path = "crates/tokenizer-solidity", version = "0.4.0", optional = true }
+themoretheless-tokenizer-zig = { path = "crates/tokenizer-zig", version = "0.4.0", optional = true }
+themoretheless-tokenizer-nim = { path = "crates/tokenizer-nim", version = "0.4.0", optional = true }
+themoretheless-tokenizer-dlang = { path = "crates/tokenizer-dlang", version = "0.4.0", optional = true }
+themoretheless-tokenizer-cobol = { path = "crates/tokenizer-cobol", version = "0.4.0", optional = true }
+themoretheless-tokenizer-ada = { path = "crates/tokenizer-ada", version = "0.4.0", optional = true }
+themoretheless-tokenizer-prolog = { path = "crates/tokenizer-prolog", version = "0.4.0", optional = true }
+themoretheless-tokenizer-abap = { path = "crates/tokenizer-abap", version = "0.4.0", optional = true }
+themoretheless-tokenizer-vhdl = { path = "crates/tokenizer-vhdl", version = "0.4.0", optional = true }
+themoretheless-tokenizer-verilog = { path = "crates/tokenizer-verilog", version = "0.4.0", optional = true }
+themoretheless-tokenizer-graphql = { path = "crates/tokenizer-graphql", version = "0.4.0", optional = true }
 
 [features]
 default = ["json", "url"]
@@ -139,12 +179,54 @@ perl = ["dep:themoretheless-tokenizer-perl"]
 objectivec = ["dep:themoretheless-tokenizer-objectivec"]
 julia = ["dep:themoretheless-tokenizer-julia"]
 assembly = ["dep:themoretheless-tokenizer-assembly"]
+groovy = ["dep:themoretheless-tokenizer-groovy"]
+haskell = ["dep:themoretheless-tokenizer-haskell"]
+elixir = ["dep:themoretheless-tokenizer-elixir"]
+erlang = ["dep:themoretheless-tokenizer-erlang"]
+clojure = ["dep:themoretheless-tokenizer-clojure"]
+fsharp = ["dep:themoretheless-tokenizer-fsharp"]
+ocaml = ["dep:themoretheless-tokenizer-ocaml"]
+lisp = ["dep:themoretheless-tokenizer-lisp"]
+scheme = ["dep:themoretheless-tokenizer-scheme"]
+solidity = ["dep:themoretheless-tokenizer-solidity"]
+zig = ["dep:themoretheless-tokenizer-zig"]
+nim = ["dep:themoretheless-tokenizer-nim"]
+dlang = ["dep:themoretheless-tokenizer-dlang"]
+cobol = ["dep:themoretheless-tokenizer-cobol"]
+ada = ["dep:themoretheless-tokenizer-ada"]
+prolog = ["dep:themoretheless-tokenizer-prolog"]
+abap = ["dep:themoretheless-tokenizer-abap"]
+vhdl = ["dep:themoretheless-tokenizer-vhdl"]
+verilog = ["dep:themoretheless-tokenizer-verilog"]
+graphql = ["dep:themoretheless-tokenizer-graphql"]
 wave1 = ["xml", "html", "css", "yaml", "toml", "markdown"]
 wave2 = ["sql", "mongo", "bash", "powershell"]
 wave3 = ["javascript", "typescript"]
 wave4 = ["python", "java", "csharp", "go", "php", "ruby"]
 wave5 = ["c", "cpp", "rust", "kotlin", "swift", "dart", "r"]
 wave6 = ["visualbasic", "fortran", "matlab", "delphi", "scala", "lua", "perl", "objectivec", "julia", "assembly"]
+wave7 = [
+    "groovy",
+    "haskell",
+    "elixir",
+    "erlang",
+    "clojure",
+    "fsharp",
+    "ocaml",
+    "lisp",
+    "scheme",
+    "solidity",
+    "zig",
+    "nim",
+    "dlang",
+    "cobol",
+    "ada",
+    "prolog",
+    "abap",
+    "vhdl",
+    "verilog",
+    "graphql",
+]
 # TIOBE-style popular programming languages (fullkit / native where noted)
 top20 = [
     "python",
@@ -168,8 +250,11 @@ top20 = [
     "delphi",
     "assembly",
 ]
-all-languages = ["json", "url", "wave1", "wave2", "wave3", "wave4", "wave5", "wave6"]
-# web-bridge used by playground WASM; all-languages keeps CI language coverage.
+# Next 20 popular languages after top20 (FP, enterprise, hardware, web API)
+next20 = ["wave7"]
+all-languages = ["json", "url", "wave1", "wave2", "wave3", "wave4", "wave5", "wave6", "wave7"]
+# web-bridge used by playground WASM/dev bridge. Pair with language features
+# (or all-languages) so the host registry can resolve ids.
 web-bridge = ["json"]
 
 [[bin]]
