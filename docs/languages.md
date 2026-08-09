@@ -32,11 +32,14 @@ html::parse("<div/>"); // MarkupDoc AST
 |---------|----------|
 | `default` | `json`, `url` |
 | `top20` | TIOBE-style 20 programming languages (full) |
-| `wave1`…`wave6` | delivery batches |
-| `all-languages` | everything |
+| `next20` | next 20 popular languages (wave7) |
+| `wave1`…`wave7` | delivery batches |
+| `all-languages` | everything (json+url+55 plugins) |
 
 ```toml
 themoretheless-tokenizer = { version = "0.4", features = ["top20"] }
+# or
+features = ["next20"]
 # or
 features = ["all-languages"]
 ```
@@ -68,7 +71,32 @@ All **fullkit** (or native) editor engines:
 | 19 | delphi | fullkit |
 | 20 | assembly | fullkit |
 
-Plus outside top20 but available: json (deepest), url, html, xml, css, yaml, toml, markdown, mongo, bash, powershell, dart, scala, lua, perl, objectivec, julia, …
+## Next 20 (feature `next20` / `wave7`)
+
+| # | id | Notes |
+|---|-----|--------|
+| 1 | groovy | fullkit |
+| 2 | haskell | fullkit |
+| 3 | elixir | fullkit |
+| 4 | erlang | fullkit |
+| 5 | clojure | fullkit |
+| 6 | fsharp | fullkit |
+| 7 | ocaml | fullkit |
+| 8 | lisp | fullkit (Common Lisp) |
+| 9 | scheme | fullkit |
+| 10 | solidity | fullkit |
+| 11 | zig | fullkit |
+| 12 | nim | fullkit |
+| 13 | dlang | fullkit (D) |
+| 14 | cobol | fullkit |
+| 15 | ada | fullkit |
+| 16 | prolog | fullkit |
+| 17 | abap | fullkit |
+| 18 | vhdl | fullkit |
+| 19 | verilog | fullkit |
+| 20 | graphql | fullkit |
+
+Plus markup/data: json (deepest), url, html, xml, css, yaml, toml, markdown, mongo, bash, powershell, dart, scala, lua, perl, objectivec, julia, …
 
 ## Capability honesty
 

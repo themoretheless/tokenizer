@@ -333,6 +333,186 @@ export const LANGUAGE_CASES = {
       { name: 'empty', source: '', minTokens: 0 },
     ],
   },
+  groovy: {
+    modes: ['default'],
+    cases: [
+      { name: 'def', source: 'def f(x) { return x + 1 }\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '// c\ndef x = 1\n', expectKinds: ['comment'] },
+      { name: 'string', source: 's = "hi"\n', expectKinds: ['string'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  haskell: {
+    modes: ['default'],
+    cases: [
+      { name: 'fn', source: 'f x = x + 1\n', minTokens: 1 },
+      { name: 'comment', source: '-- c\nf = 1\n', expectKinds: ['comment'] },
+      { name: 'where', source: 'f = g where g = 1\n', expectKinds: ['keyword'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  elixir: {
+    modes: ['default'],
+    cases: [
+      { name: 'def', source: 'def f(x), do: x + 1\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '# c\nx = 1\n', expectKinds: ['comment'] },
+      { name: 'string', source: 's = "hi"\n', expectKinds: ['string'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  erlang: {
+    modes: ['default'],
+    cases: [
+      { name: 'fun', source: 'f(X) -> X + 1.\n', minTokens: 1 },
+      { name: 'comment', source: '% c\nX = 1.\n', expectKinds: ['comment'] },
+      { name: 'case', source: 'case X of 1 -> ok end.\n', expectKinds: ['keyword'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  clojure: {
+    modes: ['default'],
+    cases: [
+      { name: 'defn', source: '(defn f [x] (+ x 1))\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '; c\n(def x 1)\n', expectKinds: ['comment'] },
+      { name: 'string', source: '(def s "hi")\n', expectKinds: ['string'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  fsharp: {
+    modes: ['default'],
+    cases: [
+      { name: 'let', source: 'let f x = x + 1\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '// c\nlet x = 1\n', expectKinds: ['comment'] },
+      { name: 'string', source: 'let s = "hi"\n', expectKinds: ['string'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  ocaml: {
+    modes: ['default'],
+    cases: [
+      { name: 'let', source: 'let f x = x + 1\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '(* c *)\nlet x = 1\n', expectKinds: ['comment'] },
+      { name: 'string', source: 'let s = "hi"\n', expectKinds: ['string'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  lisp: {
+    modes: ['default'],
+    cases: [
+      { name: 'defun', source: '(defun f (x) (+ x 1))\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '; c\n(defvar x 1)\n', expectKinds: ['comment'] },
+      { name: 'string', source: '(setq s "hi")\n', expectKinds: ['string'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  scheme: {
+    modes: ['default'],
+    cases: [
+      { name: 'define', source: '(define (f x) (+ x 1))\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '; c\n(define x 1)\n', expectKinds: ['comment'] },
+      { name: 'string', source: '(define s "hi")\n', expectKinds: ['string'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  solidity: {
+    modes: ['default'],
+    cases: [
+      { name: 'contract', source: 'contract C { function f() public {} }\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '// c\nuint x;\n', expectKinds: ['comment'] },
+      { name: 'string', source: 'string s = "hi";\n', expectKinds: ['string'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  zig: {
+    modes: ['default'],
+    cases: [
+      { name: 'fn', source: 'pub fn main() void {}\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '// c\nconst x = 1;\n', expectKinds: ['comment'] },
+      { name: 'string', source: 'const s = "hi";\n', expectKinds: ['string'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  nim: {
+    modes: ['default'],
+    cases: [
+      { name: 'proc', source: 'proc f(x: int): int = x + 1\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '# c\nlet x = 1\n', expectKinds: ['comment'] },
+      { name: 'string', source: 'let s = "hi"\n', expectKinds: ['string'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  dlang: {
+    modes: ['default'],
+    cases: [
+      { name: 'fn', source: 'int f(int x) { return x + 1; }\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '// c\nint x = 1;\n', expectKinds: ['comment'] },
+      { name: 'string', source: 'string s = "hi";\n', expectKinds: ['string'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  cobol: {
+    modes: ['default'],
+    cases: [
+      { name: 'move', source: 'MOVE 1 TO X.\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '*> c\nDISPLAY Y.\n', expectKinds: ['comment'] },
+      { name: 'if', source: 'IF X = 1 THEN DISPLAY Y END-IF.\n', expectKinds: ['keyword'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  ada: {
+    modes: ['default'],
+    cases: [
+      { name: 'procedure', source: 'procedure Main is begin null; end Main;\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '-- c\nX : Integer := 1;\n', expectKinds: ['comment'] },
+      { name: 'string', source: 'S : String := "hi";\n', expectKinds: ['string'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  prolog: {
+    modes: ['default'],
+    cases: [
+      { name: 'rule', source: 'parent(X, Y) :- mother(X, Y).\n', minTokens: 1 },
+      { name: 'comment', source: '% c\ntrue.\n', expectKinds: ['comment'] },
+      { name: 'fail', source: 'fail.\n', expectKinds: ['keyword'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  abap: {
+    modes: ['default'],
+    cases: [
+      { name: 'if', source: 'IF x = 1.\n  WRITE y.\nENDIF.\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '" c\nDATA x TYPE i.\n', expectKinds: ['comment'] },
+      { name: 'data', source: 'DATA lv TYPE i.\n', expectKinds: ['keyword'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  vhdl: {
+    modes: ['default'],
+    cases: [
+      { name: 'entity', source: 'entity E is end entity;\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '-- c\nsignal x : bit;\n', expectKinds: ['comment'] },
+      { name: 'process', source: 'process begin wait; end process;\n', expectKinds: ['keyword'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  verilog: {
+    modes: ['default'],
+    cases: [
+      { name: 'module', source: 'module m; endmodule\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '// c\nwire x;\n', expectKinds: ['comment'] },
+      { name: 'always', source: 'always @(*) begin end\n', expectKinds: ['keyword'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
+  graphql: {
+    modes: ['default'],
+    cases: [
+      { name: 'query', source: 'query Q { user { id name } }\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '# c\ntype User { id: ID }\n', expectKinds: ['comment'] },
+      { name: 'type', source: 'type User { id: ID! }\n', expectKinds: ['keyword'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
 }
 
 /** Every language id that must be present in the WASM build. */

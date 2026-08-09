@@ -11,9 +11,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Full multi-language pipeline in `core::fullkit` (lex → recovering parse →
   shared AST → semantic tokens) for programming/data languages.
 - Full markup AST pipeline in `core::markup_full` for HTML/XML.
-- 35 language crates + feature groups `wave1`…`wave6`, `top20`, `all-languages`.
+- 55 language crates + feature groups `wave1`…`wave7`, `top20`, `next20`,
+  `all-languages`.
 - TIOBE-style top 20 as first-class `top20` feature (full engines).
+- Next 20 popular languages as `next20` / `wave7`: groovy, haskell, elixir,
+  erlang, clojure, fsharp, ocaml, lisp, scheme, solidity, zig, nim, dlang,
+  cobol, ada, prolog, abap, vhdl, verilog, graphql.
 - Docs: `docs/languages.md`.
+- Playground WASM case matrix covering every registered language id.
 
 ## [0.4.0] - 2026-08-08
 

@@ -51,6 +51,27 @@ LANGS = [
     ("objectivec", "Objective-C", ["objc", "objective-c"], [".m", ".mm", ".h"], ["text/x-objective-c"], "objectivec"),
     ("julia", "Julia", ["jl"], [".jl"], ["text/x-julia"], "julia"),
     ("assembly", "Assembly", ["asm", "nasm"], [".asm", ".s", ".S"], ["text/x-asm"], "assembly"),
+    # Wave 7 / next20 (TIOBE + GitHub next tier)
+    ("groovy", "Groovy", [], [".groovy", ".gvy", ".gy", ".gsh"], ["text/x-groovy"], "groovy"),
+    ("haskell", "Haskell", ["hs"], [".hs", ".lhs"], ["text/x-haskell"], "haskell"),
+    ("elixir", "Elixir", ["ex"], [".ex", ".exs"], ["text/x-elixir"], "elixir"),
+    ("erlang", "Erlang", ["erl"], [".erl", ".hrl"], ["text/x-erlang"], "erlang"),
+    ("clojure", "Clojure", ["clj"], [".clj", ".cljs", ".cljc", ".edn"], ["text/x-clojure"], "clojure"),
+    ("fsharp", "F#", ["fs", "f#"], [".fs", ".fsi", ".fsx", ".fsscript"], ["text/x-fsharp"], "fsharp"),
+    ("ocaml", "OCaml", ["ml"], [".ml", ".mli"], ["text/x-ocaml"], "ocaml"),
+    ("lisp", "Common Lisp", ["commonlisp", "cl"], [".lisp", ".lsp", ".cl", ".asd"], ["text/x-common-lisp"], "lisp"),
+    ("scheme", "Scheme", [], [".scm", ".ss", ".rkt"], ["text/x-scheme"], "scheme"),
+    ("solidity", "Solidity", ["sol"], [".sol"], ["text/x-solidity"], "solidity"),
+    ("zig", "Zig", [], [".zig"], ["text/x-zig"], "zig"),
+    ("nim", "Nim", [], [".nim", ".nims"], ["text/x-nim"], "nim"),
+    ("dlang", "D", ["d"], [".d", ".di"], ["text/x-d"], "dlang"),
+    ("cobol", "COBOL", [], [".cob", ".cbl", ".cpy"], ["text/x-cobol"], "cobol"),
+    ("ada", "Ada", [], [".adb", ".ads", ".ada"], ["text/x-ada"], "ada"),
+    ("prolog", "Prolog", [], [".pl", ".pro", ".P"], ["text/x-prolog"], "prolog"),
+    ("abap", "ABAP", [], [".abap", ".ab4"], ["text/x-abap"], "abap"),
+    ("vhdl", "VHDL", [], [".vhd", ".vhdl"], ["text/x-vhdl"], "vhdl"),
+    ("verilog", "Verilog", ["systemverilog", "sv"], [".v", ".vh", ".sv", ".svh"], ["text/x-verilog"], "verilog"),
+    ("graphql", "GraphQL", ["gql"], [".graphql", ".gql"], ["application/graphql"], "graphql"),
 ]
 
 KEYWORDS = {
@@ -87,6 +108,26 @@ KEYWORDS = {
     "objectivec": "if else switch case default while for do break continue return goto sizeof typedef self super nil Nil YES NO id Class SEL IMP BOOL void int char float double long short signed unsigned const static extern volatile register inline restrict auto _Bool _Complex _Imaginary @interface @implementation @protocol @end @property @synthesize @dynamic @selector @encode @defs @class @try @catch @finally @throw @synchronized @autoreleasepool @import strong weak copy assign nonatomic atomic readonly readwrite retain",
     "julia": "baremodule begin break catch const continue do else elseif end export false finally for function global if import in isa let local macro module quote return struct true try using while where abstract primitive type mutable",
     "assembly": "section global extern db dw dd dq resb resw resd resq equ times bits use16 use32 use64 org mov add sub mul div push pop call ret jmp je jne jl jg jle jge ja jb jae jbe jz jnz loop cmp test and or xor not shl shr lea nop int syscall",
+    "groovy": "as assert break case catch class const continue def default do else enum extends false finally for goto if implements import in instanceof interface new null package return super switch this throw throws trait true try while yield abstract final private protected public static synchronized volatile strictfp native transient",
+    "haskell": "case class data default deriving do else if import in infix infixl infixr instance let module newtype of then type where foreign mdo proc rec qualified as hiding",
+    "elixir": "after alias and case catch cond def defdelegate defexception defguard defguardp defimpl defmacro defmacrop defmodule defoverridable defp defprotocol defstruct destructure else end false fn for if import in nil not or quote raise receive require rescue super then true try unless unquote unquote_splicing use when with",
+    "erlang": "after and andalso band begin bnot bor bsl bsr bxor case catch cond div end fun if let not of or orelse query receive rem try when xor true false",
+    "clojure": "def defn defn- defmacro defmulti defmethod defprotocol defrecord deftype defstruct ns if do let loop recur fn quote var defonce declare import require use refer alias in-ns if-not when when-not when-let if-let cond case try catch finally throw and or not true false nil",
+    "fsharp": "abstract and as assert base begin class default delegate do done downcast downto elif else end exception extern false finally for fun function global if in inherit inline interface internal lazy let match member module mutable namespace new not null of open or override private public rec return static struct then to true try type upcast use val void when while with yield async await",
+    "ocaml": "and as assert asr begin class constraint do done downto else end exception external false for fun function functor if in include inherit initializer land lazy let lor lsl lsr lxor match method mod module mutable new nonrec object of open or private rec sig struct then to true try type val virtual when while with",
+    "lisp": "defun defmacro defvar defparameter defconstant defclass defmethod defgeneric lambda if when unless cond case ecase typecase let let star flet labels progn prog1 prog2 block return return-from tagbody go catch throw unwind-protect multiple-value-bind values quote function setq setf push pop and or not t nil loop do dolist dotimes",
+    "scheme": "define define-syntax lambda if cond case and or not begin let let star letrec do delay force quote quasiquote unquote unquote-splicing set! car cdr cons list pair? null? eq? eqv? equal? #t #f else",
+    "solidity": "pragma contract interface library abstract is using for struct enum mapping function modifier event error constructor fallback receive if else for while do break continue return throw emit try catch public private internal external view pure payable virtual override immutable constant anonymous indexed memory storage calldata true false address bool string bytes uint int",
+    "zig": "addrspace align allowzero and anyframe anytype asm async await break callconv catch comptime const continue defer else enum errdefer error export extern fn for if inline linksection noalias nosuspend opaque or orelse packed pub resume return struct suspend switch test threadlocal try union unreachable usingnamespace var volatile while true false null undefined",
+    "nim": "addr and as asm bind block break case cast concept const continue converter defer discard distinct div do elif else end enum except export finally for from func if import in include interface is isnot iterator let macro method mixin mod nil not notin object of or out proc ptr raise ref return shl shr static template try tuple type using var when while xor yield true false",
+    "dlang": "abstract alias align asm assert auto body bool break byte case cast catch cdouble cent cfloat char class const continue creal dchar debug default delegate delete deprecated do double else enum export extern false final finally float for foreach foreach_reverse function goto idouble if ifloat immutable import in inout int interface invariant ireal is lazy long macro mixin module new nothrow null out override package pragma private protected public pure real ref return scope shared short static struct super switch synchronized template this throw true try typedef typeid typeof ubyte ucent uint ulong union unittest ushort version void volatile wchar while with",
+    "cobol": "ACCEPT ADD ALTER CALL CANCEL CLOSE COMPUTE CONTINUE DELETE DISPLAY DIVIDE ELSE END EVALUATE EXIT GO GOBACK IF INITIALIZE INSPECT MERGE MOVE MULTIPLY OPEN PERFORM READ RELEASE RETURN REWRITE SEARCH SET SORT START STOP STRING SUBTRACT UNSTRING WRITE WORKING-STORAGE SECTION DIVISION PROGRAM-ID IDENTIFICATION ENVIRONMENT DATA PROCEDURE AUTHOR DATE-WRITTEN",
+    "ada": "abort abs abstract accept access aliased all and array at begin body case constant declare delay delta digits do else elsif end entry exception exit for function generic goto if in interface is limited loop mod new not null of or others out overriding package pragma private procedure protected raise range record rem renames requeue return reverse select separate some subtype synchronized tagged task terminate then type until use when while with xor true false",
+    "prolog": "is mod rem div not fail true false once repeat forall between member append length reverse sort keysort findall bagof setof assert asserta assertz retract retractall clause abolish dynamic multifile discontiguous public op current_predicate",
+    "abap": "DATA TYPES CONSTANTS TABLES PARAMETERS SELECT-OPTIONS RANGES FIELD-SYMBOLS IF ELSE ELSEIF ENDIF CASE WHEN ENDCASE DO ENDDO WHILE ENDWHILE LOOP ENDLOOP EXIT CONTINUE CHECK RETURN FORM ENDFORM PERFORM FUNCTION ENDFUNCTION MODULE ENDMODULE CLASS ENDCLASS METHOD ENDMETHOD INTERFACE ENDINTERFACE TRY CATCH CLEANUP ENDTRY RAISE WRITE MOVE CLEAR REFRESH APPEND INSERT DELETE MODIFY READ SELECT ENDSELECT UPDATE INSERT FROM INTO WHERE AND OR NOT EQ NE LT GT LE GE",
+    "vhdl": "abs access after alias all and architecture array assert attribute begin block body buffer bus case component configuration constant disconnect downto else elsif end entity exit file for function generate generic group guarded if impure in inertial inout is label library linkage literal loop map mod nand new next nor not null of on open or others out package port postponed procedure process pure range record register reject rem report return rol ror select severity shared signal sla sll sra srl subtype then to transport type unaffected units until use variable wait when while with xnor xor true false",
+    "verilog": "always always_comb always_ff always_latch and assign automatic begin buf bufif0 bufif1 case casex casez cell cmos config deassign default defparam design disable edge else end endcase endconfig endfunction endgenerate endmodule endprimitive endspecify endtable endtask event for force forever fork function generate genvar highz0 highz1 if ifnone initial inout input integer join large macromodule medium module nand negedge nmos nor noshowcancelled not notif0 notif1 or output parameter pmos posedge primitive pull0 pull1 pullup pulldown pulsestyle_ondetect pulsestyle_onevent rcmos real realtime reg release repeat rnmos rpmos rtran rtranif0 rtranif1 scalared showcancelled signed small specify specparam strong0 strong1 supply0 supply1 table task time tran tranif0 tranif1 tri tri0 tri1 triand trior trireg unsigned use uwire vectored wait wand weak0 weak1 while wire wor xnor xor",
+    "graphql": "query mutation subscription schema type interface union enum input extend implements fragment on scalar true false null directive repeatable",
 }
 
 TYPES = {
@@ -101,6 +142,16 @@ TYPES = {
     "dart": "int double num bool String List Map Set Object void",
     "go": "int int8 int16 int32 int64 uint string bool byte rune float32 float64 error",
     "php": "int float string bool array object void mixed",
+    "solidity": "address bool string bytes byte int uint int8 int16 int32 int64 int128 int256 uint8 uint16 uint32 uint64 uint128 uint256 bytes1 bytes32 fixed ufixed",
+    "zig": "i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 isize usize f16 f32 f64 f128 bool void noreturn type anyerror anyframe anyopaque comptime_int comptime_float",
+    "nim": "int int8 int16 int32 int64 uint uint8 uint16 uint32 uint64 float float32 float64 bool char string cstring pointer",
+    "dlang": "bool byte ubyte short ushort int uint long ulong cent ucent float double real char wchar dchar void",
+    "fsharp": "int int16 int32 int64 uint uint16 uint32 uint64 float float32 double decimal bool byte sbyte char string unit option list array seq",
+    "ocaml": "int float bool char string unit list option array ref",
+    "ada": "Integer Natural Positive Float Boolean Character String Duration",
+    "vhdl": "std_logic std_logic_vector signed unsigned integer natural positive boolean bit bit_vector real time",
+    "verilog": "wire reg logic integer real time realtime",
+    "graphql": "Int Float String Boolean ID",
 }
 
 def kw_list(s: str) -> str:
@@ -199,6 +250,11 @@ def lang_const(lid: str) -> str:
         "visualbasic": "VISUALBASIC", "fortran": "FORTRAN", "matlab": "MATLAB",
         "delphi": "DELPHI", "scala": "SCALA", "lua": "LUA", "perl": "PERL",
         "objectivec": "OBJECTIVEC", "julia": "JULIA", "assembly": "ASSEMBLY",
+        "groovy": "GROOVY", "haskell": "HASKELL", "elixir": "ELIXIR", "erlang": "ERLANG",
+        "clojure": "CLOJURE", "fsharp": "FSHARP", "ocaml": "OCAML", "lisp": "LISP",
+        "scheme": "SCHEME", "solidity": "SOLIDITY", "zig": "ZIG", "nim": "NIM",
+        "dlang": "DLANG", "cobol": "COBOL", "ada": "ADA", "prolog": "PROLOG",
+        "abap": "ABAP", "vhdl": "VHDL", "verilog": "VERILOG", "graphql": "GRAPHQL",
     }
     return mapping[lid]
 
@@ -208,6 +264,9 @@ FULL_MODES = {
     "dart", "r", "bash", "yaml", "toml", "css", "markdown",
     "visualbasic", "fortran", "matlab", "delphi", "scala", "lua", "perl",
     "objectivec", "julia", "assembly",
+    "groovy", "haskell", "elixir", "erlang", "clojure", "fsharp", "ocaml", "lisp",
+    "scheme", "solidity", "zig", "nim", "dlang", "cobol", "ada", "prolog",
+    "abap", "vhdl", "verilog", "graphql",
 }
 
 def full_profile_body(mode: str, lid: str) -> str:
@@ -283,6 +342,66 @@ def full_profile_body(mode: str, lid: str) -> str:
     elif mode == "objectivec":
         line = 'Some("//")'
         block = 'Some(("/*", "*/"))'
+    elif mode == "groovy":
+        line = 'Some("//")'
+        block = 'Some(("/*", "*/"))'
+        dollar = "true"
+    elif mode == "haskell":
+        line = 'Some("--")'
+        block = 'Some(("{-", "-}"))'
+    elif mode == "elixir":
+        line = "None"
+        block = "None"
+        hash_c = "true"
+    elif mode == "erlang":
+        line = 'Some("%")'
+        block = "None"
+    elif mode == "clojure":
+        line = 'Some(";")'
+        block = "None"
+    elif mode == "fsharp":
+        line = 'Some("//")'
+        block = 'Some(("(*", "*)"))'
+    elif mode == "ocaml":
+        line = "None"
+        block = 'Some(("(*", "*)"))'
+    elif mode in ("lisp", "scheme"):
+        line = 'Some(";")'
+        block = "None"
+    elif mode == "solidity":
+        line = 'Some("//")'
+        block = 'Some(("/*", "*/"))'
+    elif mode == "zig":
+        line = 'Some("//")'
+        block = 'Some(("/*", "*/"))'
+    elif mode == "nim":
+        line = 'Some("#")'
+        block = 'Some(("#[", "]#"))'
+    elif mode == "dlang":
+        line = 'Some("//")'
+        block = 'Some(("/*", "*/"))'
+    elif mode == "cobol":
+        line = 'Some("*>")'
+        block = "None"
+    elif mode == "ada":
+        line = 'Some("--")'
+        block = "None"
+    elif mode == "prolog":
+        line = 'Some("%")'
+        block = 'Some(("/*", "*/"))'
+    elif mode == "abap":
+        line = 'Some("\\"")'
+        block = "None"
+    elif mode == "vhdl":
+        line = 'Some("--")'
+        block = "None"
+    elif mode == "verilog":
+        line = 'Some("//")'
+        block = 'Some(("/*", "*/"))'
+    elif mode == "graphql":
+        line = "None"
+        block = "None"
+        hash_c = "true"
     return f"""    FullProfile {{
         keywords: &[{kw_list(kws)}],
         types: &[{kw_list(types)}],

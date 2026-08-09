@@ -9,7 +9,22 @@ button, textarea { font: inherit; } button { color: inherit; }
 h1 { margin: 0; font-size: clamp(28px, 4vw, 48px); letter-spacing: -.06em; line-height: .95; } h1 i { color: var(--muted); font-weight: 400; }
 .status { display: flex; gap: 9px; align-items: center; color: var(--cyan); font: 500 11px ui-monospace, 'SFMono-Regular', Consolas, monospace; } .status.bad { color: var(--orange); }
 .pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 15px currentColor; }
-.controls { min-height: 72px; display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+.controls { min-height: 72px; display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.lang-select { display: flex; flex-direction: column; gap: 6px; min-width: min(280px, 100%); }
+.lang-select span { font: 500 10px/1.2 ui-monospace, 'SFMono-Regular', Consolas, monospace; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; }
+.lang-select select {
+  appearance: none;
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #151b1f url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%237c8a91' d='M1 1l5 5 5-5'/%3E%3C/svg%3E") no-repeat right 12px center;
+  color: #dfe7ec;
+  padding: 10px 36px 10px 12px;
+  font: 500 12px ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  outline: none;
+  cursor: pointer;
+}
+.lang-select select:focus { border-color: var(--cyan); box-shadow: 0 0 0 1px #4ee1c133; }
+.lang-select option { background: #151b1f; color: #dfe7ec; }
 .segmented { display: flex; padding: 3px; background: #151b1f; border: 1px solid var(--line); }
 .segmented button, .examples button { border: 0; background: transparent; cursor: pointer; font: 500 11px ui-monospace, 'SFMono-Regular', Consolas, monospace; padding: 8px 12px; color: var(--muted); }
 .segmented button.selected { color: #07100e; background: var(--cyan); }
@@ -21,9 +36,13 @@ h1 { margin: 0; font-size: clamp(28px, 4vw, 48px); letter-spacing: -.06em; line-
 .output-panel { position: relative; overflow: hidden; }
 .highlight { margin: 0; height: 360px; overflow: auto; padding: 22px; white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.75 ui-monospace, 'SFMono-Regular', Consolas, monospace; }
 .token { border-radius: 2px; transition: background .1s, box-shadow .1s; cursor: default; } .token.active { background: #ffffff18; box-shadow: 0 0 0 1px #ffffff2b; }
-.token-property { color: #75e9d0; } .token-string { color: #f5cf8d; } .token-number { color: #bda6ff; } .token-boolean, .token-null, .token-true, .token-false { color: #ff9d66; } .token-comment, .token-line-comment, .token-block-comment { color: #66757d; font-style: italic; }
+.token-property { color: #75e9d0; } .token-string { color: #f5cf8d; } .token-number { color: #bda6ff; } .token-boolean, .token-null, .token-true, .token-false, .token-keyword { color: #ff9d66; } .token-comment, .token-line-comment, .token-block-comment { color: #66757d; font-style: italic; }
+.token-type, .token-class, .token-function, .token-tag { color: #75e9d0; } .token-identifier, .token-attribute, .token-text { color: #dfe7ec; }
+.token-operator { color: #bda6ff; }
+.token-u-scheme, .token-u-host, .token-u-path, .token-u-query, .token-u-fragment, .token-u-userinfo, .token-u-port { color: #75e9d0; }
 .token-punctuation, .token-left-brace, .token-right-brace, .token-left-bracket, .token-right-bracket, .token-comma, .token-colon { color: #93a0a7; }
 .token-invalid, .token-error { color: var(--red); text-decoration: underline wavy; text-decoration-thickness: 1px; } .token-whitespace, .token-bom { color: inherit; }
+.bg-keyword, .bg-type, .bg-tag, .bg-function, .bg-class { background: var(--orange); } .bg-identifier { background: #859299; } .bg-operator { background: var(--violet); }
 .inspector { position: absolute; right: 14px; bottom: 12px; display: flex; gap: 10px; background: #090d0fee; border: 1px solid var(--line); padding: 7px 10px; font: 10px ui-monospace, 'SFMono-Regular', Consolas, monospace; color: var(--muted); } .inspector b { color: var(--cyan); } .inspector code { color: #dfe7ec; }
 .bridge-error { color: var(--red); border: 1px solid #6d2c38; padding: 10px 14px; font: 12px ui-monospace, 'SFMono-Regular', Consolas, monospace; }
 .lower-grid { margin-top: 14px; grid-template-columns: 1.35fr .65fr; }

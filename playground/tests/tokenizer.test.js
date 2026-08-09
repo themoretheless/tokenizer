@@ -121,7 +121,7 @@ for (const language of ALL_LANGUAGE_IDS) {
 // ─── Cross-cutting ──────────────────────────────────────────────────────────
 
 test('catalog covers every expected language id', () => {
-  // Keep in sync with facade all-languages registry (json+url+35 plugins).
+  // Keep in sync with facade all-languages registry (json+url+55 plugins).
   const expected = [
     'json',
     'url',
@@ -160,6 +160,26 @@ test('catalog covers every expected language id', () => {
     'objectivec',
     'julia',
     'assembly',
+    'groovy',
+    'haskell',
+    'elixir',
+    'erlang',
+    'clojure',
+    'fsharp',
+    'ocaml',
+    'lisp',
+    'scheme',
+    'solidity',
+    'zig',
+    'nim',
+    'dlang',
+    'cobol',
+    'ada',
+    'prolog',
+    'abap',
+    'vhdl',
+    'verilog',
+    'graphql',
   ]
   assert.deepEqual([...ALL_LANGUAGE_IDS].sort(), [...expected].sort())
 })

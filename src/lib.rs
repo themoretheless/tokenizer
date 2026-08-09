@@ -87,6 +87,46 @@ pub use themoretheless_tokenizer_objectivec as objectivec;
 pub use themoretheless_tokenizer_julia as julia;
 #[cfg(feature = "assembly")]
 pub use themoretheless_tokenizer_assembly as assembly;
+#[cfg(feature = "groovy")]
+pub use themoretheless_tokenizer_groovy as groovy;
+#[cfg(feature = "haskell")]
+pub use themoretheless_tokenizer_haskell as haskell;
+#[cfg(feature = "elixir")]
+pub use themoretheless_tokenizer_elixir as elixir;
+#[cfg(feature = "erlang")]
+pub use themoretheless_tokenizer_erlang as erlang;
+#[cfg(feature = "clojure")]
+pub use themoretheless_tokenizer_clojure as clojure;
+#[cfg(feature = "fsharp")]
+pub use themoretheless_tokenizer_fsharp as fsharp;
+#[cfg(feature = "ocaml")]
+pub use themoretheless_tokenizer_ocaml as ocaml;
+#[cfg(feature = "lisp")]
+pub use themoretheless_tokenizer_lisp as lisp;
+#[cfg(feature = "scheme")]
+pub use themoretheless_tokenizer_scheme as scheme;
+#[cfg(feature = "solidity")]
+pub use themoretheless_tokenizer_solidity as solidity;
+#[cfg(feature = "zig")]
+pub use themoretheless_tokenizer_zig as zig;
+#[cfg(feature = "nim")]
+pub use themoretheless_tokenizer_nim as nim;
+#[cfg(feature = "dlang")]
+pub use themoretheless_tokenizer_dlang as dlang;
+#[cfg(feature = "cobol")]
+pub use themoretheless_tokenizer_cobol as cobol;
+#[cfg(feature = "ada")]
+pub use themoretheless_tokenizer_ada as ada;
+#[cfg(feature = "prolog")]
+pub use themoretheless_tokenizer_prolog as prolog;
+#[cfg(feature = "abap")]
+pub use themoretheless_tokenizer_abap as abap;
+#[cfg(feature = "vhdl")]
+pub use themoretheless_tokenizer_vhdl as vhdl;
+#[cfg(feature = "verilog")]
+pub use themoretheless_tokenizer_verilog as verilog;
+#[cfg(feature = "graphql")]
+pub use themoretheless_tokenizer_graphql as graphql;
 
 pub mod api;
 pub mod plugins;

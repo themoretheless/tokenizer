@@ -125,44 +125,78 @@ name = "themoretheless-tokenizer"
 version = "0.4.0"
 dependencies = [
  "serde_json",
+ "themoretheless-tokenizer-abap",
+ "themoretheless-tokenizer-ada",
  "themoretheless-tokenizer-assembly",
  "themoretheless-tokenizer-bash",
  "themoretheless-tokenizer-c",
+ "themoretheless-tokenizer-clojure",
+ "themoretheless-tokenizer-cobol",
  "themoretheless-tokenizer-core",
  "themoretheless-tokenizer-cpp",
  "themoretheless-tokenizer-csharp",
  "themoretheless-tokenizer-css",
  "themoretheless-tokenizer-dart",
  "themoretheless-tokenizer-delphi",
+ "themoretheless-tokenizer-dlang",
+ "themoretheless-tokenizer-elixir",
+ "themoretheless-tokenizer-erlang",
  "themoretheless-tokenizer-fortran",
+ "themoretheless-tokenizer-fsharp",
  "themoretheless-tokenizer-go",
+ "themoretheless-tokenizer-graphql",
+ "themoretheless-tokenizer-groovy",
+ "themoretheless-tokenizer-haskell",
  "themoretheless-tokenizer-html",
  "themoretheless-tokenizer-java",
  "themoretheless-tokenizer-javascript",
  "themoretheless-tokenizer-json",
  "themoretheless-tokenizer-julia",
  "themoretheless-tokenizer-kotlin",
+ "themoretheless-tokenizer-lisp",
  "themoretheless-tokenizer-lua",
  "themoretheless-tokenizer-markdown",
  "themoretheless-tokenizer-matlab",
  "themoretheless-tokenizer-mongo",
+ "themoretheless-tokenizer-nim",
  "themoretheless-tokenizer-objectivec",
+ "themoretheless-tokenizer-ocaml",
  "themoretheless-tokenizer-perl",
  "themoretheless-tokenizer-php",
  "themoretheless-tokenizer-powershell",
+ "themoretheless-tokenizer-prolog",
  "themoretheless-tokenizer-python",
  "themoretheless-tokenizer-r",
  "themoretheless-tokenizer-ruby",
  "themoretheless-tokenizer-rust",
  "themoretheless-tokenizer-scala",
+ "themoretheless-tokenizer-scheme",
+ "themoretheless-tokenizer-solidity",
  "themoretheless-tokenizer-sql",
  "themoretheless-tokenizer-swift",
  "themoretheless-tokenizer-toml",
  "themoretheless-tokenizer-typescript",
  "themoretheless-tokenizer-url",
+ "themoretheless-tokenizer-verilog",
+ "themoretheless-tokenizer-vhdl",
  "themoretheless-tokenizer-visualbasic",
  "themoretheless-tokenizer-xml",
  "themoretheless-tokenizer-yaml",
+ "themoretheless-tokenizer-zig",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-abap"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-ada"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
 ]
 
 [[package]]
@@ -181,6 +215,20 @@ dependencies = [
 
 [[package]]
 name = "themoretheless-tokenizer-c"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-clojure"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-cobol"
 version = "0.4.0"
 dependencies = [
  "themoretheless-tokenizer-core",
@@ -226,6 +274,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "themoretheless-tokenizer-dlang"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-elixir"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-erlang"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
 name = "themoretheless-tokenizer-fortran"
 version = "0.4.0"
 dependencies = [
@@ -233,7 +302,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "themoretheless-tokenizer-fsharp"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
 name = "themoretheless-tokenizer-go"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-graphql"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-groovy"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-haskell"
 version = "0.4.0"
 dependencies = [
  "themoretheless-tokenizer-core",
@@ -282,6 +379,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "themoretheless-tokenizer-lisp"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
 name = "themoretheless-tokenizer-lua"
 version = "0.4.0"
 dependencies = [
@@ -310,7 +414,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "themoretheless-tokenizer-nim"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
 name = "themoretheless-tokenizer-objectivec"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-ocaml"
 version = "0.4.0"
 dependencies = [
  "themoretheless-tokenizer-core",
@@ -332,6 +450,13 @@ dependencies = [
 
 [[package]]
 name = "themoretheless-tokenizer-powershell"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-prolog"
 version = "0.4.0"
 dependencies = [
  "themoretheless-tokenizer-core",
@@ -373,6 +498,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "themoretheless-tokenizer-scheme"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-solidity"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
 name = "themoretheless-tokenizer-sql"
 version = "0.4.0"
 dependencies = [
@@ -408,6 +547,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "themoretheless-tokenizer-verilog"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-vhdl"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
 name = "themoretheless-tokenizer-visualbasic"
 version = "0.4.0"
 dependencies = [
@@ -423,6 +576,13 @@ dependencies = [
 
 [[package]]
 name = "themoretheless-tokenizer-yaml"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-zig"
 version = "0.4.0"
 dependencies = [
  "themoretheless-tokenizer-core",

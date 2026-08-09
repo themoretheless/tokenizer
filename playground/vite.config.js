@@ -7,7 +7,25 @@ const repositoryRoot = fileURLToPath(new URL('..', import.meta.url))
 
 function tokenize(source, language, mode, layer) {
   return new Promise((resolve, reject) => {
-    const child = spawn('cargo', ['run', '--quiet', '--features', 'web-bridge', '--bin', 'tokenizer-web-bridge', '--', '--language', language, '--mode', mode, '--layer', layer], { cwd: repositoryRoot, stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(
+      'cargo',
+      [
+        'run',
+        '--quiet',
+        '--features',
+        'web-bridge,all-languages',
+        '--bin',
+        'tokenizer-web-bridge',
+        '--',
+        '--language',
+        language,
+        '--mode',
+        mode,
+        '--layer',
+        layer,
+      ],
+      { cwd: repositoryRoot, stdio: ['pipe', 'pipe', 'pipe'] },
+    )
     let stdout = ''
     let stderr = ''
     child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk })
@@ -34,10 +52,16 @@ function rustBridge() {
         try {
           const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'))
           const source = typeof payload.source === 'string' ? payload.source : ''
-          const language = payload.language === 'url' ? 'url' : 'json'
-          const mode = language === 'url'
-            ? 'default'
-            : payload.mode === 'jsonc' ? 'jsonc' : 'strict'
+          const language =
+            typeof payload.language === 'string' && payload.language.trim()
+              ? payload.language.trim()
+              : 'json'
+          const mode =
+            typeof payload.mode === 'string' && payload.mode.trim()
+              ? payload.mode.trim()
+              : language === 'json'
+                ? 'strict'
+                : 'default'
           const layer = payload.layer === 'syntax' ? 'syntax' : 'semantic'
           const result = await tokenize(source, language, mode, layer)
           response.setHeader('content-type', 'application/json; charset=utf-8')
