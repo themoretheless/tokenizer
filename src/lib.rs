@@ -17,6 +17,77 @@ pub use themoretheless_tokenizer_json as json;
 #[cfg(feature = "url")]
 pub use themoretheless_tokenizer_url as url;
 
+#[cfg(feature = "xml")]
+pub use themoretheless_tokenizer_xml as xml;
+#[cfg(feature = "html")]
+pub use themoretheless_tokenizer_html as html;
+#[cfg(feature = "css")]
+pub use themoretheless_tokenizer_css as css;
+#[cfg(feature = "yaml")]
+pub use themoretheless_tokenizer_yaml as yaml;
+#[cfg(feature = "toml")]
+pub use themoretheless_tokenizer_toml as toml;
+#[cfg(feature = "markdown")]
+pub use themoretheless_tokenizer_markdown as markdown;
+#[cfg(feature = "sql")]
+pub use themoretheless_tokenizer_sql as sql;
+#[cfg(feature = "mongo")]
+pub use themoretheless_tokenizer_mongo as mongo;
+#[cfg(feature = "bash")]
+pub use themoretheless_tokenizer_bash as bash;
+#[cfg(feature = "powershell")]
+pub use themoretheless_tokenizer_powershell as powershell;
+#[cfg(feature = "javascript")]
+pub use themoretheless_tokenizer_javascript as javascript;
+#[cfg(feature = "typescript")]
+pub use themoretheless_tokenizer_typescript as typescript;
+#[cfg(feature = "python")]
+pub use themoretheless_tokenizer_python as python;
+#[cfg(feature = "java")]
+pub use themoretheless_tokenizer_java as java;
+#[cfg(feature = "csharp")]
+pub use themoretheless_tokenizer_csharp as csharp;
+#[cfg(feature = "go")]
+pub use themoretheless_tokenizer_go as go;
+#[cfg(feature = "php")]
+pub use themoretheless_tokenizer_php as php;
+#[cfg(feature = "ruby")]
+pub use themoretheless_tokenizer_ruby as ruby;
+#[cfg(feature = "c")]
+pub use themoretheless_tokenizer_c as c;
+#[cfg(feature = "cpp")]
+pub use themoretheless_tokenizer_cpp as cpp;
+#[cfg(feature = "rust")]
+pub use themoretheless_tokenizer_rust as rust;
+#[cfg(feature = "kotlin")]
+pub use themoretheless_tokenizer_kotlin as kotlin;
+#[cfg(feature = "swift")]
+pub use themoretheless_tokenizer_swift as swift;
+#[cfg(feature = "dart")]
+pub use themoretheless_tokenizer_dart as dart;
+#[cfg(feature = "r")]
+pub use themoretheless_tokenizer_r as r;
+#[cfg(feature = "visualbasic")]
+pub use themoretheless_tokenizer_visualbasic as visualbasic;
+#[cfg(feature = "fortran")]
+pub use themoretheless_tokenizer_fortran as fortran;
+#[cfg(feature = "matlab")]
+pub use themoretheless_tokenizer_matlab as matlab;
+#[cfg(feature = "delphi")]
+pub use themoretheless_tokenizer_delphi as delphi;
+#[cfg(feature = "scala")]
+pub use themoretheless_tokenizer_scala as scala;
+#[cfg(feature = "lua")]
+pub use themoretheless_tokenizer_lua as lua;
+#[cfg(feature = "perl")]
+pub use themoretheless_tokenizer_perl as perl;
+#[cfg(feature = "objectivec")]
+pub use themoretheless_tokenizer_objectivec as objectivec;
+#[cfg(feature = "julia")]
+pub use themoretheless_tokenizer_julia as julia;
+#[cfg(feature = "assembly")]
+pub use themoretheless_tokenizer_assembly as assembly;
+
 pub mod api;
 pub mod plugins;
 

@@ -172,6 +172,14 @@ mod url_host {
         ) -> Result<HostTokenization, HostError> {
             let _ = self.resolve_dialect(opts.dialect.as_ref())?;
             let result = tokenize(source);
+            let mut diagnostics: Vec<HostDiagnostic> = result
+                .diagnostics
+                .iter()
+                .map(|diagnostic| HostDiagnostic::from_diagnostic(*diagnostic))
+                .collect();
+            for diagnostic in validate(source) {
+                diagnostics.push(HostDiagnostic::from_diagnostic(diagnostic));
+            }
             let tokens = result
                 .tokens
                 .iter()
@@ -181,15 +189,10 @@ mod url_host {
                     error: false,
                 })
                 .collect();
-            let diagnostics = result
-                .diagnostics
-                .iter()
-                .map(|diagnostic| HostDiagnostic::from_diagnostic(*diagnostic))
-                .collect();
             Ok(HostTokenization {
                 tokens,
+                valid: diagnostics.is_empty(),
                 diagnostics,
-                valid: result.diagnostics.is_empty(),
             })
         }
 
@@ -227,6 +230,146 @@ pub fn register_builtins(
     #[cfg(feature = "url")]
     {
         builder.register(&url_host::ENGINE)?;
+    }
+    #[cfg(feature = "xml")]
+    {
+        builder.register(&themoretheless_tokenizer_xml::ENGINE)?;
+    }
+    #[cfg(feature = "html")]
+    {
+        builder.register(&themoretheless_tokenizer_html::ENGINE)?;
+    }
+    #[cfg(feature = "css")]
+    {
+        builder.register(&themoretheless_tokenizer_css::ENGINE)?;
+    }
+    #[cfg(feature = "yaml")]
+    {
+        builder.register(&themoretheless_tokenizer_yaml::ENGINE)?;
+    }
+    #[cfg(feature = "toml")]
+    {
+        builder.register(&themoretheless_tokenizer_toml::ENGINE)?;
+    }
+    #[cfg(feature = "markdown")]
+    {
+        builder.register(&themoretheless_tokenizer_markdown::ENGINE)?;
+    }
+    #[cfg(feature = "sql")]
+    {
+        builder.register(&themoretheless_tokenizer_sql::ENGINE)?;
+    }
+    #[cfg(feature = "mongo")]
+    {
+        builder.register(&themoretheless_tokenizer_mongo::ENGINE)?;
+    }
+    #[cfg(feature = "bash")]
+    {
+        builder.register(&themoretheless_tokenizer_bash::ENGINE)?;
+    }
+    #[cfg(feature = "powershell")]
+    {
+        builder.register(&themoretheless_tokenizer_powershell::ENGINE)?;
+    }
+    #[cfg(feature = "javascript")]
+    {
+        builder.register(&themoretheless_tokenizer_javascript::ENGINE)?;
+    }
+    #[cfg(feature = "typescript")]
+    {
+        builder.register(&themoretheless_tokenizer_typescript::ENGINE)?;
+    }
+    #[cfg(feature = "python")]
+    {
+        builder.register(&themoretheless_tokenizer_python::ENGINE)?;
+    }
+    #[cfg(feature = "java")]
+    {
+        builder.register(&themoretheless_tokenizer_java::ENGINE)?;
+    }
+    #[cfg(feature = "csharp")]
+    {
+        builder.register(&themoretheless_tokenizer_csharp::ENGINE)?;
+    }
+    #[cfg(feature = "go")]
+    {
+        builder.register(&themoretheless_tokenizer_go::ENGINE)?;
+    }
+    #[cfg(feature = "php")]
+    {
+        builder.register(&themoretheless_tokenizer_php::ENGINE)?;
+    }
+    #[cfg(feature = "ruby")]
+    {
+        builder.register(&themoretheless_tokenizer_ruby::ENGINE)?;
+    }
+    #[cfg(feature = "c")]
+    {
+        builder.register(&themoretheless_tokenizer_c::ENGINE)?;
+    }
+    #[cfg(feature = "cpp")]
+    {
+        builder.register(&themoretheless_tokenizer_cpp::ENGINE)?;
+    }
+    #[cfg(feature = "rust")]
+    {
+        builder.register(&themoretheless_tokenizer_rust::ENGINE)?;
+    }
+    #[cfg(feature = "kotlin")]
+    {
+        builder.register(&themoretheless_tokenizer_kotlin::ENGINE)?;
+    }
+    #[cfg(feature = "swift")]
+    {
+        builder.register(&themoretheless_tokenizer_swift::ENGINE)?;
+    }
+    #[cfg(feature = "dart")]
+    {
+        builder.register(&themoretheless_tokenizer_dart::ENGINE)?;
+    }
+    #[cfg(feature = "r")]
+    {
+        builder.register(&themoretheless_tokenizer_r::ENGINE)?;
+    }
+    #[cfg(feature = "visualbasic")]
+    {
+        builder.register(&themoretheless_tokenizer_visualbasic::ENGINE)?;
+    }
+    #[cfg(feature = "fortran")]
+    {
+        builder.register(&themoretheless_tokenizer_fortran::ENGINE)?;
+    }
+    #[cfg(feature = "matlab")]
+    {
+        builder.register(&themoretheless_tokenizer_matlab::ENGINE)?;
+    }
+    #[cfg(feature = "delphi")]
+    {
+        builder.register(&themoretheless_tokenizer_delphi::ENGINE)?;
+    }
+    #[cfg(feature = "scala")]
+    {
+        builder.register(&themoretheless_tokenizer_scala::ENGINE)?;
+    }
+    #[cfg(feature = "lua")]
+    {
+        builder.register(&themoretheless_tokenizer_lua::ENGINE)?;
+    }
+    #[cfg(feature = "perl")]
+    {
+        builder.register(&themoretheless_tokenizer_perl::ENGINE)?;
+    }
+    #[cfg(feature = "objectivec")]
+    {
+        builder.register(&themoretheless_tokenizer_objectivec::ENGINE)?;
+    }
+    #[cfg(feature = "julia")]
+    {
+        builder.register(&themoretheless_tokenizer_julia::ENGINE)?;
+    }
+    #[cfg(feature = "assembly")]
+    {
+        builder.register(&themoretheless_tokenizer_assembly::ENGINE)?;
     }
     let _ = builder;
     Ok(())
@@ -316,5 +459,50 @@ mod tests {
         .unwrap();
         assert!(result.valid);
         assert!(result.tokens.iter().any(|token| token.kind == "u-scheme"));
+    }
+
+    #[cfg(feature = "python")]
+    #[test]
+    fn python_host_highlights_keywords() {
+        let result = analyze_host("python", "def f():\n    return 1\n", "default", TokenLayer::Semantic)
+            .unwrap();
+        assert!(result.tokens.iter().any(|t| t.kind == "keyword"));
+    }
+
+    #[cfg(feature = "all-languages")]
+    #[test]
+    fn all_languages_register() {
+        // json + url + 35 language crates
+        assert_eq!(builtin_registry().len(), 37);
+    }
+
+    #[cfg(feature = "top20")]
+    #[test]
+    fn top20_register() {
+        let reg = builtin_registry();
+        for id in [
+            "python",
+            "c",
+            "cpp",
+            "java",
+            "csharp",
+            "javascript",
+            "visualbasic",
+            "sql",
+            "go",
+            "fortran",
+            "matlab",
+            "php",
+            "rust",
+            "r",
+            "ruby",
+            "kotlin",
+            "swift",
+            "typescript",
+            "delphi",
+            "assembly",
+        ] {
+            assert!(reg.get_str(id).is_some(), "missing top20 id {id}");
+        }
     }
 }

@@ -12,6 +12,41 @@ pub struct LanguageId(pub &'static str);
 impl LanguageId {
     pub const JSON: Self = Self("json");
     pub const URL: Self = Self("url");
+    pub const XML: Self = Self("xml");
+    pub const HTML: Self = Self("html");
+    pub const CSS: Self = Self("css");
+    pub const YAML: Self = Self("yaml");
+    pub const TOML: Self = Self("toml");
+    pub const MARKDOWN: Self = Self("markdown");
+    pub const SQL: Self = Self("sql");
+    pub const MONGO: Self = Self("mongo");
+    pub const BASH: Self = Self("bash");
+    pub const POWERSHELL: Self = Self("powershell");
+    pub const JAVASCRIPT: Self = Self("javascript");
+    pub const TYPESCRIPT: Self = Self("typescript");
+    pub const PYTHON: Self = Self("python");
+    pub const JAVA: Self = Self("java");
+    pub const CSHARP: Self = Self("csharp");
+    pub const GO: Self = Self("go");
+    pub const PHP: Self = Self("php");
+    pub const RUBY: Self = Self("ruby");
+    pub const C: Self = Self("c");
+    pub const CPP: Self = Self("cpp");
+    pub const RUST: Self = Self("rust");
+    pub const KOTLIN: Self = Self("kotlin");
+    pub const SWIFT: Self = Self("swift");
+    pub const DART: Self = Self("dart");
+    pub const R: Self = Self("r");
+    pub const VISUALBASIC: Self = Self("visualbasic");
+    pub const FORTRAN: Self = Self("fortran");
+    pub const MATLAB: Self = Self("matlab");
+    pub const DELPHI: Self = Self("delphi");
+    pub const SCALA: Self = Self("scala");
+    pub const LUA: Self = Self("lua");
+    pub const PERL: Self = Self("perl");
+    pub const OBJECTIVEC: Self = Self("objectivec");
+    pub const JULIA: Self = Self("julia");
+    pub const ASSEMBLY: Self = Self("assembly");
 
     #[must_use]
     pub const fn as_str(self) -> &'static str {

@@ -3,6 +3,41 @@ members = [
     "crates/tokenizer-core",
     "crates/tokenizer-json",
     "crates/tokenizer-url",
+    "crates/tokenizer-xml",
+    "crates/tokenizer-html",
+    "crates/tokenizer-css",
+    "crates/tokenizer-yaml",
+    "crates/tokenizer-toml",
+    "crates/tokenizer-markdown",
+    "crates/tokenizer-sql",
+    "crates/tokenizer-mongo",
+    "crates/tokenizer-bash",
+    "crates/tokenizer-powershell",
+    "crates/tokenizer-javascript",
+    "crates/tokenizer-typescript",
+    "crates/tokenizer-python",
+    "crates/tokenizer-java",
+    "crates/tokenizer-csharp",
+    "crates/tokenizer-go",
+    "crates/tokenizer-php",
+    "crates/tokenizer-ruby",
+    "crates/tokenizer-c",
+    "crates/tokenizer-cpp",
+    "crates/tokenizer-rust",
+    "crates/tokenizer-kotlin",
+    "crates/tokenizer-swift",
+    "crates/tokenizer-dart",
+    "crates/tokenizer-r",
+    "crates/tokenizer-visualbasic",
+    "crates/tokenizer-fortran",
+    "crates/tokenizer-matlab",
+    "crates/tokenizer-delphi",
+    "crates/tokenizer-scala",
+    "crates/tokenizer-lua",
+    "crates/tokenizer-perl",
+    "crates/tokenizer-objectivec",
+    "crates/tokenizer-julia",
+    "crates/tokenizer-assembly",
     "wasm",
 ]
 resolver = "3"
@@ -12,13 +47,13 @@ name = "themoretheless-tokenizer"
 version = "0.4.0"
 edition = "2024"
 authors = ["Denis Mezhov"]
-description = "Plugin-oriented lossless tokenizers: JSON/JSONC engine, URL highlighter, shared host API"
+description = "Plugin-oriented lossless multi-language syntax engines (fullkit + JSON)"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/themoretheless/tokenizer"
 documentation = "https://docs.rs/themoretheless-tokenizer"
 readme = "README.md"
 publish = ["crates-io"]
-keywords = ["tokenizer", "lexer", "json", "jsonc", "syntax-highlighting"]
+keywords = ["tokenizer", "lexer", "json", "syntax-highlighting", "plugins"]
 categories = ["parsing", "text-processing"]
 
 [lib]
@@ -29,11 +64,112 @@ path = "src/lib.rs"
 themoretheless-tokenizer-core = { path = "crates/tokenizer-core", version = "0.4.0" }
 themoretheless-tokenizer-json = { path = "crates/tokenizer-json", version = "0.4.0", optional = true }
 themoretheless-tokenizer-url = { path = "crates/tokenizer-url", version = "0.4.0", optional = true }
+themoretheless-tokenizer-xml = { path = "crates/tokenizer-xml", version = "0.4.0", optional = true }
+themoretheless-tokenizer-html = { path = "crates/tokenizer-html", version = "0.4.0", optional = true }
+themoretheless-tokenizer-css = { path = "crates/tokenizer-css", version = "0.4.0", optional = true }
+themoretheless-tokenizer-yaml = { path = "crates/tokenizer-yaml", version = "0.4.0", optional = true }
+themoretheless-tokenizer-toml = { path = "crates/tokenizer-toml", version = "0.4.0", optional = true }
+themoretheless-tokenizer-markdown = { path = "crates/tokenizer-markdown", version = "0.4.0", optional = true }
+themoretheless-tokenizer-sql = { path = "crates/tokenizer-sql", version = "0.4.0", optional = true }
+themoretheless-tokenizer-mongo = { path = "crates/tokenizer-mongo", version = "0.4.0", optional = true }
+themoretheless-tokenizer-bash = { path = "crates/tokenizer-bash", version = "0.4.0", optional = true }
+themoretheless-tokenizer-powershell = { path = "crates/tokenizer-powershell", version = "0.4.0", optional = true }
+themoretheless-tokenizer-javascript = { path = "crates/tokenizer-javascript", version = "0.4.0", optional = true }
+themoretheless-tokenizer-typescript = { path = "crates/tokenizer-typescript", version = "0.4.0", optional = true }
+themoretheless-tokenizer-python = { path = "crates/tokenizer-python", version = "0.4.0", optional = true }
+themoretheless-tokenizer-java = { path = "crates/tokenizer-java", version = "0.4.0", optional = true }
+themoretheless-tokenizer-csharp = { path = "crates/tokenizer-csharp", version = "0.4.0", optional = true }
+themoretheless-tokenizer-go = { path = "crates/tokenizer-go", version = "0.4.0", optional = true }
+themoretheless-tokenizer-php = { path = "crates/tokenizer-php", version = "0.4.0", optional = true }
+themoretheless-tokenizer-ruby = { path = "crates/tokenizer-ruby", version = "0.4.0", optional = true }
+themoretheless-tokenizer-c = { path = "crates/tokenizer-c", version = "0.4.0", optional = true }
+themoretheless-tokenizer-cpp = { path = "crates/tokenizer-cpp", version = "0.4.0", optional = true }
+themoretheless-tokenizer-rust = { path = "crates/tokenizer-rust", version = "0.4.0", optional = true }
+themoretheless-tokenizer-kotlin = { path = "crates/tokenizer-kotlin", version = "0.4.0", optional = true }
+themoretheless-tokenizer-swift = { path = "crates/tokenizer-swift", version = "0.4.0", optional = true }
+themoretheless-tokenizer-dart = { path = "crates/tokenizer-dart", version = "0.4.0", optional = true }
+themoretheless-tokenizer-r = { path = "crates/tokenizer-r", version = "0.4.0", optional = true }
+themoretheless-tokenizer-visualbasic = { path = "crates/tokenizer-visualbasic", version = "0.4.0", optional = true }
+themoretheless-tokenizer-fortran = { path = "crates/tokenizer-fortran", version = "0.4.0", optional = true }
+themoretheless-tokenizer-matlab = { path = "crates/tokenizer-matlab", version = "0.4.0", optional = true }
+themoretheless-tokenizer-delphi = { path = "crates/tokenizer-delphi", version = "0.4.0", optional = true }
+themoretheless-tokenizer-scala = { path = "crates/tokenizer-scala", version = "0.4.0", optional = true }
+themoretheless-tokenizer-lua = { path = "crates/tokenizer-lua", version = "0.4.0", optional = true }
+themoretheless-tokenizer-perl = { path = "crates/tokenizer-perl", version = "0.4.0", optional = true }
+themoretheless-tokenizer-objectivec = { path = "crates/tokenizer-objectivec", version = "0.4.0", optional = true }
+themoretheless-tokenizer-julia = { path = "crates/tokenizer-julia", version = "0.4.0", optional = true }
+themoretheless-tokenizer-assembly = { path = "crates/tokenizer-assembly", version = "0.4.0", optional = true }
 
 [features]
 default = ["json", "url"]
 json = ["dep:themoretheless-tokenizer-json"]
 url = ["dep:themoretheless-tokenizer-url"]
+xml = ["dep:themoretheless-tokenizer-xml"]
+html = ["dep:themoretheless-tokenizer-html"]
+css = ["dep:themoretheless-tokenizer-css"]
+yaml = ["dep:themoretheless-tokenizer-yaml"]
+toml = ["dep:themoretheless-tokenizer-toml"]
+markdown = ["dep:themoretheless-tokenizer-markdown"]
+sql = ["dep:themoretheless-tokenizer-sql"]
+mongo = ["dep:themoretheless-tokenizer-mongo"]
+bash = ["dep:themoretheless-tokenizer-bash"]
+powershell = ["dep:themoretheless-tokenizer-powershell"]
+javascript = ["dep:themoretheless-tokenizer-javascript"]
+typescript = ["dep:themoretheless-tokenizer-typescript"]
+python = ["dep:themoretheless-tokenizer-python"]
+java = ["dep:themoretheless-tokenizer-java"]
+csharp = ["dep:themoretheless-tokenizer-csharp"]
+go = ["dep:themoretheless-tokenizer-go"]
+php = ["dep:themoretheless-tokenizer-php"]
+ruby = ["dep:themoretheless-tokenizer-ruby"]
+c = ["dep:themoretheless-tokenizer-c"]
+cpp = ["dep:themoretheless-tokenizer-cpp"]
+rust = ["dep:themoretheless-tokenizer-rust"]
+kotlin = ["dep:themoretheless-tokenizer-kotlin"]
+swift = ["dep:themoretheless-tokenizer-swift"]
+dart = ["dep:themoretheless-tokenizer-dart"]
+r = ["dep:themoretheless-tokenizer-r"]
+visualbasic = ["dep:themoretheless-tokenizer-visualbasic"]
+fortran = ["dep:themoretheless-tokenizer-fortran"]
+matlab = ["dep:themoretheless-tokenizer-matlab"]
+delphi = ["dep:themoretheless-tokenizer-delphi"]
+scala = ["dep:themoretheless-tokenizer-scala"]
+lua = ["dep:themoretheless-tokenizer-lua"]
+perl = ["dep:themoretheless-tokenizer-perl"]
+objectivec = ["dep:themoretheless-tokenizer-objectivec"]
+julia = ["dep:themoretheless-tokenizer-julia"]
+assembly = ["dep:themoretheless-tokenizer-assembly"]
+wave1 = ["xml", "html", "css", "yaml", "toml", "markdown"]
+wave2 = ["sql", "mongo", "bash", "powershell"]
+wave3 = ["javascript", "typescript"]
+wave4 = ["python", "java", "csharp", "go", "php", "ruby"]
+wave5 = ["c", "cpp", "rust", "kotlin", "swift", "dart", "r"]
+wave6 = ["visualbasic", "fortran", "matlab", "delphi", "scala", "lua", "perl", "objectivec", "julia", "assembly"]
+# TIOBE-style popular programming languages (fullkit / native where noted)
+top20 = [
+    "python",
+    "c",
+    "cpp",
+    "java",
+    "csharp",
+    "javascript",
+    "visualbasic",
+    "sql",
+    "go",
+    "fortran",
+    "matlab",
+    "php",
+    "rust",
+    "r",
+    "ruby",
+    "kotlin",
+    "swift",
+    "typescript",
+    "delphi",
+    "assembly",
+]
+all-languages = ["json", "url", "wave1", "wave2", "wave3", "wave4", "wave5", "wave6"]
+# web-bridge used by playground WASM; all-languages keeps CI language coverage.
 web-bridge = ["json"]
 
 [[bin]]

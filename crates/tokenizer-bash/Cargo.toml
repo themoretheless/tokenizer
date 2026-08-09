@@ -1,0 +1,22 @@
+[package]
+name = "themoretheless-tokenizer-bash"
+version = "0.4.0"
+edition = "2024"
+authors = ["Denis Mezhov"]
+description = "Full Bash engine (lex/parse/AST/semantic) for themoretheless-tokenizer"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/themoretheless/tokenizer"
+readme = "README.md"
+publish = ["crates-io"]
+keywords = ["tokenizer", "lexer", "bash", "parser"]
+categories = ["parsing", "text-processing"]
+
+[lib]
+name = "themoretheless_tokenizer_bash"
+path = "src/lib.rs"
+
+[dependencies]
+themoretheless-tokenizer-core = { path = "../tokenizer-core", version = "0.4.0" }
+
+[package.metadata.docs.rs]
+all-features = true

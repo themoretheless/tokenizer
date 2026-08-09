@@ -125,14 +125,140 @@ name = "themoretheless-tokenizer"
 version = "0.4.0"
 dependencies = [
  "serde_json",
+ "themoretheless-tokenizer-assembly",
+ "themoretheless-tokenizer-bash",
+ "themoretheless-tokenizer-c",
  "themoretheless-tokenizer-core",
+ "themoretheless-tokenizer-cpp",
+ "themoretheless-tokenizer-csharp",
+ "themoretheless-tokenizer-css",
+ "themoretheless-tokenizer-dart",
+ "themoretheless-tokenizer-delphi",
+ "themoretheless-tokenizer-fortran",
+ "themoretheless-tokenizer-go",
+ "themoretheless-tokenizer-html",
+ "themoretheless-tokenizer-java",
+ "themoretheless-tokenizer-javascript",
  "themoretheless-tokenizer-json",
+ "themoretheless-tokenizer-julia",
+ "themoretheless-tokenizer-kotlin",
+ "themoretheless-tokenizer-lua",
+ "themoretheless-tokenizer-markdown",
+ "themoretheless-tokenizer-matlab",
+ "themoretheless-tokenizer-mongo",
+ "themoretheless-tokenizer-objectivec",
+ "themoretheless-tokenizer-perl",
+ "themoretheless-tokenizer-php",
+ "themoretheless-tokenizer-powershell",
+ "themoretheless-tokenizer-python",
+ "themoretheless-tokenizer-r",
+ "themoretheless-tokenizer-ruby",
+ "themoretheless-tokenizer-rust",
+ "themoretheless-tokenizer-scala",
+ "themoretheless-tokenizer-sql",
+ "themoretheless-tokenizer-swift",
+ "themoretheless-tokenizer-toml",
+ "themoretheless-tokenizer-typescript",
  "themoretheless-tokenizer-url",
+ "themoretheless-tokenizer-visualbasic",
+ "themoretheless-tokenizer-xml",
+ "themoretheless-tokenizer-yaml",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-assembly"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-bash"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-c"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-core"
 version = "0.4.0"
+
+[[package]]
+name = "themoretheless-tokenizer-cpp"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-csharp"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-css"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-dart"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-delphi"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-fortran"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-go"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-html"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-java"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-javascript"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
 
 [[package]]
 name = "themoretheless-tokenizer-json"
@@ -142,7 +268,161 @@ dependencies = [
 ]
 
 [[package]]
+name = "themoretheless-tokenizer-julia"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-kotlin"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-lua"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-markdown"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-matlab"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-mongo"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-objectivec"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-perl"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-php"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-powershell"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-python"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-r"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-ruby"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-rust"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-scala"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-sql"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-swift"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-toml"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-typescript"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
 name = "themoretheless-tokenizer-url"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-visualbasic"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-xml"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-yaml"
 version = "0.4.0"
 dependencies = [
  "themoretheless-tokenizer-core",
