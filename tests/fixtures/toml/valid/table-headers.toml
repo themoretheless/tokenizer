@@ -1,0 +1,8 @@
+[top]
+x = 1
+
+[top.middle]
+y = 2
+
+[deeply.nested.table.chain]
+z = 3

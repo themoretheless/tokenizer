@@ -1,0 +1,6 @@
+raw = '''
+no \escapes here
+'''
+stripped = '''
+first line
+second line'''

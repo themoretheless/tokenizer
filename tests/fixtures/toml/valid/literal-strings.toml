@@ -1,0 +1,3 @@
+windows = 'C:\Users\nodejs\templates'
+escaped = 'a\nb stays two characters'
+double-quotes = 'she said "hi"'
