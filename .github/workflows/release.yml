@@ -20,8 +20,6 @@ jobs:
     name: Release changed version
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    outputs:
-      tag: ${{ steps.package.outputs.tag }}
 
     steps:
       - name: Checkout repository
@@ -61,28 +59,3 @@ jobs:
           prerelease: ${{ steps.package.outputs.prerelease }}
           tag-exists: ${{ steps.tag.outputs.exists }}
           github-token: ${{ github.token }}
-
-  advance-release-branch:
-    name: Advance release branch
-    needs: release
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    concurrency:
-      group: advance-release-branch
-      cancel-in-progress: false
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Point release at this commit
-        # GITHUB_TOKEN tag pushes do not trigger release-branch.yml, so advance
-        # the branch here; that workflow only covers manually created tags.
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B release "${GITHUB_SHA}"
-          git push origin release --force
-          echo "release -> ${GITHUB_SHA} (from ${{ needs.release.outputs.tag }})"

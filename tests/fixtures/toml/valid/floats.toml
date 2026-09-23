@@ -1,0 +1,10 @@
+pi = 3.14
+exponent = 5e22
+negative = -0.01
+small = 6.626e-34
+trailing-zero = 1.0
+positive = +1.5
+underscored = 9_224_617.445_991_228_313
+infinity = inf
+negative-infinity = -inf
+not-a-number = nan

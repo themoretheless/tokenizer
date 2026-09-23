@@ -1,0 +1,8 @@
+a = 99
+b = +42
+c = 0
+d = -17
+hex = 0xDEADBEEF
+oct = 0o755
+bin = 0b11010110
+underscored = 1_000_000

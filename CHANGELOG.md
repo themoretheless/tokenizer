@@ -19,6 +19,11 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cobol, ada, prolog, abap, vhdl, verilog, graphql.
 - Docs: `docs/languages.md`.
 - Playground WASM case matrix covering every registered language id.
+- Playground UI/UX for all language types: searchable grouped language
+  combobox, shared `?lang=&mode=&layer=` state, per-language example case
+  picker from the fixture matrix, token-kind legend with hover/pin
+  filtering, inline colors for every engine kind (hashed fallback), line
+  numbers, cursor `L:col` readout, and token-map render cap.
 
 ## [0.4.0] - 2026-08-08
 

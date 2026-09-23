@@ -9,47 +9,13 @@ use themoretheless_tokenizer_core::{
 
 fn profile() -> FullProfile {
     FullProfile {
-        keywords: &["select",
-        "insert",
-        "update",
-        "delete",
-        "from",
-        "where",
-        "join",
-        "left",
-        "right",
-        "inner",
-        "outer",
-        "group",
-        "order",
-        "by",
-        "as",
-        "and",
-        "or",
-        "not",
-        "null",
-        "true",
-        "false",
-        "create",
-        "table",
-        "index",
-        "view",
-        "into",
-        "values",
-        "set",
-        "limit",
-        "offset",
-        "having",
-        "distinct",
-        "union",
-        "all",
-        "case",
-        "when",
-        "then",
-        "else",
-        "end",
-        "on",
-        "using"],
+        keywords: &[
+            "select", "insert", "update", "delete", "from", "where", "join", "left", "right",
+            "inner", "outer", "group", "order", "by", "as", "and", "or", "not", "null", "true",
+            "false", "create", "table", "index", "view", "into", "values", "set", "limit",
+            "offset", "having", "distinct", "union", "all", "case", "when", "then", "else", "end",
+            "on", "using",
+        ],
         types: &[],
         line_comment: Some("--"),
         block_comment: Some(("/*", "*/")),
@@ -104,11 +70,7 @@ impl HostLanguage for Host {
         &DESCRIPTOR
     }
 
-    fn lex(
-        &self,
-        source: &str,
-        opts: &HostAnalysisOptions,
-    ) -> Result<HostTokenization, HostError> {
+    fn lex(&self, source: &str, opts: &HostAnalysisOptions) -> Result<HostTokenization, HostError> {
         require_default_dialect(&DESCRIPTOR, opts.dialect.as_ref())?;
         if opts.limits.exceeds_input_bytes(source.len()) {
             return Err(HostError::InputTooLarge {

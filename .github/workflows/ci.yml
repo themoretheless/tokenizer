@@ -43,9 +43,13 @@ jobs:
         run: cargo doc --locked --no-deps --all-features
 
       - name: Check package
-        # Path-dependent crates need their deps on crates.io to package.
-        # Validate the leaf package here; publish workflow covers the rest.
-        run: cargo package --locked -p themoretheless-tokenizer-core
+        # The facade crate cannot be packaged while unpublished optional
+        # wave-crate dependencies declare registry versions; see RELEASING.md.
+        run: >-
+          cargo package --locked
+          -p themoretheless-tokenizer-core
+          -p themoretheless-tokenizer-json
+          -p themoretheless-tokenizer-url
 
   build:
     name: Build

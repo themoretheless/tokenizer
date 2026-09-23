@@ -4,8 +4,7 @@
 //! comments, strings, numbers, identifiers. Not full language parsers.
 
 use crate::{
-    Diagnostic, HostDiagnostic, HostSpan, HostToken, HostTokenization, Span,
-    verify_lossless_spans,
+    Diagnostic, HostDiagnostic, HostSpan, HostToken, HostTokenization, Span, verify_lossless_spans,
 };
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -180,7 +179,8 @@ pub fn highlight_c_like(source: &str, profile: &CLikeProfile) -> Highlighted {
 
         // Strings
         match profile.strings {
-            StringStyle::Python if bytes[i..].starts_with(b"'''") || bytes[i..].starts_with(b"\"\"\"") =>
+            StringStyle::Python
+                if bytes[i..].starts_with(b"'''") || bytes[i..].starts_with(b"\"\"\"") =>
             {
                 let quote = if bytes[i] == b'\'' { b"'''" } else { b"\"\"\"" };
                 let start = i;
@@ -245,8 +245,7 @@ pub fn highlight_c_like(source: &str, profile: &CLikeProfile) -> Highlighted {
         }
 
         // Numbers
-        if b.is_ascii_digit()
-            || (b == b'.' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit())
+        if b.is_ascii_digit() || (b == b'.' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit())
         {
             let start = i;
             i += 1;
@@ -301,7 +300,11 @@ pub fn highlight_c_like(source: &str, profile: &CLikeProfile) -> Highlighted {
 
         // Non-ascii / other: take one char
         let start = i;
-        i += source[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+        i += source[i..]
+            .chars()
+            .next()
+            .map(|c| c.len_utf8())
+            .unwrap_or(1);
         push(&mut out, "identifier", start, i);
     }
 
@@ -318,15 +321,11 @@ fn push(out: &mut Highlighted, kind: &'static str, start: usize, end: usize) {
 }
 
 fn is_ident_start(b: u8, style: IdentStyle) -> bool {
-    b.is_ascii_alphabetic()
-        || b == b'_'
-        || (style == IdentStyle::AsciiDollar && b == b'$')
+    b.is_ascii_alphabetic() || b == b'_' || (style == IdentStyle::AsciiDollar && b == b'$')
 }
 
 fn is_ident_continue(b: u8, style: IdentStyle) -> bool {
-    b.is_ascii_alphanumeric()
-        || b == b'_'
-        || (style == IdentStyle::AsciiDollar && b == b'$')
+    b.is_ascii_alphanumeric() || b == b'_' || (style == IdentStyle::AsciiDollar && b == b'$')
 }
 
 fn match_operator(bytes: &[u8], i: usize) -> Option<usize> {
@@ -426,15 +425,7 @@ pub fn highlight_markup(source: &str, htmlish: bool) -> Highlighted {
 #[must_use]
 pub fn highlight_css(source: &str) -> Highlighted {
     let mut profile = CLikeProfile {
-        keywords: &[
-            "important",
-            "from",
-            "to",
-            "and",
-            "or",
-            "not",
-            "only",
-        ],
+        keywords: &["important", "from", "to", "and", "or", "not", "only"],
         types: &[],
         builtins: &[],
         line_comment: None,
@@ -542,7 +533,8 @@ pub fn highlight_markdown(source: &str) -> Highlighted {
         // word / punct
         if bytes[i].is_ascii_alphanumeric() {
             let start = i;
-            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'-')
+            while i < bytes.len()
+                && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'-')
             {
                 i += 1;
             }

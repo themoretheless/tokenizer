@@ -1,0 +1,10 @@
+# Full-line comment.
+key = "value" # Comment after a value.
+
+# Another comment.
+
+[server] # Comment after a header.
+host = "127.0.0.1"
+
+# Comment between entries.
+port = 8080

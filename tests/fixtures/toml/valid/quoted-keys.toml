@@ -1,0 +1,5 @@
+"name" = "value"
+'literal key' = 2
+"quoted \"inner\"" = 3
+'raw \n stays' = 4
+"" = 5

@@ -13,8 +13,7 @@ pub const DEFAULT_DIALECTS: &[DialectDescriptor] = &[DialectDescriptor {
 }];
 
 /// Highlight-only capabilities (lex + validate via diagnostics).
-pub const HIGHLIGHT_CAPS: Capabilities =
-    Capabilities::LEX.union(Capabilities::VALIDATE);
+pub const HIGHLIGHT_CAPS: Capabilities = Capabilities::LEX.union(Capabilities::VALIDATE);
 
 /// Full pipeline capabilities (lex + parse + semantic + validate).
 pub const FULL_CAPS: Capabilities = crate::fullkit::FULL_ENGINE_CAPS;
