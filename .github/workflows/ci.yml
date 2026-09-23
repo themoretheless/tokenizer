@@ -43,7 +43,9 @@ jobs:
         run: cargo doc --locked --no-deps --all-features
 
       - name: Check package
-        run: cargo package --locked
+        # Path-dependent crates need their deps on crates.io to package.
+        # Validate the leaf package here; publish workflow covers the rest.
+        run: cargo package --locked -p themoretheless-tokenizer-core
 
   build:
     name: Build
