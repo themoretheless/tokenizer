@@ -13,6 +13,7 @@ permissions:
   contents: write
 
 concurrency:
+  # Shared with release.yml's advance job so the two writers queue, not race.
   group: advance-release-branch
   cancel-in-progress: false
 
