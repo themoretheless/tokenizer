@@ -544,8 +544,13 @@ mod tests {
     #[cfg(feature = "python")]
     #[test]
     fn python_host_highlights_keywords() {
-        let result = analyze_host("python", "def f():\n    return 1\n", "default", TokenLayer::Semantic)
-            .unwrap();
+        let result = analyze_host(
+            "python",
+            "def f():\n    return 1\n",
+            "default",
+            TokenLayer::Semantic,
+        )
+        .unwrap();
         assert!(result.tokens.iter().any(|t| t.kind == "keyword"));
     }
 
@@ -591,26 +596,9 @@ mod tests {
     fn next20_register() {
         let reg = builtin_registry();
         for id in [
-            "groovy",
-            "haskell",
-            "elixir",
-            "erlang",
-            "clojure",
-            "fsharp",
-            "ocaml",
-            "lisp",
-            "scheme",
-            "solidity",
-            "zig",
-            "nim",
-            "dlang",
-            "cobol",
-            "ada",
-            "prolog",
-            "abap",
-            "vhdl",
-            "verilog",
-            "graphql",
+            "groovy", "haskell", "elixir", "erlang", "clojure", "fsharp", "ocaml", "lisp",
+            "scheme", "solidity", "zig", "nim", "dlang", "cobol", "ada", "prolog", "abap", "vhdl",
+            "verilog", "graphql",
         ] {
             assert!(reg.get_str(id).is_some(), "missing next20 id {id}");
         }
