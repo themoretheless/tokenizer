@@ -9,34 +9,36 @@ use themoretheless_tokenizer_core::{
 
 fn profile() -> FullProfile {
     FullProfile {
-        keywords: &["case",
-        "class",
-        "data",
-        "default",
-        "deriving",
-        "do",
-        "else",
-        "if",
-        "import",
-        "in",
-        "infix",
-        "infixl",
-        "infixr",
-        "instance",
-        "let",
-        "module",
-        "newtype",
-        "of",
-        "then",
-        "type",
-        "where",
-        "foreign",
-        "mdo",
-        "proc",
-        "rec",
-        "qualified",
-        "as",
-        "hiding"],
+        keywords: &[
+            "case",
+            "class",
+            "data",
+            "default",
+            "deriving",
+            "do",
+            "else",
+            "if",
+            "import",
+            "in",
+            "infix",
+            "infixl",
+            "infixr",
+            "instance",
+            "let",
+            "module",
+            "newtype",
+            "of",
+            "then",
+            "type",
+            "where",
+            "foreign",
+            "mdo",
+            "proc",
+            "rec",
+            "qualified",
+            "as",
+            "hiding",
+        ],
         types: &[],
         line_comment: Some("--"),
         block_comment: Some(("{-", "-}")),
@@ -91,11 +93,7 @@ impl HostLanguage for Host {
         &DESCRIPTOR
     }
 
-    fn lex(
-        &self,
-        source: &str,
-        opts: &HostAnalysisOptions,
-    ) -> Result<HostTokenization, HostError> {
+    fn lex(&self, source: &str, opts: &HostAnalysisOptions) -> Result<HostTokenization, HostError> {
         require_default_dialect(&DESCRIPTOR, opts.dialect.as_ref())?;
         if opts.limits.exceeds_input_bytes(source.len()) {
             return Err(HostError::InputTooLarge {

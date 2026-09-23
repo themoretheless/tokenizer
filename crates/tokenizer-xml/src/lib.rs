@@ -1,8 +1,8 @@
 //! Full XML engine: markup lex + element AST + host adapters.
 
 use themoretheless_tokenizer_core::{
-    Diagnostic, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostTokenization,
-    LanguageDescriptor, LanguageId, MarkupParse, FULL_CAPS, markup_to_host, parse_markup,
+    Diagnostic, FULL_CAPS, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage,
+    HostTokenization, LanguageDescriptor, LanguageId, MarkupParse, markup_to_host, parse_markup,
     require_default_dialect,
 };
 
@@ -38,11 +38,7 @@ impl HostLanguage for Host {
         &DESCRIPTOR
     }
 
-    fn lex(
-        &self,
-        source: &str,
-        opts: &HostAnalysisOptions,
-    ) -> Result<HostTokenization, HostError> {
+    fn lex(&self, source: &str, opts: &HostAnalysisOptions) -> Result<HostTokenization, HostError> {
         require_default_dialect(&DESCRIPTOR, opts.dialect.as_ref())?;
         Ok(markup_to_host(&parse(source)))
     }
