@@ -14,6 +14,7 @@
 
 mod ast;
 mod lexer;
+mod parser;
 
 pub use ast::{
     Alias, Anchor, CollectionStyle, Directive, Document, Entry, Mapping, Node, NodeKind, Scalar,
@@ -23,6 +24,11 @@ pub use ast::{
 pub use lexer::{
     LexDiagnostic, LexDiagnosticKind, LexToken, Lexed, LexerOptions, SyntaxKind, TokenFlags, lex,
     lex_with,
+};
+
+pub use parser::{
+    MAX_SUPPORTED_DEPTH, Parse, ParseDiagnostic, ParseDiagnosticKind, ParseOptions, parse,
+    parse_with,
 };
 
 pub use themoretheless_tokenizer_core::Span;
@@ -63,7 +69,8 @@ fn core_kind(kind: SyntaxKind) -> CoreSyntaxKind {
     }
 }
 
-fn host_tokenization(lexed: &Lexed<'_>) -> HostTokenization {
+fn host_tokenization(parse: &Parse<'_>) -> HostTokenization {
+    let lexed = parse.lexed();
     let mut tokens = Vec::new();
     for token in lexed.tokens() {
         let kind = if token.has_error() {
@@ -78,7 +85,7 @@ fn host_tokenization(lexed: &Lexed<'_>) -> HostTokenization {
         });
     }
     let mut diagnostics = Vec::new();
-    for diagnostic in lexed.diagnostics() {
+    for diagnostic in parse.diagnostics() {
         diagnostics.push(HostDiagnostic {
             code: Cow::Borrowed(diagnostic.kind.code()),
             message: Cow::Owned(diagnostic.kind.to_string()),
@@ -86,7 +93,7 @@ fn host_tokenization(lexed: &Lexed<'_>) -> HostTokenization {
             severity: Severity::Error,
         });
     }
-    let valid = diagnostics.is_empty();
+    let valid = parse.is_valid();
     HostTokenization {
         tokens,
         diagnostics,
@@ -122,7 +129,7 @@ impl HostLanguage for Host {
                 actual: source.len(),
             });
         }
-        Ok(host_tokenization(&lex(source)))
+        Ok(host_tokenization(&parse(source)))
     }
 
     fn semantic_tokens(
@@ -139,7 +146,7 @@ impl HostLanguage for Host {
         opts: &HostAnalysisOptions,
     ) -> Result<Vec<HostDiagnostic>, HostError> {
         require_default_dialect(&DESCRIPTOR, opts.dialect.as_ref())?;
-        Ok(host_tokenization(&lex(source)).diagnostics)
+        Ok(host_tokenization(&parse(source)).diagnostics)
     }
 }
 

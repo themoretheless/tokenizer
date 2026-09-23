@@ -108,6 +108,25 @@ pub struct Scalar<'source> {
 }
 
 impl<'source> Scalar<'source> {
+    pub(crate) fn new(
+        raw: &'source str,
+        decoded: Option<Cow<'source, str>>,
+        anchor: Option<Anchor<'source>>,
+        tag: Option<TagHandle<'source>>,
+        span: Span,
+        style: ScalarStyle,
+        valid: bool,
+    ) -> Self {
+        Self {
+            raw,
+            decoded,
+            anchor,
+            tag,
+            span,
+            style,
+            valid,
+        }
+    }
     /// Returns the raw source text including delimiters.
     #[must_use]
     pub fn raw(&self) -> &'source str {
@@ -180,6 +199,21 @@ pub struct Sequence<'source> {
 }
 
 impl<'source> Sequence<'source> {
+    pub(crate) fn new(
+        elements: Vec<Node<'source>>,
+        anchor: Option<Anchor<'source>>,
+        tag: Option<TagHandle<'source>>,
+        span: Span,
+        style: CollectionStyle,
+    ) -> Self {
+        Self {
+            elements,
+            anchor,
+            tag,
+            span,
+            style,
+        }
+    }
     /// Returns the elements of this sequence.
     #[must_use]
     pub fn elements(&self) -> &[Node<'source>] {
@@ -235,6 +269,21 @@ pub struct Mapping<'source> {
 }
 
 impl<'source> Mapping<'source> {
+    pub(crate) fn new(
+        entries: Vec<Entry<'source>>,
+        anchor: Option<Anchor<'source>>,
+        tag: Option<TagHandle<'source>>,
+        span: Span,
+        style: CollectionStyle,
+    ) -> Self {
+        Self {
+            entries,
+            anchor,
+            tag,
+            span,
+            style,
+        }
+    }
     /// Returns the entries of this mapping.
     #[must_use]
     pub fn entries(&self) -> &[Entry<'source>] {
@@ -297,6 +346,9 @@ pub struct Entry<'source> {
 }
 
 impl<'source> Entry<'source> {
+    pub(crate) fn new(key: Node<'source>, value: Option<Node<'source>>, span: Span) -> Self {
+        Self { key, value, span }
+    }
     /// Returns the key node.
     #[must_use]
     pub fn key(&self) -> &Node<'source> {
@@ -325,6 +377,9 @@ pub struct Anchor<'source> {
 }
 
 impl<'source> Anchor<'source> {
+    pub(crate) fn new(name: &'source str, span: Span) -> Self {
+        Self { name, span }
+    }
     /// Returns the anchor name (without the `&` prefix).
     #[must_use]
     pub fn name(&self) -> &'source str {
@@ -347,6 +402,9 @@ pub struct Alias<'source> {
 }
 
 impl<'source> Alias<'source> {
+    pub(crate) fn new(name: &'source str, span: Span) -> Self {
+        Self { name, span }
+    }
     /// Returns the alias name (without the `*` prefix).
     #[must_use]
     pub fn name(&self) -> &'source str {
@@ -369,6 +427,9 @@ pub struct TagHandle<'source> {
 }
 
 impl<'source> TagHandle<'source> {
+    pub(crate) fn new(raw: &'source str, span: Span) -> Self {
+        Self { raw, span }
+    }
     /// Returns the raw tag text including the `!` prefix.
     #[must_use]
     pub fn raw(&self) -> &'source str {
@@ -391,6 +452,9 @@ pub struct Directive<'source> {
 }
 
 impl<'source> Directive<'source> {
+    pub(crate) fn new(raw: &'source str, span: Span) -> Self {
+        Self { raw, span }
+    }
     /// Returns the raw directive text including the `%` prefix.
     #[must_use]
     pub fn raw(&self) -> &'source str {
@@ -424,6 +488,21 @@ pub struct Document<'source> {
 }
 
 impl<'source> Document<'source> {
+    pub(crate) fn new(
+        directives: Vec<Directive<'source>>,
+        root: Option<Node<'source>>,
+        start_marker: Option<Span>,
+        end_marker: Option<Span>,
+        span: Span,
+    ) -> Self {
+        Self {
+            directives,
+            root,
+            start_marker,
+            end_marker,
+            span,
+        }
+    }
     /// Returns the directives in this document.
     #[must_use]
     pub fn directives(&self) -> &[Directive<'source>] {

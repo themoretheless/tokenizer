@@ -12,8 +12,8 @@ use std::fmt;
 
 use crate::Span;
 use crate::ast::{
-    Alias, Anchor, CollectionStyle, Directive, Document, Entry, Mapping, Node, Scalar,
-    ScalarStyle, Sequence, TagHandle,
+    Alias, Anchor, CollectionStyle, Directive, Document, Entry, Mapping, Node, Scalar, ScalarStyle,
+    Sequence, TagHandle,
 };
 use crate::lexer::{LexDiagnosticKind, LexToken, Lexed, LexerOptions, SyntaxKind};
 
@@ -232,7 +232,7 @@ impl fmt::Display for ParseDiagnosticKind {
 /// Parses YAML source into a recovering AST.
 ///
 /// ```
-/// use __YAMLCRATE__::parse;
+/// use themoretheless_tokenizer_yaml::parse;
 ///
 /// let parsed = parse("name: yaml\n");
 /// assert!(parsed.is_valid());
@@ -372,8 +372,7 @@ impl<'source> Parser<'source> {
     fn column_of(&self, offset: usize) -> usize {
         let line_start = self.line_starts[self.line_index(offset)];
         let mut column = offset - line_start;
-        if column > 0 && offset < self.source.len() && self.source.as_bytes()[offset - 1] == b'\r'
-        {
+        if column > 0 && offset < self.source.len() && self.source.as_bytes()[offset - 1] == b'\r' {
             column -= 1;
         }
         column
@@ -427,19 +426,36 @@ impl<'source> Parser<'source> {
         ))
     }
 
-    fn attach(&self, node: &mut Node<'source>, anchor: Option<Anchor<'source>>, tag: Option<TagHandle<'source>>) {
+    fn attach(
+        &self,
+        node: &mut Node<'source>,
+        anchor: Option<Anchor<'source>>,
+        tag: Option<TagHandle<'source>>,
+    ) {
         match node {
             Node::Scalar(scalar) => {
-                scalar.anchor = anchor;
-                scalar.tag = tag;
+                if anchor.is_some() {
+                    scalar.anchor = anchor;
+                }
+                if tag.is_some() {
+                    scalar.tag = tag;
+                }
             }
             Node::Sequence(sequence) => {
-                sequence.anchor = anchor;
-                sequence.tag = tag;
+                if anchor.is_some() {
+                    sequence.anchor = anchor;
+                }
+                if tag.is_some() {
+                    sequence.tag = tag;
+                }
             }
             Node::Mapping(mapping) => {
-                mapping.anchor = anchor;
-                mapping.tag = tag;
+                if anchor.is_some() {
+                    mapping.anchor = anchor;
+                }
+                if tag.is_some() {
+                    mapping.tag = tag;
+                }
             }
             Node::Alias(_) => {}
         }
@@ -459,13 +475,7 @@ impl<'source> Parser<'source> {
             self.skip_breaks();
         }
         if documents.is_empty() {
-            documents.push(Document::new(
-                Vec::new(),
-                None,
-                None,
-                None,
-                Span::new(0, 0),
-            ));
+            documents.push(Document::new(Vec::new(), None, None, None, Span::new(0, 0)));
         }
         documents
     }
@@ -487,11 +497,6 @@ impl<'source> Parser<'source> {
                 SyntaxKind::DocumentStart => {
                     start_marker = Some(token.span);
                     self.advance();
-                    if !self.is_eof() && self.same_line(self.peek().unwrap().span.start, token.span.end) {
-                        // Content may follow the marker on the same line.
-                    } else {
-                        self.skip_breaks();
-                    }
                     break;
                 }
                 _ => break,
@@ -520,7 +525,9 @@ impl<'source> Parser<'source> {
             self.skip_to_next_line();
         }
 
-        let end = self.current_span().map_or(self.source.len(), |span| span.start);
+        let end = self
+            .current_span()
+            .map_or(self.source.len(), |span| span.start);
         Document::new(
             directives,
             root,
@@ -538,7 +545,11 @@ impl<'source> Parser<'source> {
     /// implicit `key:` pair: a value indicator directly follows it on the
     /// same line.
     fn scalar_key_ahead(&self) -> bool {
-        let Some(first) = self.peek() else {
+        self.scalar_key_ahead_at(self.cursor)
+    }
+
+    fn scalar_key_ahead_at(&self, index: usize) -> bool {
+        let Some(first) = self.at(index) else {
             return false;
         };
         if !matches!(
@@ -549,7 +560,7 @@ impl<'source> Parser<'source> {
         ) {
             return false;
         }
-        let Some(next) = self.at(self.cursor + 1) else {
+        let Some(next) = self.at(index + 1) else {
             return false;
         };
         next.kind == SyntaxKind::ValueIndicator && self.same_line(next.span.start, first.span.end)
@@ -605,10 +616,10 @@ impl<'source> Parser<'source> {
             return None;
         }
         let col = self.column_of(token.span.start);
-        if let Some(floor) = floor {
-            if col <= floor {
-                return None;
-            }
+        if let Some(floor) = floor
+            && col <= floor
+        {
+            return None;
         }
 
         let mut anchor: Option<Anchor<'source>> = None;
@@ -617,7 +628,10 @@ impl<'source> Parser<'source> {
             match token.kind {
                 SyntaxKind::Anchor if anchor.is_none() => {
                     let text = self.token_text(token);
-                    anchor = Some(Anchor::new(text.strip_prefix('&').unwrap_or(text), token.span));
+                    anchor = Some(Anchor::new(
+                        text.strip_prefix('&').unwrap_or(text),
+                        token.span,
+                    ));
                 }
                 SyntaxKind::Tag if tag.is_none() => {
                     tag = Some(TagHandle::new(self.token_text(token), token.span));
@@ -769,7 +783,9 @@ impl<'source> Parser<'source> {
         }
         self.advance();
         let value = self.parse_value_after_colon(map_col, colon);
-        let end = value.as_ref().map_or(colon.span.end, |node| node.span().end);
+        let end = value
+            .as_ref()
+            .map_or(colon.span.end, |node| node.span().end);
         Some(Entry::new(key, value, Span::new(key_span.start, end)))
     }
 
@@ -778,7 +794,9 @@ impl<'source> Parser<'source> {
         self.advance();
         let key = self.empty_scalar(colon.span.start);
         let value = self.parse_value_after_colon(map_col, colon);
-        let end = value.as_ref().map_or(colon.span.end, |node| node.span().end);
+        let end = value
+            .as_ref()
+            .map_or(colon.span.end, |node| node.span().end);
         Some(Entry::new(key, value, Span::new(colon.span.start, end)))
     }
 
@@ -813,17 +831,12 @@ impl<'source> Parser<'source> {
         ))
     }
 
-    fn parse_value_after_colon(
-        &mut self,
-        indent: usize,
-        colon: LexToken,
-    ) -> Option<Node<'source>> {
-        if let Some(token) = self.peek() {
-            if token.kind != SyntaxKind::LineBreak
-                && self.same_line(token.span.start, colon.span.start)
-            {
-                return self.parse_node(Some(indent));
-            }
+    fn parse_value_after_colon(&mut self, indent: usize, colon: LexToken) -> Option<Node<'source>> {
+        if let Some(token) = self.peek()
+            && token.kind != SyntaxKind::LineBreak
+            && self.same_line(token.span.start, colon.span.start)
+        {
+            return self.parse_node(Some(indent));
         }
         self.skip_breaks();
         let token = self.peek()?;
@@ -831,7 +844,7 @@ impl<'source> Parser<'source> {
         if col > indent {
             self.parse_node(Some(indent))
         } else if col == indent && token.kind == SyntaxKind::BlockEntry {
-            self.parse_block_sequence(col).map(Node::Sequence)
+            Some(Node::Sequence(self.parse_block_sequence(col)))
         } else {
             None
         }
@@ -893,7 +906,6 @@ impl<'source> Parser<'source> {
         let start = self.current_span().map_or(0, |span| span.start);
         self.advance();
         let mut elements = Vec::new();
-        let mut end = start;
 
         loop {
             self.skip_breaks();
@@ -908,7 +920,7 @@ impl<'source> Parser<'source> {
                     break;
                 }
                 Some(token) if token.kind == SyntaxKind::FlowSequenceEnd => {
-                    end = token.span.end;
+                    let end = token.span.end;
                     self.advance();
                     return Sequence::new(
                         elements,
@@ -926,7 +938,6 @@ impl<'source> Parser<'source> {
             }
             let before = self.cursor;
             if let Some(node) = self.parse_flow_node() {
-                end = node.span().end;
                 elements.push(node);
             }
             if self.cursor == before {
@@ -935,7 +946,9 @@ impl<'source> Parser<'source> {
         }
 
         self.error(ParseDiagnosticKind::ExpectedSequenceEnd);
-        let end = self.current_span().map_or(self.source.len(), |span| span.start);
+        let end = self
+            .current_span()
+            .map_or(self.source.len(), |span| span.start);
         Sequence::new(
             elements,
             None,
@@ -949,7 +962,6 @@ impl<'source> Parser<'source> {
         let start = self.current_span().map_or(0, |span| span.start);
         self.advance();
         let mut entries = Vec::new();
-        let mut end = start;
 
         loop {
             self.skip_breaks();
@@ -964,7 +976,7 @@ impl<'source> Parser<'source> {
                     break;
                 }
                 Some(token) if token.kind == SyntaxKind::FlowMappingEnd => {
-                    end = token.span.end;
+                    let end = token.span.end;
                     self.advance();
                     return Mapping::new(
                         entries,
@@ -982,7 +994,6 @@ impl<'source> Parser<'source> {
             }
             let before = self.cursor;
             if let Some(entry) = self.parse_flow_entry() {
-                end = entry.span().end;
                 entries.push(entry);
             }
             if self.cursor == before {
@@ -991,7 +1002,9 @@ impl<'source> Parser<'source> {
         }
 
         self.error(ParseDiagnosticKind::ExpectedMappingEnd);
-        let end = self.current_span().map_or(self.source.len(), |span| span.start);
+        let end = self
+            .current_span()
+            .map_or(self.source.len(), |span| span.start);
         Mapping::new(
             entries,
             None,
@@ -1012,7 +1025,9 @@ impl<'source> Parser<'source> {
             let value = if self.at(self.cursor).is_some_and(|token| {
                 matches!(
                     token.kind,
-                    SyntaxKind::FlowEntry | SyntaxKind::FlowSequenceEnd | SyntaxKind::FlowMappingEnd
+                    SyntaxKind::FlowEntry
+                        | SyntaxKind::FlowSequenceEnd
+                        | SyntaxKind::FlowMappingEnd
                 )
             }) || self.is_eof()
             {
@@ -1020,7 +1035,9 @@ impl<'source> Parser<'source> {
             } else {
                 self.parse_flow_value()
             };
-            let end = value.as_ref().map_or(colon.span.end, |node| node.span().end);
+            let end = value
+                .as_ref()
+                .map_or(colon.span.end, |node| node.span().end);
             Some(Entry::new(key, value, Span::new(key_span.start, end)))
         } else {
             Some(Entry::new(key, None, key_span))
@@ -1051,7 +1068,9 @@ impl<'source> Parser<'source> {
         } else {
             self.parse_flow_value()
         };
-        let end = value.as_ref().map_or(colon.span.end, |node| node.span().end);
+        let end = value
+            .as_ref()
+            .map_or(colon.span.end, |node| node.span().end);
         let entry = Entry::new(key, value, Span::new(key_span.start, end));
         Some(Node::Mapping(Mapping::new(
             vec![entry],
@@ -1068,14 +1087,16 @@ impl<'source> Parser<'source> {
             return None;
         }
         self.skip_breaks();
-        let token = self.peek()?;
         let mut anchor: Option<Anchor<'source>> = None;
         let mut tag: Option<TagHandle<'source>> = None;
         while let Some(token) = self.peek() {
             match token.kind {
                 SyntaxKind::Anchor if anchor.is_none() => {
                     let text = self.token_text(token);
-                    anchor = Some(Anchor::new(text.strip_prefix('&').unwrap_or(text), token.span));
+                    anchor = Some(Anchor::new(
+                        text.strip_prefix('&').unwrap_or(text),
+                        token.span,
+                    ));
                 }
                 SyntaxKind::Tag if tag.is_none() => {
                     tag = Some(TagHandle::new(self.token_text(token), token.span));
@@ -1084,9 +1105,7 @@ impl<'source> Parser<'source> {
             }
             self.advance();
         }
-        let Some(token) = self.peek() else {
-            return None;
-        };
+        let token = self.peek()?;
         self.depth += 1;
         let mut node = match token.kind {
             SyntaxKind::FlowSequenceStart => Node::Sequence(self.parse_flow_sequence()),
@@ -1181,11 +1200,7 @@ impl<'source> Parser<'source> {
             if self.column_of(token.span.start) < min_column {
                 break;
             }
-            let saved = self.cursor;
-            self.cursor = self.sig.iter().position(|candidate| candidate.span == token.span)
-                .unwrap_or(saved);
-            if self.scalar_key_ahead() {
-                self.cursor = saved;
+            if self.scalar_key_ahead_at(self.cursor) {
                 break;
             }
             gaps.push(breaks);
@@ -1294,9 +1309,7 @@ impl<'source> Parser<'source> {
         let mut pending_blank: Option<usize> = None;
         let mut content_indent = content_indent;
         while index < self.line_starts.len() {
-            let (text, terminated, next) = self.line_at(index);
-            let _ = terminated;
-            let _ = next;
+            let (text, _, _) = self.line_at(index);
             if text.trim_start_matches(' ').is_empty() {
                 pending_blank.get_or_insert(index);
                 index += 1;
@@ -1306,16 +1319,34 @@ impl<'source> Parser<'source> {
             match content_indent {
                 Some(indent) => {
                     if column < indent {
-                        return self.finish_block_scalar(header_span, style, chomp, lines, raw_end, last_terminated, anchor, tag);
+                        return self.finish_block_scalar(
+                            header_span,
+                            style,
+                            chomp,
+                            lines,
+                            raw_end,
+                            last_terminated,
+                            anchor,
+                            tag,
+                        );
                     }
                     first_line = pending_blank.unwrap_or(index);
                     break;
                 }
                 None => {
-                    if let Some(floor) = floor {
-                        if column <= floor {
-                            return self.finish_block_scalar(header_span, style, chomp, lines, raw_end, last_terminated, anchor, tag);
-                        }
+                    if let Some(floor) = floor
+                        && column <= floor
+                    {
+                        return self.finish_block_scalar(
+                            header_span,
+                            style,
+                            chomp,
+                            lines,
+                            raw_end,
+                            last_terminated,
+                            anchor,
+                            tag,
+                        );
                     }
                     content_indent = Some(column);
                     first_line = pending_blank.unwrap_or(index);
@@ -1324,7 +1355,16 @@ impl<'source> Parser<'source> {
             }
         }
         let Some(content_indent) = content_indent else {
-            return self.finish_block_scalar(header_span, style, chomp, lines, raw_end, last_terminated, anchor, tag);
+            return self.finish_block_scalar(
+                header_span,
+                style,
+                chomp,
+                lines,
+                raw_end,
+                last_terminated,
+                anchor,
+                tag,
+            );
         };
 
         // Phase 2: consume content lines.
@@ -1347,7 +1387,16 @@ impl<'source> Parser<'source> {
             index += 1;
         }
 
-        self.finish_block_scalar(header_span, style, chomp, lines, raw_end, last_terminated, anchor, tag)
+        self.finish_block_scalar(
+            header_span,
+            style,
+            chomp,
+            lines,
+            raw_end,
+            last_terminated,
+            anchor,
+            tag,
+        )
     }
 
     fn line_at(&self, index: usize) -> (&'source str, bool, usize) {
@@ -1358,8 +1407,13 @@ impl<'source> Parser<'source> {
         } else {
             self.source.len()
         };
-        let mut text_end = if terminated { end_exclusive - 1 } else { end_exclusive };
-        if self.source.as_bytes().get(text_end.saturating_sub(1)) == Some(&b'\r') && text_end > start
+        let mut text_end = if terminated {
+            end_exclusive - 1
+        } else {
+            end_exclusive
+        };
+        if self.source.as_bytes().get(text_end.saturating_sub(1)) == Some(&b'\r')
+            && text_end > start
         {
             text_end -= 1;
         }
@@ -1382,10 +1436,7 @@ impl<'source> Parser<'source> {
         anchor: Option<Anchor<'source>>,
         tag: Option<TagHandle<'source>>,
     ) -> Scalar<'source> {
-        while self
-            .peek()
-            .is_some_and(|token| token.span.start < raw_end)
-        {
+        while self.peek().is_some_and(|token| token.span.start < raw_end) {
             self.advance();
         }
         let decoded = decode_block_scalar(&lines, style, chomp, last_terminated);
@@ -1415,16 +1466,15 @@ fn decode_block_scalar(
         for (index, line) in lines.iter().enumerate() {
             if index > 0 {
                 let previous = lines[index - 1];
-                folded.push(if line.is_empty() {
-                    '\n'
+                if line.is_empty() {
+                    folded.push('\n');
                 } else if previous.is_empty() {
                     // The break leaving a blank line is absorbed by folding.
-                    continue;
                 } else if previous.starts_with([' ', '\t']) || line.starts_with([' ', '\t']) {
-                    '\n'
+                    folded.push('\n');
                 } else {
-                    ' '
-                });
+                    folded.push(' ');
+                }
             }
             folded.push_str(line);
         }
@@ -1450,4 +1500,478 @@ fn decode_block_scalar(
         Chomp::Keep => {}
     }
     out
+}
+
+fn fold_break_runs(inner: &str) -> String {
+    let mut out = String::new();
+    let mut chars = inner.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\n' || c == '\r' {
+            let mut breaks = 1usize;
+            loop {
+                match chars.peek() {
+                    Some('\n') => {
+                        breaks += 1;
+                        chars.next();
+                    }
+                    Some('\r') => {
+                        breaks += 1;
+                        chars.next();
+                        if chars.peek() == Some(&'\n') {
+                            chars.next();
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            while matches!(chars.peek(), Some(' ') | Some('\t')) {
+                chars.next();
+            }
+            while out.ends_with([' ', '\t']) {
+                out.pop();
+            }
+            if breaks == 1 {
+                if !out.is_empty() {
+                    out.push(' ');
+                }
+            } else {
+                out.push_str(&"\n".repeat(breaks - 1));
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn decode_single_quoted(raw: &str) -> Option<String> {
+    let inner = raw.strip_prefix('\'')?.strip_suffix('\'')?;
+    let mut out = String::new();
+    let mut chars = inner.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\'' {
+            if chars.peek() == Some(&'\'') {
+                chars.next();
+                out.push('\'');
+            } else {
+                return None;
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    Some(fold_break_runs(&out))
+}
+
+fn hex_digits<T: Iterator<Item = char>>(
+    chars: &mut std::iter::Peekable<T>,
+    count: usize,
+) -> Option<u32> {
+    let mut value = 0u32;
+    for _ in 0..count {
+        let digit = chars.next()?;
+        let n = digit.to_digit(16)?;
+        value = value * 16 + n;
+    }
+    Some(value)
+}
+
+fn decode_double_quoted(raw: &str) -> Option<String> {
+    let inner = raw.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::new();
+    let mut chars = inner.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return None,
+            '\\' => {
+                let escape = chars.next()?;
+                match escape {
+                    '0' => out.push('\0'),
+                    'a' => out.push('\u{7}'),
+                    'b' => out.push('\u{8}'),
+                    't' => out.push('\t'),
+                    'n' => out.push('\n'),
+                    'v' => out.push('\u{b}'),
+                    'f' => out.push('\u{c}'),
+                    'r' => out.push('\r'),
+                    'e' => out.push('\u{1b}'),
+                    ' ' => out.push(' '),
+                    '"' => out.push('"'),
+                    '/' => out.push('/'),
+                    '\\' => out.push('\\'),
+                    'N' => out.push('\u{85}'),
+                    '_' => out.push('\u{a0}'),
+                    'L' => out.push('\u{2028}'),
+                    'P' => out.push('\u{2029}'),
+                    'x' => out.push(char::from_u32(hex_digits(&mut chars, 2)?)?),
+                    'u' => out.push(char::from_u32(hex_digits(&mut chars, 4)?)?),
+                    'U' => out.push(char::from_u32(hex_digits(&mut chars, 8)?)?),
+                    '\n' | '\r' => {
+                        if escape == '\r' && chars.peek() == Some(&'\n') {
+                            chars.next();
+                        }
+                        while matches!(
+                            chars.peek(),
+                            Some(' ') | Some('\t') | Some('\r') | Some('\n')
+                        ) {
+                            chars.next();
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    Some(fold_break_runs(&out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::NodeKind;
+
+    #[test]
+    fn parses_simple_mapping() {
+        let source = "name: yaml\nversion: 1.2\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let doc = parsed.document().unwrap();
+        let root = doc.root().unwrap();
+        assert_eq!(root.kind(), NodeKind::Mapping);
+        let mapping = root.as_mapping().unwrap();
+        assert_eq!(mapping.len(), 2);
+    }
+
+    #[test]
+    fn parses_simple_sequence() {
+        let source = "- one\n- two\n- three\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let doc = parsed.document().unwrap();
+        let root = doc.root().unwrap();
+        assert_eq!(root.kind(), NodeKind::Sequence);
+        let seq = root.as_sequence().unwrap();
+        assert_eq!(seq.len(), 3);
+    }
+
+    #[test]
+    fn parses_flow_sequence() {
+        let source = "[1, 2, 3]\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let doc = parsed.document().unwrap();
+        let root = doc.root().unwrap();
+        assert_eq!(root.kind(), NodeKind::Sequence);
+        let seq = root.as_sequence().unwrap();
+        assert_eq!(seq.len(), 3);
+    }
+
+    #[test]
+    fn parses_flow_mapping() {
+        let source = "{name: yaml, version: 1.2}\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let doc = parsed.document().unwrap();
+        let root = doc.root().unwrap();
+        assert_eq!(root.kind(), NodeKind::Mapping);
+        let mapping = root.as_mapping().unwrap();
+        assert_eq!(mapping.len(), 2);
+    }
+
+    #[test]
+    fn parses_nested_mapping() {
+        let source = "person:\n  name: Alice\n  age: 30\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let doc = parsed.document().unwrap();
+        let root = doc.root().unwrap();
+        let mapping = root.as_mapping().unwrap();
+        assert_eq!(mapping.len(), 1);
+        let entry = &mapping.entries()[0];
+        let value = entry.value().unwrap();
+        assert_eq!(value.kind(), NodeKind::Mapping);
+    }
+
+    #[test]
+    fn parses_quoted_scalars() {
+        let source = "single: 'hello'\ndouble: \"world\"\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let doc = parsed.document().unwrap();
+        let root = doc.root().unwrap();
+        let mapping = root.as_mapping().unwrap();
+        assert_eq!(mapping.len(), 2);
+    }
+
+    #[test]
+    fn parses_document_markers() {
+        let source = "---\nname: yaml\n...\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let doc = parsed.document().unwrap();
+        assert!(doc.start_marker().is_some());
+        assert!(doc.end_marker().is_some());
+    }
+
+    #[test]
+    fn parses_anchor_and_alias() {
+        let source = "anchor: &ref value\nalias: *ref\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let doc = parsed.document().unwrap();
+        let root = doc.root().unwrap();
+        let mapping = root.as_mapping().unwrap();
+        assert_eq!(mapping.len(), 2);
+        let value = mapping.entries()[0].value().unwrap();
+        assert_eq!(value.as_scalar().unwrap().anchor().unwrap().name(), "ref");
+        assert_eq!(
+            mapping.entries()[1].value().unwrap().kind(),
+            NodeKind::Alias
+        );
+    }
+
+    #[test]
+    fn parses_empty_document() {
+        let source = "";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let doc = parsed.document().unwrap();
+        assert!(doc.root().is_none());
+    }
+
+    #[test]
+    fn parses_scalar_only() {
+        let source = "hello world\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let doc = parsed.document().unwrap();
+        let root = doc.root().unwrap();
+        assert_eq!(root.kind(), NodeKind::Scalar);
+    }
+
+    #[test]
+    fn parses_multiple_documents() {
+        let source = "---\na: 1\n---\nb: 2\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        assert_eq!(parsed.documents().len(), 2);
+    }
+
+    #[test]
+    fn parses_sequence_under_key() {
+        let source = "list:\n  - 1\n  - 2\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let mapping = parsed
+            .document()
+            .unwrap()
+            .root()
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        let value = mapping.entries()[0].value().unwrap();
+        assert_eq!(value.as_sequence().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn parses_compact_sequence_at_key_column() {
+        let source = "a:\n- 1\n- 2\nb: 3\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let mapping = parsed
+            .document()
+            .unwrap()
+            .root()
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        assert_eq!(mapping.len(), 2);
+        assert_eq!(
+            mapping.entries()[0]
+                .value()
+                .unwrap()
+                .as_sequence()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn decodes_double_quoted_escapes() {
+        let source = "s: \"a\\tb\\u0041\\\\\"\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let mapping = parsed
+            .document()
+            .unwrap()
+            .root()
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        let value = mapping.entries()[0].value().unwrap();
+        assert_eq!(value.as_scalar().unwrap().decoded(), Some("a\tbA\\"));
+    }
+
+    #[test]
+    fn folds_multi_line_plain_scalar() {
+        let source = "a: one\n  two\nb: x\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let mapping = parsed
+            .document()
+            .unwrap()
+            .root()
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        let value = mapping.entries()[0].value().unwrap();
+        assert_eq!(value.as_scalar().unwrap().decoded(), Some("one two"));
+        assert_eq!(mapping.len(), 2);
+    }
+
+    #[test]
+    fn parses_literal_block_scalar() {
+        let source = "script: |\n  line1\n  line2\nnext: 1\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let mapping = parsed
+            .document()
+            .unwrap()
+            .root()
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        let value = mapping.entries()[0].value().unwrap();
+        assert_eq!(value.as_scalar().unwrap().style(), ScalarStyle::Literal);
+        assert_eq!(value.as_scalar().unwrap().decoded(), Some("line1\nline2\n"));
+        assert_eq!(mapping.len(), 2);
+    }
+
+    #[test]
+    fn parses_folded_block_scalar_with_strip() {
+        let source = "note: >-\n  a\n  b\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let mapping = parsed
+            .document()
+            .unwrap()
+            .root()
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        let value = mapping.entries()[0].value().unwrap();
+        assert_eq!(value.as_scalar().unwrap().decoded(), Some("a b"));
+    }
+
+    #[test]
+    fn reports_duplicate_keys() {
+        let source = "a: 1\na: 2\n";
+        let parsed = parse(source);
+        assert!(parsed.has_errors());
+        assert!(
+            parsed
+                .diagnostics()
+                .iter()
+                .any(|d| d.kind.code() == "duplicate-key")
+        );
+    }
+
+    #[test]
+    fn recovers_unterminated_flow_mapping() {
+        let source = "{a: 1, b: 2\n";
+        let parsed = parse(source);
+        assert!(parsed.has_errors());
+        assert!(
+            parsed
+                .diagnostics()
+                .iter()
+                .any(|d| d.kind.code() == "expected-mapping-end")
+        );
+        let root = parsed.document().unwrap().root().unwrap();
+        assert_eq!(root.as_mapping().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn deep_nesting_terminates() {
+        let mut source = String::new();
+        for level in 0..300 {
+            source.push_str(&format!("{}-\n", "  ".repeat(level)));
+        }
+        let parsed = parse(&source);
+        assert!(
+            parsed
+                .diagnostics()
+                .iter()
+                .any(|d| d.kind.code() == "nesting-limit-exceeded")
+        );
+    }
+
+    #[test]
+    fn parses_explicit_key_entry() {
+        let source = "? key\n: value\nother: 1\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let mapping = parsed
+            .document()
+            .unwrap()
+            .root()
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        assert_eq!(mapping.len(), 2);
+        assert_eq!(mapping.entries()[0].key().as_str(), Some("key"));
+    }
+
+    #[test]
+    fn parses_null_key_entry() {
+        let source = ": v\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let mapping = parsed
+            .document()
+            .unwrap()
+            .root()
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        assert_eq!(mapping.len(), 1);
+        assert_eq!(mapping.entries()[0].key().as_str(), Some(""));
+    }
+
+    #[test]
+    fn decodes_single_quoted_and_flow_pairs() {
+        let source = "s: 'it''s'\np: {a: [1, two], b: c}\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let mapping = parsed
+            .document()
+            .unwrap()
+            .root()
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        assert_eq!(mapping.entries()[0].value().unwrap().as_str(), Some("it's"));
+        let pair = mapping.entries()[1].value().unwrap();
+        let flow = pair.as_mapping().unwrap();
+        assert_eq!(flow.len(), 2);
+        assert_eq!(flow.get("a").unwrap().as_sequence().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn parses_directive_and_keeps_lex_lossless() {
+        let source = "%YAML 1.2\n---\nok: true\n";
+        let parsed = parse(source);
+        assert!(parsed.is_valid());
+        let doc = parsed.document().unwrap();
+        assert_eq!(doc.directives().len(), 1);
+        assert!(
+            themoretheless_tokenizer_core::verify_lossless_spans(
+                source,
+                parsed.lexed().tokens().iter().map(|token| token.span)
+            )
+            .is_ok()
+        );
+    }
 }
