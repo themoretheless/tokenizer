@@ -280,7 +280,10 @@ fn parse_lexed<'source>(
             .iter()
             .any(|span| span.start <= diagnostic.span.start && diagnostic.span.end <= span.end);
         if !accepted {
-            parser.problem(ParseDiagnosticKind::Lexical(diagnostic.kind), diagnostic.span);
+            parser.problem(
+                ParseDiagnosticKind::Lexical(diagnostic.kind),
+                diagnostic.span,
+            );
         }
     }
     parser.finalize_diagnostics();
@@ -494,8 +497,7 @@ fn push_basic_body(
                     cursor += 1;
                 }
                 cursor += 1;
-                while cursor < bytes.len()
-                    && matches!(bytes[cursor], b' ' | b'\t' | b'\r' | b'\n')
+                while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t' | b'\r' | b'\n')
                 {
                     cursor += 1;
                 }
@@ -601,7 +603,10 @@ fn convert_node(node: DefNode<'_>) -> (Value<'_>, usize) {
                 span = span.cover(table.span());
                 converted.push(table);
             }
-            (Value::ArrayOfTables(ArrayOfTables::new(converted, span)), span.end)
+            (
+                Value::ArrayOfTables(ArrayOfTables::new(converted, span)),
+                span.end,
+            )
         }
     }
 }
@@ -670,7 +675,9 @@ impl<'source> Parser<'source, '_> {
             return;
         }
         let header_span = Span::new(open.span.start, self.last_end.max(open.span.start + 1));
-        let last = segments.last().expect("parse_key returns at least one segment");
+        let last = segments
+            .last()
+            .expect("parse_key returns at least one segment");
         let key_span = last.span();
         let name = segment_name(last);
         let Some(nav_path) = self.navigate_intermediates(root, &segments, NavMode::Header) else {
@@ -775,7 +782,9 @@ impl<'source> Parser<'source, '_> {
             return;
         };
         let base_path = self.current_path.clone();
-        let last = segments.last().expect("parse_key returns at least one segment");
+        let last = segments
+            .last()
+            .expect("parse_key returns at least one segment");
         let key_span = last.span();
         let name = segment_name(last);
         let nav_path = {
@@ -835,9 +844,7 @@ impl<'source> Parser<'source, '_> {
                             // A leaf table value can only come from an inline
                             // literal, which is sealed at definition.
                             StepAction::Reject(match value {
-                                Value::Table(_) => {
-                                    ParseDiagnosticKind::CannotExtendInlineTable
-                                }
+                                Value::Table(_) => ParseDiagnosticKind::CannotExtendInlineTable,
                                 _ => ParseDiagnosticKind::CannotExtendValue,
                             })
                         }
@@ -886,8 +893,7 @@ impl<'source> Parser<'source, '_> {
                 SyntaxKind::BareKey => {
                     self.bump();
                     let raw = &self.source[token.span.range()];
-                    let segment =
-                        KeySegment::new(raw, Some(Cow::Borrowed(raw)), token.span);
+                    let segment = KeySegment::new(raw, Some(Cow::Borrowed(raw)), token.span);
                     self.accepted_key_spans.push(segment.span());
                     segments.push(segment);
                 }
@@ -941,10 +947,7 @@ impl<'source> Parser<'source, '_> {
 
     /// Accepts number, boolean, and date-time tokens as bare-key segments when
     /// their spelling fits the bare-key charset, splitting floats at dots.
-    fn reinterpreted_key_segments(
-        &mut self,
-        token: LexToken,
-    ) -> Option<Vec<KeySegment<'source>>> {
+    fn reinterpreted_key_segments(&mut self, token: LexToken) -> Option<Vec<KeySegment<'source>>> {
         let raw = &self.source[token.span.range()];
         let mut segments = Vec::new();
         let mut offset = token.span.start;
@@ -1207,7 +1210,9 @@ impl<'source> Parser<'source, '_> {
                 self.recover_inline_table();
                 continue;
             };
-            let last = segments.last().expect("parse_key returns at least one segment");
+            let last = segments
+                .last()
+                .expect("parse_key returns at least one segment");
             let key_span = last.span();
             let name = segment_name(last);
             let nav_path = self.navigate_intermediates(&mut slot, &segments, NavMode::Dotted);
@@ -1445,15 +1450,25 @@ mod tests {
 
     #[test]
     fn headers_and_dotted_keys_build_nested_tables() {
-        let source = "name = \"tokenizer\"\n[package]\nauthors = [\"a\"]\n[package.meta]\nversion = 2\n";
+        let source =
+            "name = \"tokenizer\"\n[package]\nauthors = [\"a\"]\n[package.meta]\nversion = 2\n";
         let document = parse(source).into_document();
         let root_table = document.root();
         assert_eq!(document.span(), Span::new(0, source.len()));
-        assert_eq!(root_table.get("name").and_then(Value::as_str), Some("tokenizer"));
-        let package = root_table.get("package").and_then(Value::as_table).expect("package table");
+        assert_eq!(
+            root_table.get("name").and_then(Value::as_str),
+            Some("tokenizer")
+        );
+        let package = root_table
+            .get("package")
+            .and_then(Value::as_table)
+            .expect("package table");
         assert_eq!(package.origin(), TableOrigin::Header);
         assert_eq!(package.len(), 2);
-        let meta = package.get("meta").and_then(Value::as_table).expect("meta table");
+        let meta = package
+            .get("meta")
+            .and_then(Value::as_table)
+            .expect("meta table");
         assert_eq!(
             meta.get("version")
                 .and_then(Value::as_integer)
@@ -1474,8 +1489,14 @@ mod tests {
             .and_then(Value::as_array_of_tables)
             .expect("array of tables");
         assert_eq!(fruit.len(), 2);
-        assert_eq!(fruit.elements()[0].get("name").and_then(Value::as_str), Some("apple"));
-        assert_eq!(fruit.elements()[1].get("name").and_then(Value::as_str), Some("banana"));
+        assert_eq!(
+            fruit.elements()[0].get("name").and_then(Value::as_str),
+            Some("apple")
+        );
+        assert_eq!(
+            fruit.elements()[1].get("name").and_then(Value::as_str),
+            Some("banana")
+        );
     }
 
     #[test]
@@ -1510,7 +1531,10 @@ mod tests {
                 .map(|element| element.get("name").and_then(Value::as_str))
                 .collect()
         }
-        assert_eq!(varieties(&fruit.elements()[0]), vec![Some("red delicious"), Some("granny smith")]);
+        assert_eq!(
+            varieties(&fruit.elements()[0]),
+            vec![Some("red delicious"), Some("granny smith")]
+        );
         assert_eq!(varieties(&fruit.elements()[1]), vec![Some("plantain")]);
     }
 
@@ -1523,7 +1547,10 @@ mod tests {
             ("a = 1\na.b = 2\n", vec!["cannot-extend-value"]),
             ("a = {x = 1}\n[a.b]\n", vec!["cannot-extend-inline-table"]),
             ("a = {x = 1}\na.y = 2\n", vec!["cannot-extend-inline-table"]),
-            ("[fruit]\napple.color = \"red\"\n[fruit.apple]\n", vec!["duplicate-key"]),
+            (
+                "[fruit]\napple.color = \"red\"\n[fruit.apple]\n",
+                vec!["duplicate-key"],
+            ),
             (
                 "[fruit]\napple.color = \"red\"\n[fruit.apple.texture]\nsmooth = true\n",
                 vec![],
@@ -1531,7 +1558,10 @@ mod tests {
             ("[[a]]\n[a]\n", vec!["duplicate-key"]),
             ("[[a]]\n[[a]]\n", vec![]),
             ("[x.y.z.w]\n[x]\n", vec![]),
-            ("[a]\nb = 1\n[a]\nb = 2\n", vec!["duplicate-key", "duplicate-key"]),
+            (
+                "[a]\nb = 1\n[a]\nb = 2\n",
+                vec!["duplicate-key", "duplicate-key"],
+            ),
         ] {
             assert_eq!(codes(source), expected, "source: {source:?}");
         }
@@ -1543,7 +1573,10 @@ mod tests {
         let parsed = parse(source);
         assert!(parsed.is_valid());
         let root_table = parsed.document().root();
-        let fruit = root_table.get("fruit").and_then(Value::as_table).expect("fruit");
+        let fruit = root_table
+            .get("fruit")
+            .and_then(Value::as_table)
+            .expect("fruit");
         assert_eq!(fruit.origin(), TableOrigin::Dotted);
         let apple = fruit.get("apple").and_then(Value::as_table).expect("apple");
         assert_eq!(apple.get("color").and_then(Value::as_str), Some("red"));
@@ -1560,9 +1593,19 @@ mod tests {
 
     #[test]
     fn numeric_and_quoted_keys_are_reinterpreted() {
-        for source in ["01 = 1\n", "1.2.3 = 1\n", "-0x10 = 1\n", "true = 1\n", "\"a b\" = 1\n"] {
+        for source in [
+            "01 = 1\n",
+            "1.2.3 = 1\n",
+            "-0x10 = 1\n",
+            "true = 1\n",
+            "\"a b\" = 1\n",
+        ] {
             let parsed = parse(source);
-            assert!(parsed.is_valid(), "source: {source:?}, {:?}", parsed.diagnostics());
+            assert!(
+                parsed.is_valid(),
+                "source: {source:?}, {:?}",
+                parsed.diagnostics()
+            );
         }
         assert_eq!(codes("12:00 = 1\n"), vec!["invalid-key"]);
         assert_eq!(codes("a = 1\n\"a\" = 2\n"), vec!["duplicate-key"]);
@@ -1593,12 +1636,20 @@ mod tests {
     fn arrays_accept_trailing_commas_and_newlines() {
         for source in ["a = [\n  1,\n  2, 3,\n]\n", "a = [1, 2,]\n", "a = []\n"] {
             let parsed = parse(source);
-            assert!(parsed.is_valid(), "source: {source:?}, {:?}", parsed.diagnostics());
+            assert!(
+                parsed.is_valid(),
+                "source: {source:?}, {:?}",
+                parsed.diagnostics()
+            );
         }
         assert_eq!(codes("a = [,]\n"), vec!["expected-value"]);
         let sparse = parse("a = [1 2]\n");
         assert_eq!(
-            sparse.diagnostics().iter().map(|d| d.kind.code()).collect::<Vec<_>>(),
+            sparse
+                .diagnostics()
+                .iter()
+                .map(|d| d.kind.code())
+                .collect::<Vec<_>>(),
             vec!["expected-comma-or-end"]
         );
         assert_eq!(
@@ -1616,19 +1667,23 @@ mod tests {
     #[test]
     fn inline_tables_reject_trailing_commas_and_newlines() {
         assert_eq!(codes("a = {x = 1,}\n"), vec!["expected-key"]);
-        assert_eq!(
-            codes("a = {x = 1\n}\n"),
-            vec!["expected-inline-table-end"]
-        );
+        assert_eq!(codes("a = {x = 1\n}\n"), vec!["expected-inline-table-end"]);
         for source in [
             "a = {x = 1, y = [2, 3]}\n",
             "a = {x = [\n1,\n]}\n",
             "a = {b.c = 1, b.d = 2}\n",
         ] {
             let parsed = parse(source);
-            assert!(parsed.is_valid(), "source: {source:?}, {:?}", parsed.diagnostics());
+            assert!(
+                parsed.is_valid(),
+                "source: {source:?}, {:?}",
+                parsed.diagnostics()
+            );
         }
-        assert_eq!(codes("a = {x = 1}\n[a.y]\nz = 1\n"), vec!["cannot-extend-inline-table"]);
+        assert_eq!(
+            codes("a = {x = 1}\n[a.y]\nz = 1\n"),
+            vec!["cannot-extend-inline-table"]
+        );
         let dotted = parse("a = {b.c = 1, b.d = 2}\n");
         let inner = dotted
             .document()
@@ -1653,7 +1708,10 @@ mod tests {
         let root_table = parsed.document().root();
         assert_eq!(root_table.get("a").and_then(Value::as_str), Some("x\ty"));
         assert_eq!(root_table.get("b").and_then(Value::as_str), Some("x\\ty"));
-        assert_eq!(root_table.get("c").and_then(Value::as_str), Some("linejoined"));
+        assert_eq!(
+            root_table.get("c").and_then(Value::as_str),
+            Some("linejoined")
+        );
         assert_eq!(root_table.get("d").and_then(Value::as_str), Some("x\ny"));
 
         let broken = parse("a = \"\\uD800\"\n");
@@ -1682,12 +1740,21 @@ mod tests {
         let parsed = parse(source);
         assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
         let root_table = parsed.document().root();
-        let a = root_table.get("a").and_then(Value::as_integer).expect("integer");
+        let a = root_table
+            .get("a")
+            .and_then(Value::as_integer)
+            .expect("integer");
         assert_eq!(a.as_i64(), Ok(0xDEAD));
         assert_eq!(a.as_f64(), Ok(57_005.0));
-        let b = root_table.get("b").and_then(Value::as_integer).expect("integer");
+        let b = root_table
+            .get("b")
+            .and_then(Value::as_integer)
+            .expect("integer");
         assert_eq!(b.as_i64(), Ok(-1_000));
-        let e = root_table.get("e").and_then(Value::as_float).expect("float");
+        let e = root_table
+            .get("e")
+            .and_then(Value::as_float)
+            .expect("float");
         assert!(e.as_f64().is_ok_and(|value| value.is_nan()));
         let kinds = [
             ("f", DateTimeKind::OffsetDateTime),
@@ -1696,7 +1763,10 @@ mod tests {
             ("i", DateTimeKind::LocalDateTime),
         ];
         for (key, kind) in kinds {
-            let value = root_table.get(key).and_then(Value::as_date_time).expect(key);
+            let value = root_table
+                .get(key)
+                .and_then(Value::as_date_time)
+                .expect(key);
             assert_eq!(value.kind(), kind, "key: {key}");
             assert!(value.is_valid(), "key: {key}");
         }
@@ -1718,7 +1788,11 @@ mod tests {
     fn recovery_preserves_following_expressions() {
         let parsed = parse("a = ]\nb = 2\nc = 3\n");
         assert_eq!(
-            parsed.diagnostics().iter().map(|d| d.kind.code()).collect::<Vec<_>>(),
+            parsed
+                .diagnostics()
+                .iter()
+                .map(|d| d.kind.code())
+                .collect::<Vec<_>>(),
             vec!["expected-value"]
         );
         let root_table = parsed.document().root();
@@ -1747,7 +1821,11 @@ mod tests {
         let deep = format!("a = {}1{}\n", "[".repeat(129), "]".repeat(129));
         let parsed = parse(&deep);
         assert_eq!(
-            parsed.diagnostics().iter().map(|d| d.kind.code()).collect::<Vec<_>>(),
+            parsed
+                .diagnostics()
+                .iter()
+                .map(|d| d.kind.code())
+                .collect::<Vec<_>>(),
             vec!["nesting-limit-exceeded"]
         );
         assert_eq!(
@@ -1766,7 +1844,10 @@ mod tests {
             .iter()
             .map(|d| d.kind.code())
             .collect::<Vec<_>>();
-        assert_eq!(limited_codes, vec!["expected-equals", "expected-equals", "too-many-diagnostics"]);
+        assert_eq!(
+            limited_codes,
+            vec!["expected-equals", "expected-equals", "too-many-diagnostics"]
+        );
         assert_eq!(
             parse_with(noisy, ParseOptions::new().max_diagnostics(500))
                 .diagnostics()

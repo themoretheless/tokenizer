@@ -470,8 +470,8 @@ impl<'source> Integer<'source> {
         }
         let cleaned = without_underscores(self.raw);
         if let Some((radix, digits)) = radix_of(&cleaned) {
-            let magnitude = u64::from_str_radix(digits, radix)
-                .map_err(|_| NumberError::OutOfRange)?;
+            let magnitude =
+                u64::from_str_radix(digits, radix).map_err(|_| NumberError::OutOfRange)?;
             return i64::try_from(magnitude).map_err(|_| NumberError::OutOfRange);
         }
         cleaned.parse().map_err(|_| NumberError::OutOfRange)
@@ -486,8 +486,7 @@ impl<'source> Integer<'source> {
             return Err(NumberError::NegativeUnsigned);
         }
         if let Some((radix, digits)) = radix_of(&cleaned) {
-            return u64::from_str_radix(digits, radix)
-                .map_err(|_| NumberError::OutOfRange);
+            return u64::from_str_radix(digits, radix).map_err(|_| NumberError::OutOfRange);
         }
         cleaned.parse().map_err(|_| NumberError::OutOfRange)
     }
@@ -498,8 +497,8 @@ impl<'source> Integer<'source> {
         }
         let cleaned = without_underscores(self.raw);
         if let Some((radix, digits)) = radix_of(&cleaned) {
-            let magnitude = u128::from_str_radix(digits, radix)
-                .map_err(|_| NumberError::OutOfRange)?;
+            let magnitude =
+                u128::from_str_radix(digits, radix).map_err(|_| NumberError::OutOfRange)?;
             return Ok(magnitude as f64);
         }
         let value: f64 = cleaned.parse().map_err(|_| NumberError::InvalidFloat)?;
@@ -760,10 +759,7 @@ mod tests {
             span: Span::new(0, 2),
             valid: false,
         };
-        assert_eq!(
-            invalid.as_i64(),
-            Err(NumberError::InvalidTomlNumber)
-        );
+        assert_eq!(invalid.as_i64(), Err(NumberError::InvalidTomlNumber));
     }
 
     #[test]

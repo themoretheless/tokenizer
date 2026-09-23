@@ -670,7 +670,9 @@ impl<'source> Lexer<'source> {
     fn scan_multi_line_basic_string(&mut self, start: usize) {
         let mut valid = true;
         self.cursor = start + 3;
-        if self.bytes().get(self.cursor) == Some(&b'\r') && self.bytes().get(self.cursor + 1) == Some(&b'\n') {
+        if self.bytes().get(self.cursor) == Some(&b'\r')
+            && self.bytes().get(self.cursor + 1) == Some(&b'\n')
+        {
             self.cursor += 2;
         } else if self.bytes().get(self.cursor) == Some(&b'\n') {
             self.cursor += 1;
@@ -696,7 +698,11 @@ impl<'source> Lexer<'source> {
                     let error_start = self.cursor;
                     self.cursor += 1;
                     valid = false;
-                    self.problem(LexDiagnosticKind::InvalidLineBreak, error_start, self.cursor);
+                    self.problem(
+                        LexDiagnosticKind::InvalidLineBreak,
+                        error_start,
+                        self.cursor,
+                    );
                 }
                 byte if is_forbidden_control(byte) => {
                     let error_start = self.cursor;
@@ -724,11 +730,16 @@ impl<'source> Lexer<'source> {
         let escape_start = self.cursor;
         self.cursor += 1;
         let mut after = self.cursor;
-        while self.bytes().get(after).is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
+        while self
+            .bytes()
+            .get(after)
+            .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+        {
             after += 1;
         }
         if self.bytes().get(after) == Some(&b'\n')
-            || (self.bytes().get(after) == Some(&b'\r') && self.bytes().get(after + 1) == Some(&b'\n'))
+            || (self.bytes().get(after) == Some(&b'\r')
+                && self.bytes().get(after + 1) == Some(&b'\n'))
         {
             self.cursor = after;
             while self
@@ -794,7 +805,9 @@ impl<'source> Lexer<'source> {
     fn scan_multi_line_literal_string(&mut self, start: usize) {
         let mut valid = true;
         self.cursor = start + 3;
-        if self.bytes().get(self.cursor) == Some(&b'\r') && self.bytes().get(self.cursor + 1) == Some(&b'\n') {
+        if self.bytes().get(self.cursor) == Some(&b'\r')
+            && self.bytes().get(self.cursor + 1) == Some(&b'\n')
+        {
             self.cursor += 2;
         } else if self.bytes().get(self.cursor) == Some(&b'\n') {
             self.cursor += 1;
@@ -817,7 +830,11 @@ impl<'source> Lexer<'source> {
                     let error_start = self.cursor;
                     self.cursor += 1;
                     valid = false;
-                    self.problem(LexDiagnosticKind::InvalidLineBreak, error_start, self.cursor);
+                    self.problem(
+                        LexDiagnosticKind::InvalidLineBreak,
+                        error_start,
+                        self.cursor,
+                    );
                 }
                 byte if is_forbidden_control(byte) => {
                     let error_start = self.cursor;
@@ -851,11 +868,9 @@ impl<'source> Lexer<'source> {
 
     fn scan_bare_atom(&mut self, start: usize) {
         self.cursor += 1;
-        while self
-            .bytes()
-            .get(self.cursor)
-            .is_some_and(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-'))
-        {
+        while self.bytes().get(self.cursor).is_some_and(
+            |byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-'),
+        ) {
             self.cursor += 1;
         }
         let kind = match &self.source[start..self.cursor] {
@@ -912,10 +927,9 @@ impl<'source> Lexer<'source> {
     fn is_signed_special(&self, start: usize) -> bool {
         let rest = &self.source[start..];
         (rest.starts_with("-inf") || rest.starts_with("-nan"))
-            && !self
-                .bytes()
-                .get(start + 4)
-                .is_some_and(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-'))
+            && !self.bytes().get(start + 4).is_some_and(
+                |byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-'),
+            )
     }
 
     fn is_time_shape(&self, cursor: usize) -> bool {
@@ -979,7 +993,7 @@ impl<'source> Lexer<'source> {
         self.push(kind, start, self.cursor);
     }
 
-        fn scan_time_components(&mut self) {
+    fn scan_time_components(&mut self) {
         let hour = self.component_span(2);
         let hour_value = self.component_value(hour);
         if hour_value > 23 {
@@ -1020,8 +1034,7 @@ impl<'source> Lexer<'source> {
                 );
                 self.mark_after_push = true;
             }
-            if self.bytes().get(self.cursor) == Some(&b'.')
-                && self.is_digit_run(self.cursor + 1, 1)
+            if self.bytes().get(self.cursor) == Some(&b'.') && self.is_digit_run(self.cursor + 1, 1)
             {
                 self.cursor += 1;
                 while self
@@ -1070,7 +1083,8 @@ impl<'source> Lexer<'source> {
         let span = (self.cursor, self.cursor + count);
         self.cursor += count;
         span
-    }fn component_value(&self, span: (usize, usize)) -> u32 {
+    }
+    fn component_value(&self, span: (usize, usize)) -> u32 {
         self.source[span.0..span.1]
             .bytes()
             .fold(0_u32, |value, byte| value * 10 + u32::from(byte - b'0'))
@@ -1160,7 +1174,11 @@ impl<'source> Lexer<'source> {
             let end = self.cursor.max(start + 1);
             self.push(SyntaxKind::Error, start, end);
             self.mark_last_error();
-            self.problem(LexDiagnosticKind::InvalidNumber(NumberIssue::MissingDigits), start, end);
+            self.problem(
+                LexDiagnosticKind::InvalidNumber(NumberIssue::MissingDigits),
+                start,
+                end,
+            );
             return;
         }
         let mut float = false;
@@ -1211,7 +1229,15 @@ impl<'source> Lexer<'source> {
             }
         }
         let end = self.cursor;
-        self.push(if float { SyntaxKind::Float } else { SyntaxKind::Integer }, start, end);
+        self.push(
+            if float {
+                SyntaxKind::Float
+            } else {
+                SyntaxKind::Integer
+            },
+            start,
+            end,
+        );
         if let Err((issue, relative_start, relative_end)) =
             validate_number(&self.source[start..end], signed)
         {
@@ -1280,11 +1306,9 @@ impl<'source> Lexer<'source> {
     }
 
     fn scan_signed_special(&mut self, start: usize) {
-        while self
-            .bytes()
-            .get(self.cursor)
-            .is_some_and(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-'))
-        {
+        while self.bytes().get(self.cursor).is_some_and(
+            |byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-'),
+        ) {
             self.cursor += 1;
         }
         let special = matches!(
@@ -1301,7 +1325,11 @@ impl<'source> Lexer<'source> {
         } else {
             self.push(SyntaxKind::Error, start, self.cursor);
             self.mark_last_error();
-            self.problem(LexDiagnosticKind::UnexpectedCharacter, start + 1, self.cursor);
+            self.problem(
+                LexDiagnosticKind::UnexpectedCharacter,
+                start + 1,
+                self.cursor,
+            );
         }
     }
 
@@ -1421,39 +1449,67 @@ fn validate_number(text: &str, signed: bool) -> Result<(), (NumberIssue, usize, 
     let bytes = text.as_bytes();
     let mut cursor = if signed { 1 } else { 0 };
     let integer_start = cursor;
-    while bytes.get(cursor).is_some_and(|byte| byte.is_ascii_digit() || *byte == b'_') {
+    while bytes
+        .get(cursor)
+        .is_some_and(|byte| byte.is_ascii_digit() || *byte == b'_')
+    {
         cursor += 1;
     }
     let integer = &text[integer_start..cursor];
     if let Some(offset) = misplaced_underscore(integer, |byte| byte.is_ascii_digit()) {
-        return Err((NumberIssue::MisplacedUnderscore, integer_start + offset, integer_start + offset + 1));
+        return Err((
+            NumberIssue::MisplacedUnderscore,
+            integer_start + offset,
+            integer_start + offset + 1,
+        ));
     }
     if integer.as_bytes().first() == Some(&b'0') && integer.len() > 1 {
-        return Err((NumberIssue::LeadingZero, integer_start + 1, integer_start + 2));
+        return Err((
+            NumberIssue::LeadingZero,
+            integer_start + 1,
+            integer_start + 2,
+        ));
     }
     if bytes.get(cursor) == Some(&b'.') {
         cursor += 1;
         let fraction_start = cursor;
-        while bytes.get(cursor).is_some_and(|byte| byte.is_ascii_digit() || *byte == b'_') {
+        while bytes
+            .get(cursor)
+            .is_some_and(|byte| byte.is_ascii_digit() || *byte == b'_')
+        {
             cursor += 1;
         }
         let fraction = &text[fraction_start..cursor];
         if let Some(offset) = misplaced_underscore(fraction, |byte| byte.is_ascii_digit()) {
-            return Err((NumberIssue::MisplacedUnderscore, fraction_start + offset, fraction_start + offset + 1));
+            return Err((
+                NumberIssue::MisplacedUnderscore,
+                fraction_start + offset,
+                fraction_start + offset + 1,
+            ));
         }
     }
-    if bytes.get(cursor).is_some_and(|byte| matches!(byte, b'e' | b'E')) {
+    if bytes
+        .get(cursor)
+        .is_some_and(|byte| matches!(byte, b'e' | b'E'))
+    {
         cursor += 1;
         if matches!(bytes.get(cursor), Some(b'+' | b'-')) {
             cursor += 1;
         }
         let exponent_start = cursor;
-        while bytes.get(cursor).is_some_and(|byte| byte.is_ascii_digit() || *byte == b'_') {
+        while bytes
+            .get(cursor)
+            .is_some_and(|byte| byte.is_ascii_digit() || *byte == b'_')
+        {
             cursor += 1;
         }
         let exponent = &text[exponent_start..cursor];
         if let Some(offset) = misplaced_underscore(exponent, |byte| byte.is_ascii_digit()) {
-            return Err((NumberIssue::MisplacedUnderscore, exponent_start + offset, exponent_start + offset + 1));
+            return Err((
+                NumberIssue::MisplacedUnderscore,
+                exponent_start + offset,
+                exponent_start + offset + 1,
+            ));
         }
     }
     Ok(())
@@ -1463,7 +1519,9 @@ fn days_in_month(year: u32, month: u32) -> u32 {
     match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
-        _ if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => 29,
+        _ if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => {
+            29
+        }
         _ => 28,
     }
 }
@@ -1522,9 +1580,11 @@ mod tests {
                 SyntaxKind::Newline,
             ]
         );
-        assert!(lex("[a.b] # t\nname = 'x'  # y\nflag = true\n")
-            .diagnostics()
-            .is_empty());
+        assert!(
+            lex("[a.b] # t\nname = 'x'  # y\nflag = true\n")
+                .diagnostics()
+                .is_empty()
+        );
         assert_eq!(
             kinds("v = [1, {k = 2.5}]"),
             vec![
@@ -1575,10 +1635,7 @@ mod tests {
         let lexed = lex(source);
         assert!(lexed.diagnostics().is_empty(), "{:?}", lexed.diagnostics());
         assert_lossless(source, &lexed);
-        let kinds: Vec<_> = lexed
-            .significant_tokens()
-            .map(|token| token.kind)
-            .collect();
+        let kinds: Vec<_> = lexed.significant_tokens().map(|token| token.kind).collect();
         for expected in [
             SyntaxKind::OffsetDateTime,
             SyntaxKind::LocalDate,
@@ -1613,7 +1670,15 @@ mod tests {
     #[test]
     fn accepts_exact_number_grammar() {
         for source in [
-            "0", "-0", "42", "-12.5", "1e9", "1E-9", "0.0e+0", "1_000", "3.141_592",
+            "0",
+            "-0",
+            "42",
+            "-12.5",
+            "1e9",
+            "1E-9",
+            "0.0e+0",
+            "1_000",
+            "3.141_592",
         ] {
             assert!(lex(source).diagnostics().is_empty(), "{source}");
         }
@@ -1628,7 +1693,11 @@ mod tests {
             ("1e+", NumberIssue::MissingExponentDigits, Span::new(0, 3)),
         ] {
             let lexed = lex(source);
-            assert_eq!(lexed.diagnostics()[0].kind, LexDiagnosticKind::InvalidNumber(issue), "{source}");
+            assert_eq!(
+                lexed.diagnostics()[0].kind,
+                LexDiagnosticKind::InvalidNumber(issue),
+                "{source}"
+            );
             assert_eq!(lexed.diagnostics()[0].span, span, "{source}");
         }
         assert!(lex("1e").tokens()[0].has_error());
@@ -1671,9 +1740,11 @@ mod tests {
 
     #[test]
     fn validates_string_escapes() {
-        assert!(lex(r#""\b\t\n\f\r\"\\ \u00E9 \U0001F600""#)
-            .diagnostics()
-            .is_empty());
+        assert!(
+            lex(r#""\b\t\n\f\r\"\\ \u00E9 \U0001F600""#)
+                .diagnostics()
+                .is_empty()
+        );
         assert_eq!(
             lex(r#""\q""#).diagnostics()[0].kind,
             LexDiagnosticKind::InvalidEscape
@@ -1712,11 +1783,22 @@ mod tests {
     #[test]
     fn unterminated_strings_recover_at_the_newline() {
         let single = lex("\"abc\nd = 1");
-        assert_eq!(single.diagnostics()[0].kind, LexDiagnosticKind::UnterminatedString);
-        assert!(single.tokens().iter().any(|token| token.kind == SyntaxKind::BareKey));
+        assert_eq!(
+            single.diagnostics()[0].kind,
+            LexDiagnosticKind::UnterminatedString
+        );
+        assert!(
+            single
+                .tokens()
+                .iter()
+                .any(|token| token.kind == SyntaxKind::BareKey)
+        );
         assert_lossless("\"abc\nd = 1", &single);
         let multi = lex("\"\"\"never ends");
-        assert_eq!(multi.diagnostics()[0].kind, LexDiagnosticKind::UnterminatedString);
+        assert_eq!(
+            multi.diagnostics()[0].kind,
+            LexDiagnosticKind::UnterminatedString
+        );
         assert_lossless("\"\"\"never ends", &multi);
     }
 
@@ -1830,10 +1912,7 @@ mod tests {
 
     #[test]
     fn dotted_key_numbers_split_on_dots_without_leading_digits() {
-        assert_eq!(
-            kinds("1.2"),
-            vec![SyntaxKind::Float]
-        );
+        assert_eq!(kinds("1.2"), vec![SyntaxKind::Float]);
         assert_eq!(
             kinds("1.foo"),
             vec![SyntaxKind::Integer, SyntaxKind::Dot, SyntaxKind::BareKey]
@@ -1854,7 +1933,10 @@ mod tests {
         assert!(lex("\"\"\"\"\"\"").diagnostics().is_empty());
         let seven = lex("\"\"\"\"\"\"\"");
         assert_eq!(seven.tokens()[0].kind, SyntaxKind::MultiLineBasicString);
-        assert_eq!(seven.tokens()[0].text("\"\"\"\"\"\"\""), Some("\"\"\"\"\"\"\""));
+        assert_eq!(
+            seven.tokens()[0].text("\"\"\"\"\"\"\""),
+            Some("\"\"\"\"\"\"\"")
+        );
         assert!(seven.diagnostics().is_empty());
         let four = lex("\"\"\"\"");
         assert_eq!(
@@ -1862,10 +1944,7 @@ mod tests {
             LexDiagnosticKind::UnterminatedString
         );
         assert_lossless("\"\"\"\"", &four);
-        assert_eq!(
-            kinds("'''''"),
-            vec![SyntaxKind::MultiLineLiteralString]
-        );
+        assert_eq!(kinds("'''''"), vec![SyntaxKind::MultiLineLiteralString]);
         assert!(lex("'''''").has_errors());
     }
 
@@ -1938,10 +2017,7 @@ mod tests {
                 SyntaxKind::False,
             ]
         );
-        assert_eq!(
-            kinds("infx"),
-            vec![SyntaxKind::BareKey]
-        );
+        assert_eq!(kinds("infx"), vec![SyntaxKind::BareKey]);
     }
 
     #[test]
