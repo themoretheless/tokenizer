@@ -41,19 +41,19 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@2d3bc163ca57318e89e801795a0b0356d5a9d941 # first-party actions
+      - name: Set up Rust
+        uses: themoretheless/.github/.github/actions/setup-rust@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           rust-toolchain: beta
 
       - name: Resolve package version
         id: package
-        uses: themoretheless/.github/.github/actions/cargo-package-version@2d3bc163ca57318e89e801795a0b0356d5a9d941 # first-party actions
+        uses: themoretheless/.github/.github/actions/cargo-package-version@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           package-name: themoretheless-tokenizer
 
       - name: Validate ref and version
-        uses: themoretheless/.github/.github/actions/validate-package-release@2d3bc163ca57318e89e801795a0b0356d5a9d941 # first-party actions
+        uses: themoretheless/.github/.github/actions/validate-package-release@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           version: ${{ steps.package.outputs.version }}
           tag: ${{ steps.package.outputs.tag }}
@@ -98,8 +98,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install beta Rust
-        uses: themoretheless/.github/.github/actions/setup-rust@2d3bc163ca57318e89e801795a0b0356d5a9d941 # first-party actions
+      - name: Set up Rust
+        uses: themoretheless/.github/.github/actions/setup-rust@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           rust-toolchain: beta
 
@@ -110,7 +110,7 @@ jobs:
           exit 1
 
       - name: Validate explicit confirmation
-        uses: themoretheless/.github/.github/actions/validate-package-release@2d3bc163ca57318e89e801795a0b0356d5a9d941 # first-party actions
+        uses: themoretheless/.github/.github/actions/validate-package-release@a6c40a906bc786a3668362d270ca95212b5bffce # v1
         with:
           version: ${{ needs.dry-run.outputs.version }}
           tag: ${{ needs.dry-run.outputs.tag }}

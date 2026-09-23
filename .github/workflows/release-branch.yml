@@ -1,0 +1,39 @@
+# Keep the long-lived `release` branch on the latest tag tip
+# (git deps: branch = "release"). Release-driven tags are advanced by the
+# advance-release-branch job in release.yml; GITHUB_TOKEN tag pushes never
+# trigger a push workflow, so this workflow only covers manually created tags.
+name: Advance release branch
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  # Shared with release.yml's advance job so the two writers queue, not race.
+  group: advance-release-branch
+  cancel-in-progress: false
+
+jobs:
+  advance:
+    name: Update release branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Point release at tag
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B release "${GITHUB_SHA}"
+          git push origin release --force
+          echo "release -> ${GITHUB_SHA} (${GITHUB_REF_NAME})"
