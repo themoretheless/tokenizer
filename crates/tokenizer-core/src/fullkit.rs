@@ -423,8 +423,7 @@ pub fn lex_full(source: &str, profile: &FullProfile) -> Lexed {
             }
             continue;
         }
-        if b.is_ascii_digit()
-            || (b == b'.' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit())
+        if b.is_ascii_digit() || (b == b'.' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit())
         {
             let start = i;
             i += 1;
@@ -469,7 +468,11 @@ pub fn lex_full(source: &str, profile: &FullProfile) -> Lexed {
             continue;
         }
         let start = i;
-        i += source[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+        i += source[i..]
+            .chars()
+            .next()
+            .map(|c| c.len_utf8())
+            .unwrap_or(1);
         push_lex(&mut out, SyntaxKind::Identifier, start, i);
     }
     out
@@ -595,11 +598,8 @@ impl<'s> Parser<'s> {
             let span = self.peek().map(|t| t.span).unwrap_or_else(|| {
                 Span::new(self.source.len().saturating_sub(1), self.source.len())
             });
-            self.diagnostics.push(Diagnostic::new(
-                span,
-                "expected-token",
-                "Expected token",
-            ));
+            self.diagnostics
+                .push(Diagnostic::new(span, "expected-token", "Expected token"));
             None
         }
     }
@@ -764,10 +764,7 @@ impl<'s> Parser<'s> {
                 break;
             }
         }
-        let end = stmts
-            .last()
-            .map(|s| stmt_span(s).end)
-            .unwrap_or(start);
+        let end = stmts.last().map(|s| stmt_span(s).end).unwrap_or(start);
         Block {
             span: Span::new(start, end),
             stmts,
@@ -968,8 +965,7 @@ impl<'s> Parser<'s> {
 
     fn parse_expr(&mut self, min_bp: u8) -> Expr<'s> {
         let mut lhs = self.parse_prefix();
-        loop {
-            let Some(op) = self.peek() else { break };
+        while let Some(op) = self.peek() {
             let text = self.text_of(op);
             let Some((lbp, rbp)) = infix_bp(text) else {
                 break;
@@ -1105,7 +1101,12 @@ impl<'s> Parser<'s> {
                 entries,
             };
         }
-        if text == "-" || text == "!" || text == "~" || text == "not" || text == "++" || text == "--"
+        if text == "-"
+            || text == "!"
+            || text == "~"
+            || text == "not"
+            || text == "++"
+            || text == "--"
         {
             let op = self.bump().unwrap();
             let expr = self.parse_prefix();
@@ -1266,10 +1267,7 @@ pub fn semantic_full(parse: &Parse<'_>) -> SemanticTokenization {
                 }
             }
         }
-        tokens.push(SemanticToken {
-            kind,
-            span: t.span,
-        });
+        tokens.push(SemanticToken { kind, span: t.span });
     }
     SemanticTokenization {
         tokens,
@@ -1309,10 +1307,11 @@ fn collect_block<'s>(b: &Block<'s>, out: &mut Vec<(Span, &'static str)>) {
 
 fn collect_stmt<'s>(s: &Stmt<'s>, out: &mut Vec<(Span, &'static str)>) {
     match s {
-        Stmt::Declaration { name_span, .. } => {
-            if let Some(sp) = name_span {
-                out.push((*sp, "variable"));
-            }
+        Stmt::Declaration {
+            name_span: Some(sp),
+            ..
+        } => {
+            out.push((*sp, "variable"));
         }
         Stmt::If {
             then_block,
@@ -1396,7 +1395,10 @@ mod tests {
         let source = "function add(a, b) { return a + b; }";
         let p = parse_full(source, &profile);
         assert!(p.lexed.is_lossless(source));
-        assert!(matches!(p.module.items.first(), Some(Item::Function { .. })));
+        assert!(matches!(
+            p.module.items.first(),
+            Some(Item::Function { .. })
+        ));
         let sem = semantic_full(&p);
         assert!(sem.tokens.iter().any(|t| t.kind == "function"));
     }
@@ -1406,6 +1408,9 @@ mod tests {
         let source = "def f(x):\n    return x\n";
         let p = parse_full(source, &py());
         assert!(p.lexed.is_lossless(source));
-        assert!(matches!(p.module.items.first(), Some(Item::Function { .. })));
+        assert!(matches!(
+            p.module.items.first(),
+            Some(Item::Function { .. })
+        ));
     }
 }

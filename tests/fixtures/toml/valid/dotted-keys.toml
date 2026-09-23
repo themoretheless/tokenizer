@@ -1,0 +1,5 @@
+name = "Orange"
+physical.color = "orange"
+physical.shape = "round"
+physical.taste.sweet = true
+site."google.com" = true

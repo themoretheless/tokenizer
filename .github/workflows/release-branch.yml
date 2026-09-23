@@ -1,7 +1,5 @@
 # Keep the long-lived `release` branch on the latest tag tip
-# (git deps: branch = "release"). Release-driven tags are advanced by the
-# advance-release-branch job in release.yml; GITHUB_TOKEN tag pushes never
-# trigger a push workflow, so this workflow only covers manually created tags.
+# (git deps: branch = "release").
 name: Advance release branch
 
 on:
@@ -13,7 +11,6 @@ permissions:
   contents: write
 
 concurrency:
-  # Shared with release.yml's advance job so the two writers queue, not race.
   group: advance-release-branch
   cancel-in-progress: false
 

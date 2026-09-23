@@ -66,7 +66,7 @@ export const LANGUAGE_CASES = {
     cases: [
       { name: 'mapping', source: 'name: Denis\nage: 1\n', minTokens: 1 },
       { name: 'comment', source: '# hi\nkey: value\n', expectKinds: ['comment'] },
-      { name: 'bool', source: 'ok: true\n', expectKinds: ['keyword'] },
+      { name: 'bool', source: 'ok: true\n', expectKinds: ['identifier'] },
       { name: 'empty', source: '', minTokens: 0 },
     ],
   },

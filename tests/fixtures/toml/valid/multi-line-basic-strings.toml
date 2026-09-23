@@ -1,0 +1,6 @@
+joined = """\
+first \
+second"""
+plain = """
+multi
+line"""
