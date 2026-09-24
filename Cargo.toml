@@ -252,6 +252,9 @@ top20 = [
 ]
 # Next 20 popular languages after top20 (FP, enterprise, hardware, web API)
 next20 = ["wave7"]
+# Format family: data, config and markup documents (core::family::FORMAT_IDS).
+# Keeps pace with the formats20 target list in docs/formats.md.
+formats = ["json", "url", "xml", "html", "css", "yaml", "toml", "markdown"]
 all-languages = ["json", "url", "wave1", "wave2", "wave3", "wave4", "wave5", "wave6", "wave7"]
 # web-bridge used by playground WASM/dev bridge. Pair with language features
 # (or all-languages) so the host registry can resolve ids.

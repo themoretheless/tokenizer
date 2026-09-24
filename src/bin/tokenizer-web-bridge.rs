@@ -5,10 +5,14 @@ use std::{
     io::{self, Read},
 };
 
-use themoretheless_tokenizer::web_bridge::tokenization;
+use themoretheless_tokenizer::web_bridge::{catalog, tokenization};
 
 fn main() {
     let arguments: Vec<String> = env::args().skip(1).collect();
+    if arguments.iter().any(|flag| flag == "--catalog") {
+        println!("{}", catalog());
+        return;
+    }
     let language = argument_value(&arguments, "--language").unwrap_or("json");
     let mode = argument_value(&arguments, "--mode").unwrap_or("strict");
     let layer = argument_value(&arguments, "--layer").unwrap_or("semantic");

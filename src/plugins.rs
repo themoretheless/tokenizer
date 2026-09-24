@@ -565,29 +565,8 @@ mod tests {
     #[test]
     fn top20_register() {
         let reg = builtin_registry();
-        for id in [
-            "python",
-            "c",
-            "cpp",
-            "java",
-            "csharp",
-            "javascript",
-            "visualbasic",
-            "sql",
-            "go",
-            "fortran",
-            "matlab",
-            "php",
-            "rust",
-            "r",
-            "ruby",
-            "kotlin",
-            "swift",
-            "typescript",
-            "delphi",
-            "assembly",
-        ] {
-            assert!(reg.get_str(id).is_some(), "missing top20 id {id}");
+        for id in themoretheless_tokenizer_core::TOP20_IDS {
+            assert!(reg.get_str(id.as_str()).is_some(), "missing top20 id {id}");
         }
     }
 
@@ -595,12 +574,19 @@ mod tests {
     #[test]
     fn next20_register() {
         let reg = builtin_registry();
-        for id in [
-            "groovy", "haskell", "elixir", "erlang", "clojure", "fsharp", "ocaml", "lisp",
-            "scheme", "solidity", "zig", "nim", "dlang", "cobol", "ada", "prolog", "abap", "vhdl",
-            "verilog", "graphql",
-        ] {
-            assert!(reg.get_str(id).is_some(), "missing next20 id {id}");
+        for id in themoretheless_tokenizer_core::NEXT20_IDS {
+            assert!(reg.get_str(id.as_str()).is_some(), "missing next20 id {id}");
+        }
+    }
+
+    #[cfg(feature = "formats")]
+    #[test]
+    fn formats_register() {
+        use themoretheless_tokenizer_core::Family;
+        let reg = builtin_registry();
+        for id in themoretheless_tokenizer_core::FORMAT_IDS {
+            assert!(reg.get_str(id.as_str()).is_some(), "missing format id {id}");
+            assert_eq!(Family::of(*id), Family::FORMAT);
         }
     }
 }

@@ -8,6 +8,22 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Format family as first-class core data: `core::family` (`Family`,
+  `FORMAT_IDS`, `TOP20_IDS`, `NEXT20_IDS`, `Preset`, `presets_of`) plus a
+  `formats` cargo feature; registry presets are derived from these tables.
+- `catalog()` endpoint (bin `--catalog`, WASM `wasm_catalog`, dev
+  `/api/catalog`) exposing per-engine family, presets, dialects, extensions
+  and capabilities so the playground consumes registry truth, not restated lists.
+- Playground presets (top20 / next20 / formats), two-in-one compare view with a
+  KIND DIFF pane, and a measured engine-depth matrix with batch run.
+- TOML and YAML host adapters now emit their own spec vocabularies
+  (`bare-key`, `plain-scalar`, `value-indicator`, …) instead of collapsing into
+  the generic core syntax kinds, so format-specific tokens reach the UI.
+- `markdown` and `css` are now hand-written recovering format engines with
+  their own `SyntaxKind` vocabularies (34 kinds each) instead of generic
+  fullkit wrappers: measured format-specific kinds went 0 -> 8 (markdown) and
+  0 -> 7 (css), and spurious "unexpected token" diagnostics on *valid*
+  documents went 9 -> 0 and 3 -> 0. Both advertise honest `LEX|PARSE|SEMANTIC|VALIDATE`.
 - Full multi-language pipeline in `core::fullkit` (lex → recovering parse →
   shared AST → semantic tokens) for programming/data languages.
 - Full markup AST pipeline in `core::markup_full` for HTML/XML.
