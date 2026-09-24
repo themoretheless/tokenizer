@@ -10,6 +10,7 @@
 
 pub mod capabilities;
 pub mod diagnostic;
+pub mod family;
 pub mod fullkit;
 pub mod host;
 pub mod langkit;
@@ -24,6 +25,7 @@ pub mod span;
 
 pub use capabilities::{Capabilities, Capability, CapabilityError};
 pub use diagnostic::{Diagnostic, DiagnosticKind, Severity};
+pub use family::{FORMAT_IDS, Family, NEXT20_IDS, Preset, TOP20_IDS, presets_of};
 pub use fullkit::{
     Block, Expr, FULL_ENGINE_CAPS, FullProfile, Item, LexToken, Lexed, LitKind, Module, Parse,
     SemanticToken, SemanticTokenization, Stmt, SyntaxKind, analyze_full_host, lex_full,

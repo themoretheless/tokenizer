@@ -39,33 +39,37 @@ use std::borrow::Cow;
 
 use themoretheless_tokenizer_core::{
     HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan, HostToken,
-    HostTokenization, LanguageDescriptor, LanguageId, Severity, SyntaxKind as CoreSyntaxKind,
-    full_descriptor, require_default_dialect,
+    HostTokenization, LanguageDescriptor, LanguageId, Severity, full_descriptor,
+    require_default_dialect,
 };
 
-fn core_kind(kind: SyntaxKind) -> CoreSyntaxKind {
+/// Host token kind: YAML's own node vocabulary, so an editor can tell a key
+/// indicator from a flow entry, or an anchor from a plain scalar.
+fn host_kind(kind: SyntaxKind) -> &'static str {
     match kind {
-        SyntaxKind::Whitespace | SyntaxKind::LineBreak | SyntaxKind::Bom => {
-            CoreSyntaxKind::Whitespace
-        }
-        SyntaxKind::Comment => CoreSyntaxKind::LineComment,
-        SyntaxKind::DocumentStart
-        | SyntaxKind::DocumentEnd
-        | SyntaxKind::BlockEntry
-        | SyntaxKind::KeyIndicator
-        | SyntaxKind::ValueIndicator
-        | SyntaxKind::FlowSequenceStart
-        | SyntaxKind::FlowSequenceEnd
-        | SyntaxKind::FlowMappingStart
-        | SyntaxKind::FlowMappingEnd
-        | SyntaxKind::FlowEntry => CoreSyntaxKind::Punctuation,
-        SyntaxKind::Directive | SyntaxKind::BlockScalarHeader => CoreSyntaxKind::Operator,
-        SyntaxKind::Anchor | SyntaxKind::Alias | SyntaxKind::Tag => CoreSyntaxKind::Identifier,
-        SyntaxKind::SingleQuotedScalar | SyntaxKind::DoubleQuotedScalar => {
-            CoreSyntaxKind::StringLit
-        }
-        SyntaxKind::PlainScalar => CoreSyntaxKind::Identifier,
-        SyntaxKind::Error => CoreSyntaxKind::Error,
+        SyntaxKind::Whitespace => "whitespace",
+        SyntaxKind::LineBreak => "line-break",
+        SyntaxKind::Bom => "bom",
+        SyntaxKind::Comment => "comment",
+        SyntaxKind::DocumentStart => "document-start",
+        SyntaxKind::DocumentEnd => "document-end",
+        SyntaxKind::Directive => "directive",
+        SyntaxKind::BlockEntry => "block-entry",
+        SyntaxKind::KeyIndicator => "key-indicator",
+        SyntaxKind::ValueIndicator => "value-indicator",
+        SyntaxKind::FlowSequenceStart => "flow-sequence-start",
+        SyntaxKind::FlowSequenceEnd => "flow-sequence-end",
+        SyntaxKind::FlowMappingStart => "flow-mapping-start",
+        SyntaxKind::FlowMappingEnd => "flow-mapping-end",
+        SyntaxKind::FlowEntry => "flow-entry",
+        SyntaxKind::Anchor => "anchor",
+        SyntaxKind::Alias => "alias",
+        SyntaxKind::Tag => "tag",
+        SyntaxKind::BlockScalarHeader => "block-scalar-header",
+        SyntaxKind::SingleQuotedScalar => "single-quoted-scalar",
+        SyntaxKind::DoubleQuotedScalar => "double-quoted-scalar",
+        SyntaxKind::PlainScalar => "plain-scalar",
+        SyntaxKind::Error => "error",
     }
 }
 
@@ -73,15 +77,15 @@ fn host_tokenization(parse: &Parse<'_>) -> HostTokenization {
     let lexed = parse.lexed();
     let mut tokens = Vec::new();
     for token in lexed.tokens() {
-        let kind = if token.has_error() {
-            CoreSyntaxKind::Error
-        } else {
-            core_kind(token.kind)
-        };
+        let error = token.has_error();
         tokens.push(HostToken {
-            kind: Cow::Borrowed(kind.as_str()),
+            kind: Cow::Borrowed(if error {
+                "error"
+            } else {
+                host_kind(token.kind)
+            }),
             span: HostSpan::from(token.span),
-            error: kind == CoreSyntaxKind::Error,
+            error,
         });
     }
     let mut diagnostics = Vec::new();
@@ -177,7 +181,9 @@ mod tests {
             .iter()
             .map(|token| token.kind.as_ref())
             .collect();
-        assert!(kinds.contains(&"punctuation"));
+        assert!(kinds.contains(&"value-indicator"), "{kinds:?}");
+        assert!(kinds.contains(&"plain-scalar"), "{kinds:?}");
+        assert!(kinds.contains(&"line-break"), "{kinds:?}");
     }
 
     #[test]
