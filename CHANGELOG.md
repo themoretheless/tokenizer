@@ -34,6 +34,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   erlang, clojure, fsharp, ocaml, lisp, scheme, solidity, zig, nim, dlang,
   cobol, ada, prolog, abap, vhdl, verilog, graphql.
 - Docs: `docs/languages.md`.
+- Docs: `docs/structure-review.md` — measured audit of the workspace against
+  this project's own contract (SOLID, DRY, modularity, pluggability), with the
+  phased cleanup plan it implies.
 - Playground WASM case matrix covering every registered language id.
 - Playground UI/UX for all language types: searchable grouped language
   combobox, shared `?lang=&mode=&layer=` state, per-language example case
