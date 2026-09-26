@@ -1,0 +1,5 @@
+% demo
+f(X) ->
+  case X of
+    1 -> ok
+  end.

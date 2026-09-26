@@ -9,6 +9,13 @@ members = [
     "crates/tokenizer-yaml",
     "crates/tokenizer-toml",
     "crates/tokenizer-markdown",
+    "crates/tokenizer-csv",
+    "crates/tokenizer-logfmt",
+    "crates/tokenizer-ini",
+    "crates/tokenizer-hcl",
+    "crates/tokenizer-edn",
+    "crates/tokenizer-ics",
+    "crates/tokenizer-srt",
     "crates/tokenizer-sql",
     "crates/tokenizer-mongo",
     "crates/tokenizer-bash",
@@ -90,6 +97,13 @@ themoretheless-tokenizer-css = { path = "crates/tokenizer-css", version = "0.4.0
 themoretheless-tokenizer-yaml = { path = "crates/tokenizer-yaml", version = "0.4.0", optional = true }
 themoretheless-tokenizer-toml = { path = "crates/tokenizer-toml", version = "0.4.0", optional = true }
 themoretheless-tokenizer-markdown = { path = "crates/tokenizer-markdown", version = "0.4.0", optional = true }
+themoretheless-tokenizer-csv = { path = "crates/tokenizer-csv", version = "0.4.0", optional = true }
+themoretheless-tokenizer-logfmt = { path = "crates/tokenizer-logfmt", version = "0.4.0", optional = true }
+themoretheless-tokenizer-ini = { path = "crates/tokenizer-ini", version = "0.4.0", optional = true }
+themoretheless-tokenizer-hcl = { path = "crates/tokenizer-hcl", version = "0.4.0", optional = true }
+themoretheless-tokenizer-edn = { path = "crates/tokenizer-edn", version = "0.4.0", optional = true }
+themoretheless-tokenizer-ics = { path = "crates/tokenizer-ics", version = "0.4.0", optional = true }
+themoretheless-tokenizer-srt = { path = "crates/tokenizer-srt", version = "0.4.0", optional = true }
 themoretheless-tokenizer-sql = { path = "crates/tokenizer-sql", version = "0.4.0", optional = true }
 themoretheless-tokenizer-mongo = { path = "crates/tokenizer-mongo", version = "0.4.0", optional = true }
 themoretheless-tokenizer-bash = { path = "crates/tokenizer-bash", version = "0.4.0", optional = true }
@@ -150,6 +164,18 @@ css = ["dep:themoretheless-tokenizer-css"]
 yaml = ["dep:themoretheless-tokenizer-yaml"]
 toml = ["dep:themoretheless-tokenizer-toml"]
 markdown = ["dep:themoretheless-tokenizer-markdown"]
+csv = ["dep:themoretheless-tokenizer-csv"]
+tsv = ["csv"]
+logfmt = ["dep:themoretheless-tokenizer-logfmt"]
+ini = ["dep:themoretheless-tokenizer-ini"]
+properties = ["ini"]
+hcl = ["dep:themoretheless-tokenizer-hcl"]
+edn = ["dep:themoretheless-tokenizer-edn"]
+ics = ["dep:themoretheless-tokenizer-ics"]
+srt = ["dep:themoretheless-tokenizer-srt"]
+vtt = ["srt"]
+json5 = ["json"]
+jsonl = ["json"]
 sql = ["dep:themoretheless-tokenizer-sql"]
 mongo = ["dep:themoretheless-tokenizer-mongo"]
 bash = ["dep:themoretheless-tokenizer-bash"]
@@ -252,7 +278,10 @@ top20 = [
 ]
 # Next 20 popular languages after top20 (FP, enterprise, hardware, web API)
 next20 = ["wave7"]
-all-languages = ["json", "url", "wave1", "wave2", "wave3", "wave4", "wave5", "wave6", "wave7"]
+# Format family: data, config and markup documents (core::family::FORMAT_IDS).
+# Keeps pace with the format target list documented in docs/languages.md.
+formats = ["json", "json5", "jsonl", "url", "xml", "html", "css", "yaml", "toml", "markdown", "csv", "tsv", "logfmt", "ini", "properties", "hcl", "edn", "ics", "srt", "vtt"]
+all-languages = ["json", "url", "wave1", "wave2", "wave3", "wave4", "wave5", "wave6", "wave7", "formats"]
 # web-bridge used by playground WASM/dev bridge. Pair with language features
 # (or all-languages) so the host registry can resolve ids.
 web-bridge = ["json"]

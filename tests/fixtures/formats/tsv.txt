@@ -1,0 +1,3 @@
+name	role	score	active
+Ada	professor	99.5	true
+Alan	visiting fellow	42	false

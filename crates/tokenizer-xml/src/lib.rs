@@ -1,7 +1,7 @@
 //! Full XML engine: markup lex + element AST + host adapters.
 
 use themoretheless_tokenizer_core::{
-    Diagnostic, FULL_CAPS, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage,
+    Capabilities, Diagnostic, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage,
     HostTokenization, LanguageDescriptor, LanguageId, MarkupParse, markup_to_host, parse_markup,
     require_default_dialect,
 };
@@ -29,7 +29,12 @@ pub static DESCRIPTOR: LanguageDescriptor = LanguageDescriptor {
     aliases: &[],
     extensions: &[".xml", ".xsl", ".svg"],
     mime_types: &["application/xml", "text/xml"],
-    capabilities: FULL_CAPS,
+    // The markup AST in `core::markup_full` really does reject a mismatched or
+    // unclosed element, so this engine claims validation; the shared fullkit
+    // parser behind the wave languages does not.
+    capabilities: Capabilities::LEX
+        .union(Capabilities::PARSE)
+        .union(Capabilities::VALIDATE),
     engine_version: env!("CARGO_PKG_VERSION"),
 };
 
@@ -48,6 +53,7 @@ impl HostLanguage for Host {
         source: &str,
         opts: &HostAnalysisOptions,
     ) -> Result<HostTokenization, HostError> {
+        // SEMANTIC dropped: identical to syntax (measurement-driven capability honesty).
         self.lex(source, opts)
     }
 

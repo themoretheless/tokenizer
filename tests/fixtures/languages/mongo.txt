@@ -1,0 +1,2 @@
+// query
+db.users.find({ active: true })

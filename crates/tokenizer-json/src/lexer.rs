@@ -19,6 +19,7 @@ pub enum SyntaxKind {
     Comma,
     Colon,
     String,
+    Identifier,
     Number,
     True,
     False,
@@ -69,6 +70,13 @@ pub struct TokenFlags(u8);
 
 impl TokenFlags {
     pub const HAS_ERROR: Self = Self(1);
+    /// JSON5 wrote this string with `'` rather than `"`.
+    pub const SINGLE_QUOTED: Self = Self(2);
+    /// JSON5 wrote this number in hexadecimal, with a leading/trailing point,
+    /// or as `Infinity`/`NaN` rather than as a JSON number.
+    pub const JSON5_NUMBER: Self = Self(4);
+    /// This number was written as `0x…`.
+    pub const HEX_NUMBER: Self = Self(8);
 
     #[must_use]
     pub const fn is_empty(self) -> bool {
@@ -219,6 +227,7 @@ impl Error for LexDiagnostic {}
 pub struct LexerOptions {
     allow_comments: bool,
     allow_bom: bool,
+    json5: bool,
     max_input_bytes: usize,
     max_tokens: usize,
     max_diagnostics: usize,
@@ -230,6 +239,7 @@ impl LexerOptions {
         Self {
             allow_comments: false,
             allow_bom: false,
+            json5: false,
             max_input_bytes: 16 * 1024 * 1024,
             max_tokens: 1_000_000,
             max_diagnostics: 256,
@@ -241,10 +251,39 @@ impl LexerOptions {
         Self {
             allow_comments: true,
             allow_bom: true,
+            json5: false,
             max_input_bytes: 16 * 1024 * 1024,
             max_tokens: 1_000_000,
             max_diagnostics: 256,
         }
+    }
+
+    /// JSON5: comments, byte-order marks, single-quoted and unquoted keys,
+    /// trailing commas, hexadecimal and point-padded numbers, `Infinity`/`NaN`,
+    /// and string line continuations.
+    #[must_use]
+    pub const fn json5() -> Self {
+        Self {
+            allow_comments: true,
+            allow_bom: true,
+            json5: true,
+            max_input_bytes: 16 * 1024 * 1024,
+            max_tokens: 1_000_000,
+            max_diagnostics: 256,
+        }
+    }
+
+    #[must_use]
+    pub const fn json5_mode(mut self, yes: bool) -> Self {
+        self.json5 = yes;
+        self.allow_comments = yes || self.allow_comments;
+        self.allow_bom = yes || self.allow_bom;
+        self
+    }
+
+    #[must_use]
+    pub const fn json5_enabled(self) -> bool {
+        self.json5
     }
 
     #[must_use]
@@ -427,12 +466,15 @@ impl<'source> Lexer<'source> {
                 b',' => self.single(SyntaxKind::Comma),
                 b':' => self.single(SyntaxKind::Colon),
                 b'"' => self.scan_string(start),
+                b'\'' if self.options.json5 => self.scan_string(start),
                 b'/' if self.bytes().get(start + 1) == Some(&b'/') => self.scan_line_comment(start),
                 b'/' if self.bytes().get(start + 1) == Some(&b'*') => {
                     self.scan_block_comment(start)
                 }
                 b'-' | b'0'..=b'9' => self.scan_number(start),
+                b'+' | b'.' if self.options.json5 => self.scan_json5_number(start),
                 b't' | b'f' | b'n' | b'a'..=b'z' | b'A'..=b'Z' | b'_' => self.scan_word(start),
+                b'$' if self.options.json5 => self.scan_word(start),
                 _ if start == 0 && self.source[start..].starts_with('\u{feff}') => {
                     self.cursor += '\u{feff}'.len_utf8();
                     self.push(SyntaxKind::Bom, start, self.cursor);
@@ -478,19 +520,23 @@ impl<'source> Lexer<'source> {
     }
 
     fn scan_string(&mut self, start: usize) {
+        let quote = self.bytes()[start];
         let mut valid = true;
         self.cursor += 1;
         while self.cursor < self.source.len() {
             match self.bytes()[self.cursor] {
-                b'"' => {
+                b'\\' => valid &= self.scan_escape(),
+                byte if byte == quote => {
                     self.cursor += 1;
                     self.push(SyntaxKind::String, start, self.cursor);
+                    if quote == b'\'' {
+                        self.mark_last_flag(TokenFlags::SINGLE_QUOTED);
+                    }
                     if !valid {
                         self.mark_last_error();
                     }
                     return;
                 }
-                b'\\' => valid &= self.scan_escape(),
                 b'\r' | b'\n' => {
                     let control_end = line_break_end(self.bytes(), self.cursor);
                     self.problem(
@@ -537,6 +583,19 @@ impl<'source> Lexer<'source> {
                 self.cursor += 1;
                 true
             }
+            b'\'' | b'v' if self.options.json5 => {
+                self.cursor += 1;
+                true
+            }
+            b'\'' | b'v' => {
+                self.cursor += 1;
+                self.problem(LexDiagnosticKind::InvalidEscape, start, self.cursor);
+                false
+            }
+            b'u' if self.options.json5 && self.bytes().get(self.cursor + 1) == Some(&b'{') => {
+                self.cursor += 1;
+                self.scan_braced_unicode_escape(start)
+            }
             b'u' => {
                 self.cursor += 1;
                 let digits_start = self.cursor;
@@ -563,11 +622,12 @@ impl<'source> Lexer<'source> {
                 }
             }
             b'\r' | b'\n' => {
-                self.problem(
-                    LexDiagnosticKind::InvalidEscape,
-                    start,
-                    line_break_end(self.bytes(), self.cursor),
-                );
+                let end = line_break_end(self.bytes(), self.cursor);
+                if self.options.json5 {
+                    self.cursor = end;
+                    return true;
+                }
+                self.problem(LexDiagnosticKind::InvalidEscape, start, end);
                 false
             }
             _ => {
@@ -616,7 +676,127 @@ impl<'source> Lexer<'source> {
         );
     }
 
+    /// JSON5 numbers: an optional `+`, hexadecimal integers, a leading or
+    /// trailing decimal point, and signed `Infinity`/`NaN`.
+    fn scan_json5_number(&mut self, start: usize) {
+        let mut cursor = start;
+        let signed = matches!(self.bytes().get(cursor), Some(&b'+') | Some(&b'-'));
+        if signed {
+            cursor += 1;
+        }
+        if let Some(word) = ["Infinity", "NaN"].into_iter().find(|word| {
+            self.source[cursor..].starts_with(word)
+                && !self
+                    .bytes()
+                    .get(cursor + word.len())
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+        }) {
+            let end = cursor + word.len();
+            self.cursor = end;
+            self.push(SyntaxKind::Number, start, end);
+            self.mark_last_flag(TokenFlags::JSON5_NUMBER);
+            if signed && word == "NaN" {
+                self.problem(
+                    LexDiagnosticKind::InvalidNumber(NumberIssue::MissingInteger),
+                    start,
+                    end,
+                );
+                self.mark_last_error();
+            }
+            return;
+        }
+        if self.bytes().get(cursor) == Some(&b'0')
+            && matches!(self.bytes().get(cursor + 1), Some(&b'x') | Some(&b'X'))
+        {
+            let digits_start = cursor + 2;
+            let mut end = digits_start;
+            while self.bytes().get(end).is_some_and(u8::is_ascii_hexdigit) {
+                end += 1;
+            }
+            self.cursor = end;
+            self.push(SyntaxKind::Number, start, end);
+            self.mark_last_flag(TokenFlags::JSON5_NUMBER);
+            if end == digits_start {
+                self.problem(
+                    LexDiagnosticKind::InvalidNumber(NumberIssue::MissingInteger),
+                    start,
+                    end,
+                );
+                self.mark_last_error();
+            } else {
+                self.mark_last_flag(TokenFlags::HEX_NUMBER);
+            }
+            return;
+        }
+        let mut saw_digit = false;
+        while self.bytes().get(cursor).is_some_and(u8::is_ascii_digit) {
+            cursor += 1;
+            saw_digit = true;
+        }
+        if self.bytes().get(cursor) == Some(&b'.') {
+            cursor += 1;
+            while self.bytes().get(cursor).is_some_and(u8::is_ascii_digit) {
+                cursor += 1;
+                saw_digit = true;
+            }
+        }
+        if !saw_digit {
+            self.cursor = (cursor + 1).max(start + 1).min(self.source.len());
+            self.push(SyntaxKind::Error, start, self.cursor);
+            self.problem(LexDiagnosticKind::UnexpectedCharacter, start, self.cursor);
+            self.mark_last_error();
+            return;
+        }
+        if matches!(self.bytes().get(cursor), Some(b'e' | b'E')) {
+            let exponent = cursor;
+            cursor += 1;
+            if matches!(self.bytes().get(cursor), Some(b'+' | b'-')) {
+                cursor += 1;
+            }
+            let digits = cursor;
+            while self.bytes().get(cursor).is_some_and(u8::is_ascii_digit) {
+                cursor += 1;
+            }
+            if cursor == digits {
+                self.cursor = cursor;
+                self.push(SyntaxKind::Number, start, cursor);
+                self.mark_last_flag(TokenFlags::JSON5_NUMBER);
+                self.mark_last_error();
+                self.problem(
+                    LexDiagnosticKind::InvalidNumber(NumberIssue::MissingExponentDigits),
+                    exponent,
+                    cursor,
+                );
+                return;
+            }
+        }
+        let mantissa = if signed { start + 1 } else { start };
+        let leading_zero = self.bytes().get(mantissa) == Some(&b'0')
+            && self
+                .bytes()
+                .get(mantissa + 1)
+                .is_some_and(u8::is_ascii_digit);
+        self.cursor = cursor;
+        self.push(SyntaxKind::Number, start, cursor);
+        if leading_zero {
+            self.mark_last_error();
+            self.problem(
+                LexDiagnosticKind::InvalidNumber(NumberIssue::LeadingZero),
+                mantissa + 1,
+                mantissa + 2,
+            );
+        } else if cursor > mantissa + 1
+            || self.source[mantissa..cursor].contains(['.', 'e', 'E', '+'])
+        {
+            self.mark_last_flag(TokenFlags::JSON5_NUMBER);
+        }
+    }
+
     fn scan_number(&mut self, start: usize) {
+        if self.options.json5 {
+            self.scan_json5_number(start);
+            return;
+        }
         self.cursor = start;
         if self.bytes().get(self.cursor) == Some(&b'-') {
             self.cursor += 1;
@@ -665,16 +845,60 @@ impl<'source> Lexer<'source> {
         }
     }
 
-    fn scan_word(&mut self, start: usize) {
+    /// JSON5's `\\u{1F600}` form: braces, one to six hex digits, no leading
+    /// `+`/`-`, and a code point that actually exists.
+    fn scan_braced_unicode_escape(&mut self, start: usize) -> bool {
+        let open = self.cursor;
         self.cursor += 1;
+        let digits_start = self.cursor;
         while self
             .bytes()
             .get(self.cursor)
-            .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+            .is_some_and(u8::is_ascii_hexdigit)
         {
             self.cursor += 1;
         }
+        let digits = self.cursor - digits_start;
+        if self.bytes().get(self.cursor) != Some(&b'}') || digits == 0 || digits > 6 {
+            self.problem(
+                LexDiagnosticKind::InvalidUnicodeEscape,
+                start,
+                self.cursor.max(open + 2),
+            );
+            return false;
+        }
+        self.cursor += 1;
+        let value = u32::from_str_radix(&self.source[digits_start..digits_start + digits], 16)
+            .unwrap_or(u32::MAX);
+        if !matches!(value, 0x0000..=0xD7FF | 0xE000..=0x10FFFF) {
+            let digits_end = digits_start + digits;
+            self.problem(
+                LexDiagnosticKind::InvalidUnicodeEscape,
+                digits_start,
+                digits_end,
+            );
+            return false;
+        }
+        true
+    }
+
+    fn scan_word(&mut self, start: usize) {
+        self.cursor = self.word_end(start);
         let text = &self.source[start..self.cursor];
+        if self.options.json5 {
+            match text {
+                "true" | "false" | "null" => {}
+                "Infinity" | "NaN" => {
+                    self.push(SyntaxKind::Number, start, self.cursor);
+                    self.mark_last_flag(TokenFlags::JSON5_NUMBER);
+                    return;
+                }
+                _ => {
+                    self.push(SyntaxKind::Identifier, start, self.cursor);
+                    return;
+                }
+            }
+        }
         let kind = match text {
             "true" => SyntaxKind::True,
             "false" => SyntaxKind::False,
@@ -685,6 +909,35 @@ impl<'source> Lexer<'source> {
         if kind == SyntaxKind::Error {
             self.problem(LexDiagnosticKind::UnexpectedToken, start, self.cursor);
         }
+    }
+
+    /// End of a bare word. JSON5 keys may hold `$` and any non-ASCII letter, so
+    /// the scan widens to `char` boundaries only in that mode.
+    fn word_end(&self, start: usize) -> usize {
+        if !self.options.json5 {
+            let mut cursor = start + 1;
+            while self
+                .bytes()
+                .get(cursor)
+                .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+            {
+                cursor += 1;
+            }
+            return cursor;
+        }
+        let mut cursor = start;
+        for (offset, ch) in self.source[start..].char_indices() {
+            if offset == 0 {
+                cursor = start + ch.len_utf8();
+                continue;
+            }
+            if ch.is_alphanumeric() || ch == '_' || ch == '$' {
+                cursor = start + offset + ch.len_utf8();
+                continue;
+            }
+            break;
+        }
+        cursor
     }
 
     fn scan_unexpected(&mut self, start: usize) {
@@ -708,8 +961,12 @@ impl<'source> Lexer<'source> {
     }
 
     fn mark_last_error(&mut self) {
+        self.mark_last_flag(TokenFlags::HAS_ERROR);
+    }
+
+    fn mark_last_flag(&mut self, flags: TokenFlags) {
         if let Some(token) = self.tokens.last_mut() {
-            token.flags = TokenFlags::HAS_ERROR;
+            token.flags = TokenFlags(token.flags.0 | flags.0);
         }
     }
 
@@ -743,12 +1000,16 @@ fn is_token_start(source: &str, cursor: usize) -> bool {
             | b','
             | b':'
             | b'"'
+            | b'\''
             | b'/'
             | b'-'
+            | b'+'
+            | b'.'
             | b'0'..=b'9'
             | b'a'..=b'z'
             | b'A'..=b'Z'
             | b'_'
+            | b'$'
     ) || source[cursor..].starts_with('\u{feff}')
 }
 
@@ -756,7 +1017,7 @@ fn next_boundary(source: &str, start: usize) -> usize {
     start + source[start..].chars().next().map_or(1, char::len_utf8)
 }
 
-fn line_break_end(bytes: &[u8], cursor: usize) -> usize {
+pub(crate) fn line_break_end(bytes: &[u8], cursor: usize) -> usize {
     if bytes.get(cursor) == Some(&b'\r') && bytes.get(cursor + 1) == Some(&b'\n') {
         cursor + 2
     } else {

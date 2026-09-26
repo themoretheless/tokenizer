@@ -227,6 +227,14 @@ pub fn register_builtins(
     {
         builder.register(&json_host::ENGINE)?;
     }
+    #[cfg(feature = "json5")]
+    {
+        builder.register(&themoretheless_tokenizer_json::JSON5_ENGINE)?;
+    }
+    #[cfg(feature = "jsonl")]
+    {
+        builder.register(&themoretheless_tokenizer_json::JSONL_ENGINE)?;
+    }
     #[cfg(feature = "url")]
     {
         builder.register(&url_host::ENGINE)?;
@@ -254,6 +262,46 @@ pub fn register_builtins(
     #[cfg(feature = "markdown")]
     {
         builder.register(&themoretheless_tokenizer_markdown::ENGINE)?;
+    }
+    #[cfg(feature = "csv")]
+    {
+        builder.register(&themoretheless_tokenizer_csv::ENGINE)?;
+    }
+    #[cfg(feature = "tsv")]
+    {
+        builder.register(&themoretheless_tokenizer_csv::TSV_ENGINE)?;
+    }
+    #[cfg(feature = "logfmt")]
+    {
+        builder.register(&themoretheless_tokenizer_logfmt::ENGINE)?;
+    }
+    #[cfg(feature = "ini")]
+    {
+        builder.register(&themoretheless_tokenizer_ini::ENGINE)?;
+    }
+    #[cfg(feature = "properties")]
+    {
+        builder.register(&themoretheless_tokenizer_ini::PROPERTIES_ENGINE)?;
+    }
+    #[cfg(feature = "hcl")]
+    {
+        builder.register(&themoretheless_tokenizer_hcl::ENGINE)?;
+    }
+    #[cfg(feature = "edn")]
+    {
+        builder.register(&themoretheless_tokenizer_edn::ENGINE)?;
+    }
+    #[cfg(feature = "ics")]
+    {
+        builder.register(&themoretheless_tokenizer_ics::ENGINE)?;
+    }
+    #[cfg(feature = "srt")]
+    {
+        builder.register(&themoretheless_tokenizer_srt::ENGINE)?;
+    }
+    #[cfg(feature = "vtt")]
+    {
+        builder.register(&themoretheless_tokenizer_srt::VTT_ENGINE)?;
     }
     #[cfg(feature = "sql")]
     {
@@ -557,37 +605,18 @@ mod tests {
     #[cfg(feature = "all-languages")]
     #[test]
     fn all_languages_register() {
-        // json + url + 55 language crates
-        assert_eq!(builtin_registry().len(), 57);
+        // Count is asserted as set equality over Cargo features, the registry
+        // and the playground in `tests/wiring_completeness.rs`, so this only
+        // guards against an empty registry.
+        assert!(!builtin_registry().is_empty());
     }
 
     #[cfg(feature = "top20")]
     #[test]
     fn top20_register() {
         let reg = builtin_registry();
-        for id in [
-            "python",
-            "c",
-            "cpp",
-            "java",
-            "csharp",
-            "javascript",
-            "visualbasic",
-            "sql",
-            "go",
-            "fortran",
-            "matlab",
-            "php",
-            "rust",
-            "r",
-            "ruby",
-            "kotlin",
-            "swift",
-            "typescript",
-            "delphi",
-            "assembly",
-        ] {
-            assert!(reg.get_str(id).is_some(), "missing top20 id {id}");
+        for id in themoretheless_tokenizer_core::TOP20_IDS {
+            assert!(reg.get_str(id.as_str()).is_some(), "missing top20 id {id}");
         }
     }
 
@@ -595,12 +624,19 @@ mod tests {
     #[test]
     fn next20_register() {
         let reg = builtin_registry();
-        for id in [
-            "groovy", "haskell", "elixir", "erlang", "clojure", "fsharp", "ocaml", "lisp",
-            "scheme", "solidity", "zig", "nim", "dlang", "cobol", "ada", "prolog", "abap", "vhdl",
-            "verilog", "graphql",
-        ] {
-            assert!(reg.get_str(id).is_some(), "missing next20 id {id}");
+        for id in themoretheless_tokenizer_core::NEXT20_IDS {
+            assert!(reg.get_str(id.as_str()).is_some(), "missing next20 id {id}");
+        }
+    }
+
+    #[cfg(feature = "formats")]
+    #[test]
+    fn formats_register() {
+        use themoretheless_tokenizer_core::Family;
+        let reg = builtin_registry();
+        for id in themoretheless_tokenizer_core::FORMAT_IDS {
+            assert!(reg.get_str(id.as_str()).is_some(), "missing format id {id}");
+            assert_eq!(Family::of(*id), Family::FORMAT);
         }
     }
 }

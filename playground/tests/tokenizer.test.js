@@ -66,6 +66,13 @@ function assertCase(language, c) {
     assert.ok(result.diagnostics.length <= c.maxDiagnostics)
   }
 
+  for (const code of c.expectDiagnostics ?? []) {
+    assert.ok(
+      result.diagnostics.some((d) => d.code === code),
+      `${language}/${c.name}: missing diagnostic "${code}", have [${result.diagnostics.map((d) => d.code).join(', ')}]`,
+    )
+  }
+
   // Full cover when tokenizer emits text spans (bridge always includes text).
   if (result.tokens?.length) {
     assertLossless(result, c.source)
@@ -77,7 +84,7 @@ function assertCase(language, c) {
   for (const token of result.tokens ?? []) {
     assert.ok(Number.isInteger(token.start))
     assert.ok(Number.isInteger(token.end))
-    assert.ok(token.start >= 0 && token.end >= token.start)
+    assert.ok(token.start >= 0 && token.end > token.start)
     assert.ok(token.end <= result.sourceBytes)
     assert.equal(typeof token.kind, 'string')
     assert.ok(token.kind.length > 0)
@@ -121,15 +128,27 @@ for (const language of ALL_LANGUAGE_IDS) {
 // ─── Cross-cutting ──────────────────────────────────────────────────────────
 
 test('catalog covers every expected language id', () => {
-  // Keep in sync with facade all-languages registry (json+url+55 plugins).
+  // Keep in sync with the facade all-languages registry (69 engines).
   const expected = [
     'json',
+    'json5',
+    'jsonl',
     'url',
     'xml',
     'html',
     'css',
     'yaml',
     'toml',
+    'csv',
+    'tsv',
+    'logfmt',
+    'ini',
+    'properties',
+    'hcl',
+    'edn',
+    'srt',
+    'vtt',
+    'ics',
     'markdown',
     'sql',
     'mongo',
@@ -212,4 +231,29 @@ test('two languages produce independent token streams', () => {
   assert.ok(html.tokens.some((t) => t.kind === 'tag' || t.kind === 'text'))
   assertLossless(py, 'def f():\n    return 1\n')
   assertLossless(html, '<div>hi</div>')
+})
+
+test('an html script body is one text token, not markup', () => {
+  // The dialect knows `if (1 < 2)` is text; if the token stream disagreed, the
+  // playground would highlight `< 2) f();</script>` as a tag while reporting the
+  // document as valid.
+  const source = '<script>if (1 < 2) f();</script>'
+  const html = run('html', source, 'default', 'syntax')
+  assert.deepEqual(
+    html.tokens.map((t) => [t.kind, source.slice(t.start, t.end)]),
+    [
+      ['tag', '<script>'],
+      ['text', 'if (1 < 2) f();'],
+      ['tag', '</script>'],
+    ],
+  )
+  assert.equal(html.valid, true)
+  // XML has no raw-text rule: the same bytes split at the comparison operator,
+  // and the rest of the body is swallowed as a tag.
+  const xml = run('xml', source, 'default', 'syntax')
+  assert.deepEqual(
+    xml.tokens.map((t) => source.slice(t.start, t.end)),
+    ['<script>', 'if (1 ', '< 2) f();</script>'],
+  )
+  assert.equal(xml.valid, false)
 })

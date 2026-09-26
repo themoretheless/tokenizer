@@ -136,9 +136,11 @@ dependencies = [
  "themoretheless-tokenizer-cpp",
  "themoretheless-tokenizer-csharp",
  "themoretheless-tokenizer-css",
+ "themoretheless-tokenizer-csv",
  "themoretheless-tokenizer-dart",
  "themoretheless-tokenizer-delphi",
  "themoretheless-tokenizer-dlang",
+ "themoretheless-tokenizer-edn",
  "themoretheless-tokenizer-elixir",
  "themoretheless-tokenizer-erlang",
  "themoretheless-tokenizer-fortran",
@@ -147,13 +149,17 @@ dependencies = [
  "themoretheless-tokenizer-graphql",
  "themoretheless-tokenizer-groovy",
  "themoretheless-tokenizer-haskell",
+ "themoretheless-tokenizer-hcl",
  "themoretheless-tokenizer-html",
+ "themoretheless-tokenizer-ics",
+ "themoretheless-tokenizer-ini",
  "themoretheless-tokenizer-java",
  "themoretheless-tokenizer-javascript",
  "themoretheless-tokenizer-json",
  "themoretheless-tokenizer-julia",
  "themoretheless-tokenizer-kotlin",
  "themoretheless-tokenizer-lisp",
+ "themoretheless-tokenizer-logfmt",
  "themoretheless-tokenizer-lua",
  "themoretheless-tokenizer-markdown",
  "themoretheless-tokenizer-matlab",
@@ -173,6 +179,7 @@ dependencies = [
  "themoretheless-tokenizer-scheme",
  "themoretheless-tokenizer-solidity",
  "themoretheless-tokenizer-sql",
+ "themoretheless-tokenizer-srt",
  "themoretheless-tokenizer-swift",
  "themoretheless-tokenizer-toml",
  "themoretheless-tokenizer-typescript",
@@ -260,6 +267,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "themoretheless-tokenizer-csv"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
 name = "themoretheless-tokenizer-dart"
 version = "0.4.0"
 dependencies = [
@@ -275,6 +289,13 @@ dependencies = [
 
 [[package]]
 name = "themoretheless-tokenizer-dlang"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-edn"
 version = "0.4.0"
 dependencies = [
  "themoretheless-tokenizer-core",
@@ -337,7 +358,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "themoretheless-tokenizer-hcl"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
 name = "themoretheless-tokenizer-html"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-ics"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-ini"
 version = "0.4.0"
 dependencies = [
  "themoretheless-tokenizer-core",
@@ -380,6 +422,13 @@ dependencies = [
 
 [[package]]
 name = "themoretheless-tokenizer-lisp"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-logfmt"
 version = "0.4.0"
 dependencies = [
  "themoretheless-tokenizer-core",
@@ -513,6 +562,13 @@ dependencies = [
 
 [[package]]
 name = "themoretheless-tokenizer-sql"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-srt"
 version = "0.4.0"
 dependencies = [
  "themoretheless-tokenizer-core",

@@ -1,0 +1,17 @@
+# cluster settings
+service "api" {
+  enabled  = true
+  port     = 8080
+  latency  = -1.5e3
+  ratio    = 0.25
+  owner    = null
+  tags     = ["web", "edge"]
+  defaults = { cpu = 2 }
+  greeting = "hello ${local.name}!"
+  note     = "said \"hi\"\n"
+  banner   = <<-EOT
+    cluster ${local.region} online
+    EOT
+  toggle   = enabled ? "on" : "off"
+  /* trailing note */
+}

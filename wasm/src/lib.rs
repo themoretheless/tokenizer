@@ -1,4 +1,4 @@
-use themoretheless_tokenizer::web_bridge::{tokenization, tokenization_json};
+use themoretheless_tokenizer::web_bridge::{catalog, tokenization, tokenization_json};
 use wasm_bindgen::prelude::*;
 
 /// Runs the Rust tokenizer in the browser and returns a compact JSON payload.
@@ -15,6 +15,13 @@ pub fn tokenize(language: &str, source: &str, mode: &str, layer: &str) -> String
     tokenization(language, source, mode, layer)
 }
 
+/// Registry catalog: every enabled engine with family, presets, capability
+/// bits and dialects, as JSON.
+#[wasm_bindgen]
+pub fn wasm_catalog() -> String {
+    catalog()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -25,6 +32,13 @@ mod tests {
         assert!(output.contains("\"valid\":true"));
         assert!(output.contains("\"sourceBytes\":25"));
         assert!(output.contains("\"kind\":\"property\""));
+    }
+
+    #[test]
+    fn catalog_reports_the_format_family() {
+        let output = wasm_catalog();
+        assert!(output.contains("\"engines\":[{"));
+        assert!(output.contains("\"family\":\"format\""));
     }
 
     #[test]

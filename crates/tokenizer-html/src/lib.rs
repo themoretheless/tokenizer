@@ -1,14 +1,14 @@
 //! Full HTML engine: markup lex + element AST + host adapters.
 
 use themoretheless_tokenizer_core::{
-    Diagnostic, FULL_CAPS, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage,
-    HostTokenization, LanguageDescriptor, LanguageId, MarkupParse, markup_to_host, parse_markup,
-    require_default_dialect,
+    Capabilities, Diagnostic, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage,
+    HostTokenization, LanguageDescriptor, LanguageId, MarkupFlavor, MarkupParse, markup_to_host,
+    parse_markup_as, require_default_dialect,
 };
 
 #[must_use]
 pub fn parse(source: &str) -> MarkupParse<'_> {
-    parse_markup(source)
+    parse_markup_as(source, MarkupFlavor::Html5)
 }
 
 #[must_use]
@@ -29,7 +29,14 @@ pub static DESCRIPTOR: LanguageDescriptor = LanguageDescriptor {
     aliases: &[],
     extensions: &[".html", ".htm"],
     mime_types: &["text/html"],
-    capabilities: FULL_CAPS,
+    // The markup AST in `core::markup_full` really does reject a mismatched or
+    // unclosed element, and under `MarkupFlavor::Html5` it stays quiet on the
+    // shapes HTML allows: void elements, omitted end tags, `<` inside a
+    // `<script>` body. The shared fullkit parser behind the wave languages does
+    // not claim either half.
+    capabilities: Capabilities::LEX
+        .union(Capabilities::PARSE)
+        .union(Capabilities::VALIDATE),
     engine_version: env!("CARGO_PKG_VERSION"),
 };
 
@@ -48,6 +55,7 @@ impl HostLanguage for Host {
         source: &str,
         opts: &HostAnalysisOptions,
     ) -> Result<HostTokenization, HostError> {
+        // SEMANTIC dropped: identical to syntax (measurement-driven capability honesty).
         self.lex(source, opts)
     }
 
