@@ -1,7 +1,7 @@
-# themorelessness-tokenizer-css
+# themoretheless-tokenizer-css
 
 A purpose-built CSS engine: a lossless, context-aware lexer, a recovering structural pass, and a
-light rule list. It depends only on `themorelessness-tokenizer-core`.
+light rule list. It depends only on `themoretheless-tokenizer-core`.
 
 ## Surface
 
