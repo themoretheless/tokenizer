@@ -1,0 +1,4 @@
+% demo
+if true
+  x = 1;
+end

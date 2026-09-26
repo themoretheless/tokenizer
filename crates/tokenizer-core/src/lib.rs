@@ -43,7 +43,8 @@ pub use language::{DialectDescriptor, DialectId, LanguageDescriptor, LanguageId,
 pub use limits::{InputLimits, LimitExceeded};
 pub use lossless::{LosslessViolation, verify_lossless_spans};
 pub use markup_full::{
-    MarkupAttr, MarkupDoc, MarkupNode, MarkupParse, markup_to_host, parse_markup,
+    MarkupAttr, MarkupDoc, MarkupFlavor, MarkupNode, MarkupParse, markup_to_host, parse_markup,
+    parse_markup_as,
 };
 pub use plugin_host::{
     DEFAULT_DIALECTS, FULL_CAPS, HIGHLIGHT_CAPS, full_descriptor, highlight_descriptor,

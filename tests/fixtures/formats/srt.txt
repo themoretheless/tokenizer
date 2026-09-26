@@ -1,0 +1,12 @@
+﻿1
+00:00:01,000 --> 00:00:04,000
+Hello, world — bonjour!
+Second line of the first cue.
+
+2
+00:00:04,500 --> 00:00:09,000
+🎬 Cue two: <i>tags stay text</i> here.
+
+coda
+00:00:09,000 --> 00:00:12,000
+Final cue — the end.

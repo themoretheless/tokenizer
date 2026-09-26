@@ -103,13 +103,35 @@ parser matches with `at_text`, an **exact** comparison (`fullkit.rs:575-579`), a
 literals `"function" | "fn" | "def" | "func" | "fun"` and
 `"class" | "struct" | "interface" | "trait" | "type" | "enum"` (`fullkit.rs:629-645`). For source
 using `FUNCTION` / `PROCEDURE` — Fortran, COBOL, Ada, ABAP, VHDL, SQL, Visual Basic — item detection
-never triggers, so the semantic layer returns lexer kinds unchanged. All 49 advertise
-`FULL_CAPS = LEX|PARSE|SEMANTIC|VALIDATE`. Note also that parser behavior is decoupled from profile
+never triggers, so the semantic layer returns lexer kinds unchanged. All 49 advertised
+`FULL_CAPS = LEX|PARSE|SEMANTIC|VALIDATE`. **Since measured, two things changed:** `VALIDATE` is
+dropped from `FULL_ENGINE_CAPS`, so the badge belongs to the 20 format engines alone; and the parser's
+two diagnostic sites are gone, so its verdict is no longer noise — it recovers in silence and reports
+only what the token stream proves (bracket balance, closed literals). Measured: 76 diagnostics across
+25 of 69 valid documents before, 0 after, with 11 broken shapes still flagged
+(`tests/wiring_completeness.rs` checks 12-13). The `SEMANTIC` bit is still over-claimed, and now
+measured at the same bar: of the 68 engines that advertise it, **30 emit a semantic stream identical to
+their syntax stream on every case of their own matrix**. Re-running the comparison against a
+hand-written representative program per engine moved only a handful into earning the bit (powershell,
+matlab, delphi, solidity, dlang, ada, graphql, bash, c — the parser recognizes their
+`function`/`class` shapes once the document has any), and 23 stayed byte-identical both ways, including
+`html` and `xml`, whose `semantic_tokens` delegates to `lex` verbatim. So `SEMANTIC` marks "a second
+layer is reachable", not "the layer adds anything", for about a third of the registry. Note also that parser behavior is decoupled from profile
 data: a language whose function keyword is `proc` (Nim) works only by accident of the literal list.
 
-The same class of over-claim is structural in `html` and `xml`: both advertise `FULL_CAPS`
+The same class of over-claim is structural in `html` and `xml`: both advertised `FULL_CAPS`
 (`tokenizer-html/src/lib.rs:32`, `tokenizer-xml/src/lib.rs:32`) while their `semantic_tokens` delegates
-to `lex` verbatim (`:51`), i.e. no parser-aware layer exists behind the advertised bit.
+to `lex` verbatim (`:51`), i.e. no parser-aware layer exists behind the advertised bit. **Still open:**
+the two now name their capabilities themselves, which moved `VALIDATE` from an inherited claim to an
+earned one (a mismatched or unclosed element really is rejected) but left `SEMANTIC` claiming a layer
+that returns lexer kinds. The `VALIDATE` half of that sentence needed a dialect, not just a declaration:
+read with XML rules, `tokenizer-html` flagged 12 of 20 valid documents, so `parse_markup_as` now takes a
+`MarkupFlavor` and HTML gets void elements, raw-text `<script>`/`<style>` bodies, omitted end tags and
+case-folded tag names while `tokenizer-xml` keeps the strict rules and has matrix cases proving it. The
+lexer needed the same dialect: `highlight_markup`'s `htmlish` argument was accepted and discarded, so a
+`<script>` body was lexed as markup and the playground showed `< 2) f();</script>` as one `tag` token on
+a document the parser called valid — the tree and the token stream now share `HTML_RAW_TEXT` and
+`find_close_tag` (`499` JS tests, `772` native).
 
 **4.2 `analyze_full_host` discards diagnostics** (`fullkit.rs:1356-1365`):
 `if sem.diagnostics.is_empty() { sem.diagnostics = parsed.diagnostics; }` — when the semantic pass
@@ -168,6 +190,15 @@ Recorded so the plan is not built on a wrong premise.
    its test step is `cargo test --locked --workspace --all-targets --all-features` (`:90`). So coverage
    exists outside the merge gate. This changes P0 from "write tests" to "port the existing sweep to
    native, where CI runs it".
+   **Partly done since this was measured:** `tests/wiring_completeness.rs` is now thirteen native
+   checks in the CI command. Two truncate every format fixture at every character boundary, so
+   losslessness, non-empty spans, panic-freedom and a per-prefix time budget are gated for the 20
+   formats. `every_engine_is_quiet_on_its_valid_fixture` gates all 69 engines against a valid document
+   each ships (49 language fixtures exported from the picker samples by
+   `playground/scripts/export-language-fixtures.mjs`), which is what caught the fullkit parser
+   flagging valid go, java and sql (§4.1). Still Node-only: the per-case kind/diagnostic matrix in
+   `playground/tests/language-cases.js`, i.e. the *lossless-sweep over every fixture case* for the
+   languages.
 3. **"Core depends on leaves" — wrong axis.** 0 Cargo edges; the issue is enumeration, not layering. A
    separate `tokenizer-languages` crate is **not recommended**: it converts 0 edges into 9-57 and moves
    ~115 lines at the cost of editing 57 manifests. Revisit only if a consumer outside this repo needs

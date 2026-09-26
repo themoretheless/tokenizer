@@ -1,0 +1,4 @@
+// demo
+module m;
+  wire x;
+endmodule

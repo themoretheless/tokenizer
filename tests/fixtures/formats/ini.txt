@@ -1,0 +1,9 @@
+; config for the demo
+[server]
+host = example.com
+port = 8080
+secure = true
+banner = "welcome, all"
+[cache]
+ttl = 60
+enabled = false

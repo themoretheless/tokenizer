@@ -13,6 +13,10 @@
 
 #[cfg(feature = "json")]
 pub use themoretheless_tokenizer_json as json;
+#[cfg(feature = "json5")]
+pub use themoretheless_tokenizer_json::{JSON5_ENGINE, Json5Host};
+#[cfg(feature = "jsonl")]
+pub use themoretheless_tokenizer_json::{JSONL_ENGINE, JsonlHost};
 
 #[cfg(feature = "url")]
 pub use themoretheless_tokenizer_url as url;
@@ -37,12 +41,16 @@ pub use themoretheless_tokenizer_cpp as cpp;
 pub use themoretheless_tokenizer_csharp as csharp;
 #[cfg(feature = "css")]
 pub use themoretheless_tokenizer_css as css;
+#[cfg(feature = "csv")]
+pub use themoretheless_tokenizer_csv as csv;
 #[cfg(feature = "dart")]
 pub use themoretheless_tokenizer_dart as dart;
 #[cfg(feature = "delphi")]
 pub use themoretheless_tokenizer_delphi as delphi;
 #[cfg(feature = "dlang")]
 pub use themoretheless_tokenizer_dlang as dlang;
+#[cfg(feature = "edn")]
+pub use themoretheless_tokenizer_edn as edn;
 #[cfg(feature = "elixir")]
 pub use themoretheless_tokenizer_elixir as elixir;
 #[cfg(feature = "erlang")]
@@ -59,8 +67,16 @@ pub use themoretheless_tokenizer_graphql as graphql;
 pub use themoretheless_tokenizer_groovy as groovy;
 #[cfg(feature = "haskell")]
 pub use themoretheless_tokenizer_haskell as haskell;
+#[cfg(feature = "hcl")]
+pub use themoretheless_tokenizer_hcl as hcl;
 #[cfg(feature = "html")]
 pub use themoretheless_tokenizer_html as html;
+#[cfg(feature = "ics")]
+pub use themoretheless_tokenizer_ics as ics;
+#[cfg(feature = "ini")]
+pub use themoretheless_tokenizer_ini as ini;
+#[cfg(feature = "properties")]
+pub use themoretheless_tokenizer_ini::{PROPERTIES_ENGINE, PropertiesHost};
 #[cfg(feature = "java")]
 pub use themoretheless_tokenizer_java as java;
 #[cfg(feature = "javascript")]
@@ -71,6 +87,8 @@ pub use themoretheless_tokenizer_julia as julia;
 pub use themoretheless_tokenizer_kotlin as kotlin;
 #[cfg(feature = "lisp")]
 pub use themoretheless_tokenizer_lisp as lisp;
+#[cfg(feature = "logfmt")]
+pub use themoretheless_tokenizer_logfmt as logfmt;
 #[cfg(feature = "lua")]
 pub use themoretheless_tokenizer_lua as lua;
 #[cfg(feature = "markdown")]
@@ -109,6 +127,10 @@ pub use themoretheless_tokenizer_scheme as scheme;
 pub use themoretheless_tokenizer_solidity as solidity;
 #[cfg(feature = "sql")]
 pub use themoretheless_tokenizer_sql as sql;
+#[cfg(feature = "srt")]
+pub use themoretheless_tokenizer_srt as srt;
+#[cfg(feature = "vtt")]
+pub use themoretheless_tokenizer_srt::{VTT_ENGINE, VttHost};
 #[cfg(feature = "swift")]
 pub use themoretheless_tokenizer_swift as swift;
 #[cfg(feature = "toml")]

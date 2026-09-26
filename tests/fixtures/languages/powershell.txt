@@ -1,0 +1,4 @@
+# script
+if ($true) {
+  Write-Host "hi"
+}
