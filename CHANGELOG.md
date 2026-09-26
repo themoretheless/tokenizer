@@ -223,6 +223,20 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     so it is now two cases — `jsonc-allows-trailing-comma` (valid) and
     `trailing-comma-rejected-in-strict` (invalid) — and the JS matrix is 486
     tests.
+- `SEMANTIC` tokens must be earned: 30 engines returned a stream byte-identical
+  to `syntax` on their entire test matrix, including html/xml where
+  `semantic_tokens(source)` delegates to `self.lex(source)`. Measured against
+  hand-written representative programs, only ~9 actually demonstrate semantic
+  insight, while 23 stay identical (css, toml, yaml, html, xml, markdown).
+  Dropping SEMANTIC from these engines follows the VALIDATE precedent: the badge
+  means "this layer adds analysis" not "this layer exists". **Breaking for
+  `tokenizer-core` direct users:** `htmlish` parameter in `langkit::highlight_markup`
+  was a dead variable (`let _ = htmlish;`), so an HTML `<script>` body was lexed
+  as markup at the first `<` inside it — the playground showed
+  `< 2) console.log("ok");</script>` as one `tag` token. Now `htmlish` drives
+  raw-text handling through a shared `HTML_RAW_TEXT` + `find_close_tag`, so
+  script/style/body runs to their close tag without parsing `<` as markup; this
+  matches the tokenizer-core fix above but is separate.
 - `core::fullkit` is recovery-first: the parser recovers in silence, and only
   the token stream is allowed to report a problem. Dropping `VALIDATE` from the
   badge made the noise visible but did not remove it, so the two parser

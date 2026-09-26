@@ -140,7 +140,6 @@ pub static DESCRIPTOR: LanguageDescriptor = language_descriptor(
     env!("CARGO_PKG_VERSION"),
     Capabilities::LEX
         .union(Capabilities::PARSE)
-        .union(Capabilities::SEMANTIC)
         .union(Capabilities::VALIDATE),
 );
 
@@ -165,6 +164,7 @@ impl HostLanguage for Host {
         source: &str,
         opts: &HostAnalysisOptions,
     ) -> Result<HostTokenization, HostError> {
+        // SEMANTIC dropped: identical to syntax (measurement-driven capability honesty).
         self.lex(source, opts)
     }
 

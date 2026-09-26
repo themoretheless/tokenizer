@@ -67,7 +67,6 @@ use themoretheless_tokenizer_core::{
 /// behind the wave languages cannot claim.
 const CAPABILITIES: Capabilities = Capabilities::LEX
     .union(Capabilities::PARSE)
-    .union(Capabilities::SEMANTIC)
     .union(Capabilities::VALIDATE);
 
 /// Host token kind: the TOML spec's own lexical categories, so an editor (and
@@ -176,6 +175,7 @@ impl HostLanguage for Host {
         source: &str,
         opts: &HostAnalysisOptions,
     ) -> Result<HostTokenization, HostError> {
+        // SEMANTIC dropped: identical to syntax (measurement-driven capability honesty).
         self.lex(source, opts)
     }
 

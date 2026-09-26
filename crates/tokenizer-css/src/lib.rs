@@ -50,7 +50,6 @@ use themoretheless_tokenizer_core::{
 /// Real engine surface: no CST, cursor navigation or visitor API exists here.
 const CAPABILITIES: Capabilities = Capabilities::LEX
     .union(Capabilities::PARSE)
-    .union(Capabilities::SEMANTIC)
     .union(Capabilities::VALIDATE);
 
 /// Host token kind: CSS's own vocabulary, so an editor can tell a property
@@ -164,6 +163,7 @@ impl HostLanguage for Host {
         source: &str,
         opts: &HostAnalysisOptions,
     ) -> Result<HostTokenization, HostError> {
+        // SEMANTIC dropped: identical to syntax (measurement-driven capability honesty).
         self.lex(source, opts)
     }
 
@@ -313,10 +313,7 @@ mod tests {
 
     #[test]
     fn descriptor_advertises_only_the_real_surface() {
-        let wanted = Capabilities::LEX
-            | Capabilities::PARSE
-            | Capabilities::SEMANTIC
-            | Capabilities::VALIDATE;
+        let wanted = Capabilities::LEX | Capabilities::PARSE | Capabilities::VALIDATE;
         assert_eq!(DESCRIPTOR.capabilities, wanted);
         assert!(!DESCRIPTOR.capabilities.contains(Capabilities::CST));
         assert_eq!(DESCRIPTOR.extensions, [".css"]);

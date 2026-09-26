@@ -47,7 +47,6 @@ use themoretheless_tokenizer_core::{
 /// unclosed flow collections and reports nothing on valid documents.
 const CAPABILITIES: Capabilities = Capabilities::LEX
     .union(Capabilities::PARSE)
-    .union(Capabilities::SEMANTIC)
     .union(Capabilities::VALIDATE);
 
 /// Host token kind: YAML's own node vocabulary, so an editor can tell a key
@@ -149,6 +148,7 @@ impl HostLanguage for Host {
         source: &str,
         opts: &HostAnalysisOptions,
     ) -> Result<HostTokenization, HostError> {
+        // SEMANTIC dropped: identical to syntax (measurement-driven capability honesty).
         self.lex(source, opts)
     }
 
