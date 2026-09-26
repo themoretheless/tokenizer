@@ -470,11 +470,12 @@ impl Lexer<'_> {
     }
 
     /// A heredoc: the `<<TAG` / `<<-TAG` marker, then the body up to a line
-    /// whose trimmed content is exactly the tag.
+    /// holding the tag — at column zero for `<<TAG`, after blanks for `<<-TAG`.
     fn lex_heredoc(&mut self) {
         let start = self.pos;
         let mut cursor = start + 2;
-        if self.peek(cursor) == Some(b'-') {
+        let indented = self.peek(cursor) == Some(b'-');
+        if indented {
             cursor += 1;
         }
         let tag_start = cursor;
@@ -511,7 +512,7 @@ impl Lexer<'_> {
             self.pos = end;
             body_start = end;
         }
-        match self.find_heredoc_end(body_start, tag) {
+        match self.find_heredoc_end(body_start, tag, indented) {
             Some((body_end, close_start)) => {
                 self.lex_heredoc_body(body_start, body_end);
                 if close_start > body_end {
@@ -539,9 +540,20 @@ impl Lexer<'_> {
     }
 
     /// `(body_end, close_start)` for the first line at or after `body_start`
-    /// whose content is exactly `tag` once blanks are trimmed; `None` when the
-    /// heredoc never terminates. The tag must end its own line.
-    fn find_heredoc_end(&self, body_start: usize, tag: &[u8]) -> Option<(usize, usize)> {
+    /// whose content is exactly `tag`; `None` when the heredoc never
+    /// terminates. The tag must end its own line.
+    ///
+    /// `indented` is the `<<-` form: only it may put blanks before the
+    /// terminator. For `<<TAG` the tag has to start at column zero, otherwise an
+    /// indented line that merely looks like the tag would silently close a
+    /// heredoc that HCL still considers open. Trailing blanks are tolerated in
+    /// both forms.
+    fn find_heredoc_end(
+        &self,
+        body_start: usize,
+        tag: &[u8],
+        indented: bool,
+    ) -> Option<(usize, usize)> {
         let mut line_start = body_start;
         loop {
             let mut line_end = line_start;
@@ -549,8 +561,10 @@ impl Lexer<'_> {
                 line_end += 1;
             }
             let mut content_start = line_start;
-            while content_start < line_end && is_space(self.bytes[content_start]) {
-                content_start += 1;
+            if indented {
+                while content_start < line_end && is_space(self.bytes[content_start]) {
+                    content_start += 1;
+                }
             }
             let mut content_end = line_end;
             while content_end > content_start
@@ -915,6 +929,32 @@ mod tests {
                 (SyntaxKind::HeredocClose, "EOT"),
                 (SyntaxKind::Newline, "\n"),
             ]
+        );
+    }
+
+    #[test]
+    fn indented_terminator_needs_the_dash_form() {
+        let source = "b = <<EOT\n  hi\n  EOT\n";
+        let lexed = assert_lossless(source);
+        assert!(
+            lexed.has_errors(),
+            "an indented terminator closed a <<EOT heredoc"
+        );
+        assert!(
+            !lexed
+                .tokens()
+                .iter()
+                .any(|t| t.kind == SyntaxKind::HeredocClose)
+        );
+
+        // The same document written with `<<-` is valid and does close.
+        let dashed = assert_lossless("b = <<-EOT\n  hi\n  EOT\n");
+        assert!(!dashed.has_errors());
+        assert!(
+            dashed
+                .tokens()
+                .iter()
+                .any(|t| t.kind == SyntaxKind::HeredocClose)
         );
     }
 

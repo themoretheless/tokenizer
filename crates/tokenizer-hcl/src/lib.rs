@@ -286,7 +286,7 @@ mod tests {
         "  defaults = { cpu = 2 }\n",
         "  greeting = \"hello ${local.name}!\"\n",
         "  note     = \"said \\\"hi\\\"\\n\"\n",
-        "  banner   = <<EOT\n",
+        "  banner   = <<-EOT\n",
         "    cluster ${local.region} online\n",
         "    EOT\n",
         "  toggle   = enabled ? \"on\" : \"off\"\n",

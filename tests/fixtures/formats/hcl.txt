@@ -9,7 +9,7 @@ service "api" {
   defaults = { cpu = 2 }
   greeting = "hello ${local.name}!"
   note     = "said \"hi\"\n"
-  banner   = <<EOT
+  banner   = <<-EOT
     cluster ${local.region} online
     EOT
   toggle   = enabled ? "on" : "off"
