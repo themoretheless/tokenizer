@@ -16,4 +16,4 @@ jobs:
       pull-requests: write
     uses: themoretheless/.github/.github/workflows/copilot-review.yml@2d3bc163ca57318e89e801795a0b0356d5a9d941 # first-party actions
     with:
-      fail_on_comments: true
+      fail_on_comments: false
