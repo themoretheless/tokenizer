@@ -46,13 +46,28 @@ impl Family {
             | LanguageId::CSS
             | LanguageId::YAML
             | LanguageId::TOML
-            | LanguageId::MARKDOWN => Self::Format,
+            | LanguageId::MARKDOWN
+            | LanguageId::JSON5
+            | LanguageId::JSONL
+            | LanguageId::CSV
+            | LanguageId::TSV
+            | LanguageId::LOGFMT
+            | LanguageId::INI
+            | LanguageId::PROPERTIES
+            | LanguageId::HCL
+            | LanguageId::SRT
+            | LanguageId::VTT
+            | LanguageId::EDN
+            | LanguageId::ICS => Self::Format,
             _ => Self::Language,
         }
     }
 }
 
 /// Data, config, and markup formats (Cargo feature `formats`).
+///
+/// Order is the shipped-first, spec-difficulty-later build order behind the
+/// top-20-formats target in `docs/languages.md`.
 pub const FORMAT_IDS: &[LanguageId] = &[
     LanguageId::JSON,
     LanguageId::YAML,
@@ -62,6 +77,18 @@ pub const FORMAT_IDS: &[LanguageId] = &[
     LanguageId::HTML,
     LanguageId::CSS,
     LanguageId::MARKDOWN,
+    LanguageId::JSON5,
+    LanguageId::JSONL,
+    LanguageId::CSV,
+    LanguageId::TSV,
+    LanguageId::LOGFMT,
+    LanguageId::INI,
+    LanguageId::PROPERTIES,
+    LanguageId::HCL,
+    LanguageId::SRT,
+    LanguageId::VTT,
+    LanguageId::EDN,
+    LanguageId::ICS,
 ];
 
 /// TIOBE-style popular programming languages (Cargo feature `top20`).
@@ -170,6 +197,18 @@ pub fn presets_of(id: LanguageId) -> &'static [Preset] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn formats_preset_holds_the_full_top_twenty() {
+        assert_eq!(FORMAT_IDS.len(), 20);
+        for id in FORMAT_IDS {
+            assert_eq!(
+                FORMAT_IDS.iter().filter(|other| *other == id).count(),
+                1,
+                "{id} listed twice"
+            );
+        }
+    }
 
     #[test]
     fn language_presets_hold_twenty_each() {

@@ -56,10 +56,19 @@ pub use themoretheless_tokenizer_core::{ColumnEncoding, LineIndex};
 use std::borrow::Cow;
 
 use themoretheless_tokenizer_core::{
-    HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan, HostToken,
-    HostTokenization, LanguageDescriptor, LanguageId, Severity, full_descriptor,
+    Capabilities, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan,
+    HostToken, HostTokenization, LanguageDescriptor, LanguageId, Severity, language_descriptor,
     require_default_dialect,
 };
+
+/// What this engine actually does, stated on its own: TOML has a hand-written
+/// recovering grammar that rejects `[s` and `key =` and stays silent on valid
+/// documents, so it advertises `VALIDATE` — which the shared fullkit parser
+/// behind the wave languages cannot claim.
+const CAPABILITIES: Capabilities = Capabilities::LEX
+    .union(Capabilities::PARSE)
+    .union(Capabilities::SEMANTIC)
+    .union(Capabilities::VALIDATE);
 
 /// Host token kind: the TOML spec's own lexical categories, so an editor (and
 /// the playground) can tell a bare key from a quoted one, or an offset date
@@ -136,13 +145,14 @@ pub struct Host;
 
 pub static ENGINE: Host = Host;
 
-pub static DESCRIPTOR: LanguageDescriptor = full_descriptor(
+pub static DESCRIPTOR: LanguageDescriptor = language_descriptor(
     LanguageId::TOML,
     "TOML",
     &[],
     &[".toml"],
     &["application/toml"],
     env!("CARGO_PKG_VERSION"),
+    CAPABILITIES,
 );
 
 impl HostLanguage for Host {

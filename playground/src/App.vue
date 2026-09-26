@@ -79,6 +79,17 @@ const casesForLanguage = computed(() => LANGUAGE_CASES[language.value]?.cases ??
 const lineCount = computed(() => source.value.split('\n').length)
 const currentEngine = computed(() => engines.value[language.value])
 const secondEngine = computed(() => engines.value[secondId.value])
+
+/// Whether an engine issues a validity verdict at all. `validate` is advertised
+/// only by grammars that reject their own invalid input; the shared fullkit
+/// parser behind the wave languages flags valid code and stays quiet on broken
+/// code, so for those engines a diagnostic count reports what recovery managed
+/// to notice, not whether the document is well-formed.
+function engineValidates(id) {
+  return engines.value[id]?.capabilities?.includes('validate') ?? false
+}
+const currentValidates = computed(() => engineValidates(language.value))
+const secondValidates = computed(() => engineValidates(secondId.value))
 const secondModes = computed(() => languageMeta(secondId.value)?.modes ?? ['default'])
 const secondMeta = computed(() => languageMeta(secondId.value))
 const familyLabel = computed(() => (currentEngine.value ? currentEngine.value.family : null))
@@ -150,9 +161,16 @@ const statusLabel = computed(() => {
   if (loading.value) return 'ANALYZING'
   if (error.value) return 'BRIDGE ERROR'
   if (!result.value) return 'READY'
+  const count = diagnostics.value.length
+  if (!currentValidates.value) {
+    return count ? `${count} FLAG${count === 1 ? '' : 'S'} · NOT VALIDATED` : 'TOKENIZED'
+  }
   if (result.value.valid) return 'VALID'
   return `${diagnostics.value.length} DIAG${diagnostics.value.length === 1 ? '' : 'S'}`
 })
+const statusBad = computed(() =>
+  Boolean(error.value) || Boolean(result.value && currentValidates.value && !result.value.valid),
+)
 
 function dotColor(kind) {
   const color = kindColor(kind)
@@ -425,7 +443,7 @@ onBeforeUnmount(() => {
         <p class="eyebrow">THEMORETHELESS / DEV TOOL</p>
         <h1>Tokenizer <i>Lab</i></h1>
       </div>
-      <div class="status" :class="{ bad: error || (result && !result.valid) }" aria-live="polite">
+      <div class="status" :class="{ bad: statusBad }" aria-live="polite">
         <span class="pulse" />
         {{ statusLabel }}
       </div>
@@ -572,7 +590,14 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in matrixRows" :key="row.id" :class="{ invalid: !row.valid && !row.note }">
+            <tr
+              v-for="row in matrixRows"
+              :key="row.id"
+              :class="{
+                invalid: !row.valid && !row.note && engineValidates(row.id),
+                unvalidated: !row.valid && !row.note && !engineValidates(row.id),
+              }"
+            >
               <td><button type="button" class="row-link" @click="pickFromMatrix(row.id)">{{ row.id }}</button></td>
               <td>{{ row.family }}</td>
               <td><code>{{ row.depth }}</code></td>
@@ -686,7 +711,9 @@ onBeforeUnmount(() => {
           :title="`${token.kind} · ${token.start}..${token.end}`"
         >{{ token.text }}</span><span v-if="!resultB" class="empty">Tokenizing…</span></pre>
         <div class="compare-verdict">
-          <span>{{ secondModes.join('/') }} · {{ resultB?.valid ? 'valid' : (resultB?.diagnostics.length ?? 0) + ' diagnostics' }}</span>
+          <span>{{ secondModes.join('/') }} · {{ secondValidates
+            ? (resultB?.valid ? 'valid' : (resultB?.diagnostics.length ?? 0) + ' diagnostics')
+            : (resultB?.diagnostics.length ?? 0) + ' flags, not validated' }}</span>
         </div>
       </article>
     </section>
@@ -732,7 +759,8 @@ onBeforeUnmount(() => {
         <div v-if="!diagnostics.length" class="all-clear">
           <span>✓</span>
           <b>No diagnostics</b>
-          <small>The input is valid in this mode.</small>
+          <small v-if="currentValidates">The input is valid in this mode.</small>
+          <small v-else>This engine does not advertise validation, so nothing was checked.</small>
         </div>
         <button
           v-for="diagnostic in diagnostics"

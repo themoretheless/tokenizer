@@ -1,0 +1,11 @@
+// JSON5 sample
+{
+  unquoted: 'single quotes',
+  'quoted key': "double",
+  hex: 0xFF,
+  padded: .5,
+  pointy: 8.,
+  infinite: Infinity,
+  notANumber: NaN,
+  list: [1, 2, 3,],
+}

@@ -1,0 +1,31 @@
+WEBVTT - Adventures in timed text
+Region: overlay
+Style: highlight
+
+NOTE Transcribed by the tokenizer project.
+
+STYLE
+::cue(.highlight) { color: #4afa9b }
+::cue { background: transparent }
+
+REGION
+id:overlay
+width:100.0%
+lines:3
+viewportanchor:10.0%,90.0%
+scroll:up
+
+1
+00:00:20.000 --> 00:00:24.000 align:start position:50%
+Hello <v Roger>are you there?
+
+00:00:25.000 --> 00:00:30.000
+An <i>italic</i> word.
+
+2
+00:00:31.000 --> 00:00:34.000 size:60% line:-1 region:overlay
+Highlight: <c.highlight>class</c> and time.
+Later at <00:00:33.500> the plot thickens.
+
+01:00.000 --> 01:02.000 vertical:rl
+A cue that leaves its hours out.

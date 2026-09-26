@@ -63,6 +63,10 @@ impl UrlToken {
 pub struct UrlTokenization {
     pub tokens: Vec<UrlToken>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Where a `host:` announced a port slot and left it empty. A slot is a
+    /// fact about the document, not a token: an empty span here would break the
+    /// partition `verify_lossless_spans` asks of every engine.
+    pub empty_port: Option<Span>,
 }
 
 impl UrlTokenization {
@@ -147,8 +151,12 @@ pub fn tokenize(source: &str) -> UrlTokenization {
                     }
                     d += 1;
                 }
-                // Empty ":port" (trailing colon) still counts as a port slot.
+                // A trailing colon with no digits is still a port slot: the
+                // separator carries it, and `port` stays absent.
                 if bracket < colon && (colon + 1 == auth_end || digits) {
+                    if colon + 1 == auth_end {
+                        out.empty_port = Some(Span::new(colon, colon + 1));
+                    }
                     push_range(&mut out, source, UrlKind::Host, host_start, colon);
                     push_range(&mut out, source, UrlKind::Sep, colon, colon + 1);
                     push_range(&mut out, source, UrlKind::Port, colon + 1, auth_end);
@@ -277,6 +285,14 @@ pub fn validate(source: &str) -> Vec<Diagnostic> {
         }
     }
 
+    if let Some(span) = tokens.empty_port {
+        diagnostics.push(Diagnostic {
+            span,
+            code: "url-empty-port",
+            message: "Port is empty",
+        });
+    }
+
     for token in &tokens.tokens {
         if token.kind != UrlKind::Port {
             continue;
@@ -284,14 +300,6 @@ pub fn validate(source: &str) -> Vec<Diagnostic> {
         let Some(text) = token.text(source) else {
             continue;
         };
-        if text.is_empty() {
-            diagnostics.push(Diagnostic {
-                span: token.span,
-                code: "url-empty-port",
-                message: "Port is empty",
-            });
-            continue;
-        }
         if !text.bytes().all(|b| b.is_ascii_digit()) {
             diagnostics.push(Diagnostic {
                 span: token.span,
@@ -366,14 +374,9 @@ fn push_range(out: &mut UrlTokenization, source: &str, kind: UrlKind, from: usiz
     if to < from || to > source.len() || from > source.len() {
         return;
     }
-    // Allow zero-width Port spans so trailing `host:` is still representable.
+    // No zero-length tokens: a trailing `host:` is carried by its `:` separator,
+    // which is what `verify_lossless_spans` requires of every engine here.
     if to == from {
-        if kind == UrlKind::Port {
-            out.tokens.push(UrlToken {
-                kind,
-                span: Span::new(from, to),
-            });
-        }
         return;
     }
     if !source.is_char_boundary(from) || !source.is_char_boundary(to) {
@@ -548,18 +551,47 @@ mod tests {
     }
 
     #[test]
-    fn trailing_colon_emits_empty_port() {
+    fn trailing_colon_is_flagged_without_an_empty_token() {
         let source = "https://h:";
         let tokens = tokenize(source);
         assert!(tokens.is_lossless(source));
+        // The port slot is a diagnostic, not a zero-length token: every engine
+        // here owes `verify_lossless_spans` a contiguous partition of non-empty
+        // spans, and the `:` separator already carries the byte.
+        assert!(
+            tokens.tokens.iter().all(|t| !t.span.is_empty()),
+            "{:?}",
+            tokens.tokens
+        );
         assert!(
             tokens
                 .tokens
                 .iter()
-                .any(|t| t.kind == UrlKind::Port && t.span.is_empty())
+                .any(|t| t.kind == UrlKind::Sep && t.text(source) == Some(":"))
         );
         let d = validate(source);
         assert!(d.iter().any(|x| x.code == "url-empty-port"));
+    }
+
+    #[test]
+    fn spans_tile_the_source_for_every_shape_the_lexer_handles() {
+        use themoretheless_tokenizer_core::verify_lossless_spans;
+        for source in [
+            "",
+            "https://example.com",
+            "https://h:",
+            "https://user:@h:8080/p?q=1#f",
+            "//@:80",
+            "?only=query",
+            "#frag",
+            "relative/path",
+            "http://[::1]:8080/x",
+            "https://h:80/p{{var}}x",
+        ] {
+            let tokens = tokenize(source);
+            verify_lossless_spans(source, tokens.tokens.iter().map(|token| token.span))
+                .unwrap_or_else(|error| panic!("{source:?}: {error}"));
+        }
     }
 
     #[test]

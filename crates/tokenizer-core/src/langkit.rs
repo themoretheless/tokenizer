@@ -342,6 +342,32 @@ fn match_operator(bytes: &[u8], i: usize) -> Option<usize> {
     None
 }
 
+/// Elements whose HTML body is text until their own close tag, `<` included.
+pub const HTML_RAW_TEXT: [&str; 4] = ["script", "style", "textarea", "title"];
+
+/// Index of the `<` starting `</name`, ASCII-case insensitively, or `None` to
+/// end of input. Both the markup lexer and its parser need the same rule.
+pub fn find_close_tag(source: &str, from: usize, name: &str) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut i = from;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'<' && bytes[i + 1] == b'/' {
+            let ns = i + 2;
+            let mut ne = ns;
+            while ne < bytes.len()
+                && (bytes[ne].is_ascii_alphanumeric() || matches!(bytes[ne], b'-' | b':' | b'_'))
+            {
+                ne += 1;
+            }
+            if source[ns..ne].eq_ignore_ascii_case(name) {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 /// Minimal markup highlighter: tags, attrs, text, comments, doctype.
 #[must_use]
 pub fn highlight_markup(source: &str, htmlish: bool) -> Highlighted {
@@ -384,6 +410,18 @@ pub fn highlight_markup(source: &str, htmlish: bool) -> Highlighted {
                 push(&mut out, "tag", start, i);
                 continue;
             }
+            let closing = i < bytes.len() && bytes[i] == b'/';
+            if closing {
+                i += 1;
+            }
+            let name_start = i;
+            while i < bytes.len()
+                && (bytes[i].is_ascii_alphanumeric() || matches!(bytes[i], b'-' | b':' | b'_'))
+            {
+                i += 1;
+            }
+            let raw_text_name = source[name_start..i].to_ascii_lowercase();
+            let raw_text = htmlish && !closing && HTML_RAW_TEXT.contains(&raw_text_name.as_str());
             // closing or open tag
             while i < bytes.len() && bytes[i] != b'>' {
                 // string attrs
@@ -407,7 +445,33 @@ pub fn highlight_markup(source: &str, htmlish: bool) -> Highlighted {
                 i += 1;
             }
             push(&mut out, "tag", start, i);
-            let _ = htmlish;
+            // An HTML raw-text body is one text run, so `if (1 < 2)` inside a
+            // `<script>` is not a tag. The element does end at the first
+            // `</script`, exactly as a browser reads it.
+            if raw_text {
+                let body_start = i;
+                match find_close_tag(source, body_start, &raw_text_name) {
+                    Some(close) => {
+                        if close > body_start {
+                            push(&mut out, "text", body_start, close);
+                        }
+                        i = close;
+                        while i < bytes.len() && bytes[i] != b'>' {
+                            i += 1;
+                        }
+                        if i < bytes.len() {
+                            i += 1;
+                        }
+                        push(&mut out, "tag", close, i);
+                    }
+                    None => {
+                        i = bytes.len();
+                        if i > body_start {
+                            push(&mut out, "text", body_start, i);
+                        }
+                    }
+                }
+            }
             continue;
         }
 
