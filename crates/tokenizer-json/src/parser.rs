@@ -57,6 +57,16 @@ impl ParseOptions {
         self.lexer.json5_enabled()
     }
 
+    /// Turns the JSON5 grammar on or off without touching resource limits.
+    /// Turning it off also drops the comments and byte-order marks that
+    /// [`LexerOptions::json5_mode`] implies, leaving trailing commas alone
+    /// because those are a parser option, not a lexer mode.
+    #[must_use]
+    pub const fn json5_mode(mut self, yes: bool) -> Self {
+        self.lexer = self.lexer.json5_mode(yes);
+        self
+    }
+
     #[must_use]
     pub const fn allow_comments(mut self, yes: bool) -> Self {
         self.lexer = self.lexer.allow_comments(yes);

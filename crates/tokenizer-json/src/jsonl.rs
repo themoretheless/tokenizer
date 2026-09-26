@@ -9,7 +9,14 @@
 //!
 //! Record text is parsed exactly as JSON, so comments, trailing commas and
 //! unquoted keys stay errors here even where JSON and JSON5 allow them; the
-//! `application/jsonl` registration says each line is one JSON value.
+//! `application/jsonl` registration says each line is one JSON value. That
+//! guarantee holds for [`parse_records`] as well, which adopts only the
+//! resource limits a caller supplies, never its grammar.
+//!
+//! A line that carries no text at all is skipped rather than parsed, so leading,
+//! embedded and trailing blank lines produce neither a record nor a diagnostic.
+//! This is the usual tolerance of the format; the line terminator itself stays
+//! visible as a record break.
 
 use crate::{Parse, ParseDiagnostic, ParseOptions, parse_with};
 use themoretheless_tokenizer_core::Span;
@@ -102,18 +109,33 @@ impl<'source> Jsonl<'source> {
     }
 }
 
+/// Strict JSON grammar carrying over only the caller's resource limits.
+///
+/// `LexerOptions::json5_mode(false)` clears the JSON5 grammar along with the
+/// comments and byte-order marks it implies, so the three knobs that widen the
+/// grammar are all forced off; `max_input_bytes`, `max_tokens`,
+/// `max_diagnostics` and `max_depth` are left exactly as supplied.
+fn strict_records(options: ParseOptions) -> ParseOptions {
+    options
+        .json5_mode(false)
+        .allow_comments(false)
+        .allow_trailing_commas(false)
+}
+
 /// Parses JSONL with the strict JSON record parser.
 #[must_use]
 pub fn parse(source: &str) -> Jsonl<'_> {
     parse_records(source, ParseOptions::strict())
 }
 
-/// Parses JSONL with explicit record options. A record is always exactly one
-/// value, so an option that permits trailing commas is rejected here rather
-/// than silently accepted.
+/// Parses JSONL with explicit record options. A record is always one strict
+/// JSON value, so only the resource limits a caller supplies are adopted here;
+/// the grammar is forced back to strict JSON, rejecting trailing commas,
+/// comments, single-quoted strings and unquoted keys even where JSON5 and
+/// JSONC accept them.
 #[must_use]
 pub fn parse_records(source: &str, options: ParseOptions) -> Jsonl<'_> {
-    let records_options = options.allow_trailing_commas(false);
+    let records_options = strict_records(options);
     let mut records = Vec::new();
     let mut line_breaks = Vec::new();
     let mut diagnostics = Vec::new();
@@ -171,5 +193,44 @@ fn shift(diagnostic: ParseDiagnostic, offset: usize) -> ParseDiagnostic {
     ParseDiagnostic {
         kind: diagnostic.kind,
         span: Span::new(diagnostic.span.start + offset, diagnostic.span.end + offset),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json5_options_cannot_widen_the_record_grammar() {
+        for (construct, source) in [
+            ("unquoted key", "{a:1}\n"),
+            ("single-quoted string", "{'a':1}\n"),
+            ("line comment", "//x\n{\"a\":1}\n"),
+            ("trailing comma", "{\"a\":[1,]}\n"),
+        ] {
+            assert!(
+                !parse_records(source, ParseOptions::json5()).is_valid(),
+                "{construct} was accepted through JSON5 options"
+            );
+        }
+        assert!(parse_records("{\"a\":1}\n", ParseOptions::json5()).is_valid());
+    }
+
+    #[test]
+    fn caller_resource_limits_survive_the_strict_forcing() {
+        let source = "{\"a\":true}\n";
+        assert!(
+            parse_records(source, ParseOptions::strict().max_input_bytes(4)).has_errors(),
+            "strict grammar forcing reset the caller's input limit"
+        );
+        assert!(parse_records(source, ParseOptions::strict()).is_valid());
+    }
+
+    #[test]
+    fn blank_lines_are_skipped_but_their_breaks_stay_visible() {
+        let document = parse("\n{\"a\":1}\n");
+        assert_eq!(document.records().len(), 1);
+        assert!(document.diagnostics().is_empty());
+        assert_eq!(document.line_breaks().len(), 2);
     }
 }
