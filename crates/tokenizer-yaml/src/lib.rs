@@ -38,10 +38,17 @@ pub use themoretheless_tokenizer_core::Span;
 use std::borrow::Cow;
 
 use themoretheless_tokenizer_core::{
-    HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan, HostToken,
-    HostTokenization, LanguageDescriptor, LanguageId, Severity, full_descriptor,
+    Capabilities, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan,
+    HostToken, HostTokenization, LanguageDescriptor, LanguageId, Severity, language_descriptor,
     require_default_dialect,
 };
+
+/// YAML's grammar is hand-written too, so the same claim as TOML: it rejects
+/// unclosed flow collections and reports nothing on valid documents.
+const CAPABILITIES: Capabilities = Capabilities::LEX
+    .union(Capabilities::PARSE)
+    .union(Capabilities::SEMANTIC)
+    .union(Capabilities::VALIDATE);
 
 /// Host token kind: YAML's own node vocabulary, so an editor can tell a key
 /// indicator from a flow entry, or an anchor from a plain scalar.
@@ -111,13 +118,14 @@ pub struct Host;
 
 pub static ENGINE: Host = Host;
 
-pub static DESCRIPTOR: LanguageDescriptor = full_descriptor(
+pub static DESCRIPTOR: LanguageDescriptor = language_descriptor(
     LanguageId::YAML,
     "YAML",
     &["yml"],
     &[".yaml", ".yml"],
     &["application/yaml", "text/yaml"],
     env!("CARGO_PKG_VERSION"),
+    CAPABILITIES,
 );
 
 impl HostLanguage for Host {

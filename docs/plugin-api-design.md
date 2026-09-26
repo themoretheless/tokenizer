@@ -790,7 +790,10 @@ Evolve today’s playground contract into a **versioned, language-scoped** envel
 
 **Invariants:**
 
-- Spans are half-open UTF-8 byte offsets; `start <= end <= sourceBytes`; char boundaries.
+- Spans are half-open UTF-8 byte offsets; `start < end <= sourceBytes`; char boundaries. A slot that
+  announces something and holds no byte (an empty port after `host:`) is a diagnostic, never a
+  zero-length token — `verify_lossless_spans` rejects empty spans, and
+  `no_format_engine_panics_or_stalls_on_a_truncated_document` enforces it on every format fixture.
 - Syntax/semantic token streams are lossless when tokens present.
 - `kind` is stable kebab-case vocabulary for `(language, layer)`, not Rust `Debug`.
 - `valid` is false if any diagnostic has severity error (or any diagnostic when severity omitted).

@@ -88,6 +88,10 @@ footer { padding-top: 20px; text-align: center; }
 .matrix-panel td, .matrix-panel th { padding: 6px 10px; border-bottom: 1px solid #182126; text-align: right; }
 .matrix-panel th:first-child, .matrix-panel td:first-child { text-align: left; }
 .matrix-panel tr.invalid td { color: #6d7a81; }
+/* Flags from an engine that does not advertise validation are a note about
+   recovery, not a verdict, so they read differently from a real INVALID. */
+.matrix-panel tr.unvalidated td { color: #7c8a92; }
+.matrix-panel tr.unvalidated th { border-left: 2px dashed #43525a; }
 .row-link { border: 0; background: none; cursor: pointer; color: var(--cyan); font: inherit; padding: 0; }
 .warn-flag { color: #ff9d66; }
 .matrix-note { margin: 0; padding: 10px 14px; border-top: 1px solid var(--line); font: 11px/1.6 ui-monospace, 'SFMono-Regular', Consolas, monospace; color: var(--muted); }
