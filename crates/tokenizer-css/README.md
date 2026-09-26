@@ -44,7 +44,7 @@ the lexer released.
 
 ## Capabilities and non-goals
 
-`DESCRIPTOR` advertises LEX, PARSE, SEMANTIC and VALIDATE. There is no CST, cursor navigation or
+`DESCRIPTOR` advertises LEX, PARSE and VALIDATE. There is no CST, cursor navigation or
 visitor API here, and no formatting layer: the engine only answers "what are these bytes, and what
 is wrong with them". Named colors are deliberately not hard-coded; `color` covers `#`-hex literals
 in value position, and other color functions lex as `function` tokens.

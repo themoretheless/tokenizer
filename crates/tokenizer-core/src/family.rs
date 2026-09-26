@@ -159,7 +159,8 @@ impl Preset {
         match self {
             Self::TOP20 => TOP20_IDS,
             Self::NEXT20 => NEXT20_IDS,
-            _ => FORMAT_IDS,
+            Self::FORMATS => FORMAT_IDS,
+            _ => &[],
         }
     }
 
@@ -197,6 +198,13 @@ pub fn presets_of(id: LanguageId) -> &'static [Preset] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unrecognised_preset_resolves_to_no_engines() {
+        assert!(Preset("top20").ids() == TOP20_IDS);
+        assert!(Preset("formats").ids() == FORMAT_IDS);
+        assert!(Preset("not-a-preset").ids().is_empty());
+    }
 
     #[test]
     fn formats_preset_holds_the_full_top_twenty() {
