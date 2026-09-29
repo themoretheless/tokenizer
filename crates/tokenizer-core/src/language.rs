@@ -21,6 +21,7 @@ impl LanguageId {
     pub const SQL: Self = Self("sql");
     pub const MONGO: Self = Self("mongo");
     pub const BASH: Self = Self("bash");
+    pub const RUSH: Self = Self("rush");
     pub const POWERSHELL: Self = Self("powershell");
     pub const JAVASCRIPT: Self = Self("javascript");
     pub const TYPESCRIPT: Self = Self("typescript");
