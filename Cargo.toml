@@ -207,7 +207,7 @@ wave2 = ["sql", "mongo", "bash", "powershell"]
 wave3 = ["javascript", "typescript"]
 wave4 = ["python", "java", "csharp", "go", "php", "ruby"]
 wave5 = ["c", "cpp", "rust", "kotlin", "swift", "dart", "r"]
-wave6 = ["visualbasic", "fortran", "matlab", "delphi", "scala", "lua", "perl", "objectivec", "julia", "assembly"]
+wave6 = ["visualbasic", "fortran", "matlab", "delphi", "scala", "lua", "perl", "objectivec", "julia", "assembly", "rush"]
 wave7 = [
     "groovy",
     "haskell",

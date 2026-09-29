@@ -14,8 +14,8 @@ use themoretheless_tokenizer_core::{
 fn profile() -> FullProfile {
     FullProfile {
         keywords: &[
-            "if", "else", "fn", "ret", "for", "foreach", "in", "yield", "match", "where",
-            "select", "count", "run", "and", "or", "not", "param", "show", "assert", "let",
+            "if", "else", "fn", "ret", "for", "foreach", "in", "yield", "match", "where", "select",
+            "count", "run", "and", "or", "not", "param", "show", "assert", "let",
         ],
         types: &["int", "f64", "str", "bool", "T", "Geometry", "Row"],
         line_comment: None,

@@ -25,8 +25,6 @@ pub use themoretheless_tokenizer_ada as ada;
 pub use themoretheless_tokenizer_assembly as assembly;
 #[cfg(feature = "bash")]
 pub use themoretheless_tokenizer_bash as bash;
-#[cfg(feature = "rush")]
-pub use themoretheless_tokenizer_rush as rush;
 #[cfg(feature = "c")]
 pub use themoretheless_tokenizer_c as c;
 #[cfg(feature = "clojure")]
@@ -101,6 +99,8 @@ pub use themoretheless_tokenizer_python as python;
 pub use themoretheless_tokenizer_r as r;
 #[cfg(feature = "ruby")]
 pub use themoretheless_tokenizer_ruby as ruby;
+#[cfg(feature = "rush")]
+pub use themoretheless_tokenizer_rush as rush;
 #[cfg(feature = "rust")]
 pub use themoretheless_tokenizer_rust as rust;
 #[cfg(feature = "scala")]
