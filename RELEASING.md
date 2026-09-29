@@ -1,8 +1,8 @@
 # Releasing
 
 Releases use two explicit GitHub Actions workflows. The publish workflow first
-uploads the crate to crates.io; the release workflow then verifies that exact
-package before creating its Git tag and GitHub release. Do not create the tag
+uploads the workspace crates to crates.io; the release workflow creates the
+Git tag and GitHub release after version and tag checks. Do not create the tag
 before publishing.
 
 ## Prerequisites
@@ -31,7 +31,7 @@ before publishing.
    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
    cargo test --locked --workspace --all-targets --all-features
    RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --all-features
-   cargo package --locked
+   cargo +beta publish --locked --workspace --exclude tokenizer-wasm --dry-run
    ```
 
 5. Commit the version, changelog, and any regenerated `Cargo.lock`, push to
@@ -39,12 +39,21 @@ before publishing.
 
 ## Publish to crates.io
 
-The workspace publishes four crates in order:
+The workflow selects every publishable workspace crate with Cargo's workspace
+publish support, excluding `tokenizer-wasm` (`publish = false`). Cargo orders
+packages by their dependencies: core, language/format plugins, then the facade.
+New plugin crates are included automatically; optional dependencies are included.
+Use the beta toolchain configured by CI for workspace publishing.
 
-1. `themoretheless-tokenizer-core`
-2. `themoretheless-tokenizer-json`
-3. `themoretheless-tokenizer-url`
-4. `themoretheless-tokenizer` (facade)
+```console
+cargo +beta publish --locked --workspace --exclude tokenizer-wasm --dry-run
+```
+
+This dry run packages and verifies the workspace together without uploading it,
+including dependencies that have not been published yet. Before a new release,
+update every changed crate's version and the matching path dependency versions;
+never reuse a published version for changed contents. Existing registry versions
+and publication permissions remain Cargo's responsibility to validate.
 
 1. In GitHub Actions, open **Publish to crates.io** and run it against `main`.
 2. Enter the exact Cargo version, leave **publish** disabled, and run the
@@ -53,15 +62,15 @@ The workspace publishes four crates in order:
 3. Run the same workflow again on the same `main` commit with **publish**
    enabled and confirmation equal to the Cargo version (for example `0.4.0`).
 4. Approve the protected `crates-io` environment when prompted, then wait until
-   all four packages are visible on crates.io. Never publish from an uncommitted
+   all selected packages are visible on crates.io. Never publish from an uncommitted
    local checkout.
 
 ## Create the GitHub release
 
 1. In GitHub Actions, run **Release** against the same `main` commit with
-   confirmation `release vX.Y.Z`.
-2. The workflow rebuilds the package, confirms the version and checksum on
-   crates.io, then creates the annotated `vX.Y.Z` tag and GitHub release.
+   version `X.Y.Z`.
+2. After confirming publication, run the workflow to validate the version and
+   existing tag state, then create the `vX.Y.Z` tag and GitHub release.
 3. Confirm the tag, generated release notes, crates.io page, and docs.rs build.
 
 The release workflow is safe to rerun when its existing tag points to the same

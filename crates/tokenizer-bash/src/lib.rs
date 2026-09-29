@@ -18,6 +18,7 @@ fn profile() -> FullProfile {
         block_comment: None,
         hash_line_comment: true,
         dollar_ident: false,
+        backtick_strings: true,
         triple_strings: false,
         soft_indent_blocks: false,
     }
@@ -109,6 +110,15 @@ impl HostLanguage for Host {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quoted_backticks_shield_delimiters() {
+        let source = "echo `printf ]`";
+        let parsed = parse(source);
+        assert!(parsed.lexed.is_lossless(source));
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        assert!(!validate("(").is_empty());
+    }
 
     #[test]
     fn lossless_lex() {

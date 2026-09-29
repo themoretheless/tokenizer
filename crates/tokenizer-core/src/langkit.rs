@@ -345,7 +345,7 @@ fn match_operator(bytes: &[u8], i: usize) -> Option<usize> {
 /// Elements whose HTML body is text until their own close tag, `<` included.
 pub const HTML_RAW_TEXT: [&str; 4] = ["script", "style", "textarea", "title"];
 
-/// Index of the `<` starting `</name`, ASCII-case insensitively, or `None` to
+/// Index of the `<` starting a complete `</name>` tag, ASCII-case insensitively, or `None` to
 /// end of input. Both the markup lexer and its parser need the same rule.
 pub fn find_close_tag(source: &str, from: usize, name: &str) -> Option<usize> {
     let bytes = source.as_bytes();
@@ -360,7 +360,13 @@ pub fn find_close_tag(source: &str, from: usize, name: &str) -> Option<usize> {
                 ne += 1;
             }
             if source[ns..ne].eq_ignore_ascii_case(name) {
-                return Some(i);
+                let mut end = ne;
+                while end < bytes.len() && bytes[end].is_ascii_whitespace() {
+                    end += 1;
+                }
+                if bytes.get(end) == Some(&b'>') {
+                    return Some(i);
+                }
             }
         }
         i += 1;

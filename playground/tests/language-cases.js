@@ -48,7 +48,7 @@ export const LANGUAGE_CASES = {
     cases: [
       { name: 'two-records', source: '{"a":1}\n{"b":2}', expectValid: true, expectKinds: ['record-break'] },
       { name: 'scalar-per-line', source: '1\n2\n3', expectValid: true, expectKinds: ['number'] },
-      { name: 'blank-lines', source: '{"a":1}\n\n{"b":2}\n', expectValid: true },
+      { name: 'blank-lines', source: '{"a":1}\n\n{"b":2}\n', expectValid: false },
       { name: 'trailing-comma-rejected', source: '{"a":1,}', expectValid: false },
       { name: 'comment-rejected', source: '{// c\n"a":1}', expectValid: false },
       { name: 'broken-record', source: '{"a":1}\n{"b":', expectValid: false },

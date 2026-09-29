@@ -633,6 +633,24 @@ mod tests {
     }
 
     #[test]
+    fn raw_text_requires_a_complete_closing_tag() {
+        for source in [
+            "<script>x</script",
+            "<style>x</style ",
+            "<textarea>x</textarea!",
+        ] {
+            let parsed = parse_markup_as(source, MarkupFlavor::Html5);
+            assert!(!parsed.diagnostics.is_empty(), "{source}");
+            assert!(parsed.lexed.is_lossless(source));
+        }
+        assert!(
+            parse_markup_as("<script>x</SCRIPT >", MarkupFlavor::Html5)
+                .diagnostics
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn a_raw_text_body_is_text_until_its_own_close_tag() {
         let parse = parse_markup_as("<script>if (a < b) f();</script>", MarkupFlavor::Html5);
         assert!(parse.diagnostics.is_empty());

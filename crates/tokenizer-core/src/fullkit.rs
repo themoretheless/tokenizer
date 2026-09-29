@@ -88,6 +88,8 @@ pub struct FullProfile {
     pub hash_line_comment: bool,
     /// Allow `$` in identifiers.
     pub dollar_ident: bool,
+    /// Treat paired backticks as an opaque quoted span (SQL identifiers, shell commands).
+    pub backtick_strings: bool,
     /// Python-style triple quotes.
     pub triple_strings: bool,
     /// `#` comments that are not only at BOL (shell/python already hash_line).
@@ -103,6 +105,7 @@ impl Default for FullProfile {
             block_comment: Some(("/*", "*/")),
             hash_line_comment: false,
             dollar_ident: false,
+            backtick_strings: false,
             triple_strings: false,
             soft_indent_blocks: false,
         }
@@ -396,15 +399,9 @@ pub fn lex_full(source: &str, profile: &FullProfile) -> Lexed {
             push_lex(&mut out, SyntaxKind::StringLit, start, i);
             continue;
         }
-        // A backtick opens a quoted span only where `$` names a variable: that
-        // set is exactly groovy, javascript, php, perl and typescript, whose
-        // template / shell / qx literals all run to a closing backtick and may
-        // cross lines. Elsewhere a backtick is not a quote this lexer should
-        // close — haskell uses it for an infix call, sql for a quoted
-        // identifier, and bash for command substitution, which this profile
-        // flag does not cover — so it stays punctuation. An unmatched one is
-        // left as punctuation too rather than swallowing the rest of the file.
-        if profile.dollar_ident
+        // Paired backticks shield embedded delimiters in templates, SQL names,
+        // and shell commands. Haskell infix names keep their token structure.
+        if (profile.dollar_ident || profile.backtick_strings)
             && b == b'`'
             && let Some(close) = find_backtick_end(bytes, i + 1)
         {
@@ -1480,6 +1477,7 @@ mod tests {
             block_comment: None,
             hash_line_comment: true,
             dollar_ident: false,
+            backtick_strings: false,
             triple_strings: true,
             soft_indent_blocks: true,
         }
@@ -1555,7 +1553,7 @@ mod delimiter_tests {
         let open = lex_full("let t = `x;", &js);
         assert!(!open.tokens.iter().any(|t| t.kind == SyntaxKind::StringLit));
         assert_eq!(open.diagnostics, Vec::new());
-        // Without `$` the backtick is not a quote (haskell infix, sql ids).
+        // Without `$` the backtick is not a quote (haskell infix).
         let other = lex_full("let t = `x`;", &FullProfile::default());
         assert!(!other.tokens.iter().any(|t| t.kind == SyntaxKind::StringLit));
     }

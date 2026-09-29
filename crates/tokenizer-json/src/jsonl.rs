@@ -13,10 +13,8 @@
 //! guarantee holds for [`parse_records`] as well, which adopts only the
 //! resource limits a caller supplies, never its grammar.
 //!
-//! A line that carries no text at all is skipped rather than parsed, so leading,
-//! embedded and trailing blank lines produce neither a record nor a diagnostic.
-//! This is the usual tolerance of the format; the line terminator itself stays
-//! visible as a record break.
+//! Blank lines are invalid empty records. A single final line terminator is
+//! allowed; every line terminator stays visible as a record break.
 
 use crate::{Parse, ParseDiagnostic, ParseOptions, parse_with};
 use themoretheless_tokenizer_core::Span;
@@ -144,9 +142,6 @@ pub fn parse_records(source: &str, options: ParseOptions) -> Jsonl<'_> {
         if let Some(break_span) = terminator {
             line_breaks.push(break_span);
         }
-        if start == end {
-            continue;
-        }
         let parsed = parse_with(&source[start..end], records_options);
         for diagnostic in parsed.diagnostics() {
             diagnostics.push(shift(*diagnostic, start));
@@ -227,10 +222,15 @@ mod tests {
     }
 
     #[test]
-    fn blank_lines_are_skipped_but_their_breaks_stay_visible() {
-        let document = parse("\n{\"a\":1}\n");
+    fn blank_lines_are_invalid_records_with_preserved_breaks() {
+        for source in ["\n{\"a\":1}\n", "{\"a\":1}\n\n", "1\n\n2", "1\n \n2"] {
+            let document = parse(source);
+            assert!(!document.is_valid(), "{source:?}");
+            assert!(!document.diagnostics().is_empty());
+            assert_eq!(document.line_breaks().len(), 2);
+        }
+        let document = parse("1\n");
+        assert!(document.is_valid());
         assert_eq!(document.records().len(), 1);
-        assert!(document.diagnostics().is_empty());
-        assert_eq!(document.line_breaks().len(), 2);
     }
 }
