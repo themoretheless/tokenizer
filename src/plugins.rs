@@ -315,6 +315,10 @@ pub fn register_builtins(
     {
         builder.register(&themoretheless_tokenizer_bash::ENGINE)?;
     }
+    #[cfg(feature = "rush")]
+    {
+        builder.register(&themoretheless_tokenizer_rush::ENGINE)?;
+    }
     #[cfg(feature = "powershell")]
     {
         builder.register(&themoretheless_tokenizer_powershell::ENGINE)?;
@@ -605,10 +609,8 @@ mod tests {
     #[cfg(feature = "all-languages")]
     #[test]
     fn all_languages_register() {
-        // Count is asserted as set equality over Cargo features, the registry
-        // and the playground in `tests/wiring_completeness.rs`, so this only
-        // guards against an empty registry.
-        assert!(!builtin_registry().is_empty());
+        // Exact coverage is checked against Cargo features and playground fixtures.
+        assert_eq!(builtin_registry().len(), 70);
     }
 
     #[cfg(feature = "top20")]

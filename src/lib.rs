@@ -117,6 +117,8 @@ pub use themoretheless_tokenizer_python as python;
 pub use themoretheless_tokenizer_r as r;
 #[cfg(feature = "ruby")]
 pub use themoretheless_tokenizer_ruby as ruby;
+#[cfg(feature = "rush")]
+pub use themoretheless_tokenizer_rush as rush;
 #[cfg(feature = "rust")]
 pub use themoretheless_tokenizer_rust as rust;
 #[cfg(feature = "scala")]

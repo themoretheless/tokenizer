@@ -35,7 +35,7 @@ html::parse("<div/>"); // MarkupDoc AST
 | `next20` | next 20 popular languages, wave7 (`core::family::NEXT20_IDS`) |
 | `formats` | the 20 data/config/markup/timed-text formats (`core::family::FORMAT_IDS`) |
 | `wave1`…`wave7` | delivery batches |
-| `all-languages` | everything (69 engines) |
+| `all-languages` | everything (70 engines) |
 
 ```toml
 themoretheless-tokenizer = { version = "0.4", features = ["top20"] }
@@ -97,7 +97,7 @@ All **fullkit** (or native) editor engines:
 | 19 | verilog | fullkit |
 | 20 | graphql | fullkit |
 
-Plus markup/data: json (deepest), url, html, xml, css, yaml, toml, markdown, mongo, bash, powershell, dart, scala, lua, perl, objectivec, julia, …
+Plus markup/data: json (deepest), url, html, xml, css, yaml, toml, markdown, mongo, bash, powershell, dart, scala, lua, perl, objectivec, julia, rush, …
 
 ## Capability honesty
 

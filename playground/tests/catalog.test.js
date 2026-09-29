@@ -134,7 +134,7 @@ test('a picker sample is a valid document, and the language fixtures track it', 
       `${lang.id}: fixture drifted from the picker sample — run npm run export:language-fixtures`,
     )
   }
-  assert.equal(quiet.length, 69)
+  assert.equal(quiet.length, 70)
 })
 
 test('format vocabulary depth is measurable per engine', () => {

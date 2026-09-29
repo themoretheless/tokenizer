@@ -267,6 +267,13 @@ export const LANGUAGES = [
     sample: '# script\nif ($true) {\n  Write-Host "hi"\n}\n',
   },
   {
+    id: 'rush',
+    label: 'Rush',
+    group: 'scripting',
+    modes: ['default'],
+    sample: '// demo\nfn add(a, b) {\n  return a + b;\n}\nlet s = "hi";\n',
+  },
+  {
     id: 'rust',
     label: 'Rust',
     group: 'systems',

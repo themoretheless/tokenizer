@@ -677,7 +677,7 @@ fn every_engine_is_quiet_on_its_valid_fixture() {
             }
         }
     }
-    assert_eq!(checked, 69, "every registered engine needs a valid fixture");
+    assert_eq!(checked, 70, "every registered engine needs a valid fixture");
     assert!(
         noisy.is_empty(),
         "{} diagnostics on valid fixtures: {:?}",

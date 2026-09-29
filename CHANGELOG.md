@@ -175,8 +175,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Full multi-language pipeline in `core::fullkit` (lex → recovering parse →
   shared AST → semantic tokens) for programming/data languages.
 - Full markup AST pipeline in `core::markup_full` for HTML/XML.
-- 55 language crates + feature groups `wave1`…`wave7`, `top20`, `next20`,
+- 56 language crates + feature groups `wave1`…`wave7`, `top20`, `next20`,
   `all-languages`.
+- Rush scripting language engine (`tokenizer-rush`, feature `rush`, wave6).
 - TIOBE-style top 20 as first-class `top20` feature (full engines).
 - Next 20 popular languages as `next20` / `wave7`: groovy, haskell, elixir,
   erlang, clojure, fsharp, ocaml, lisp, scheme, solidity, zig, nim, dlang,
