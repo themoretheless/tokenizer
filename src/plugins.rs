@@ -451,6 +451,10 @@ pub fn register_builtins(
     {
         builder.register(&themoretheless_tokenizer_graphql::ENGINE)?;
     }
+    #[cfg(feature = "rush")]
+    {
+        builder.register(&themoretheless_tokenizer_rush::ENGINE)?;
+    }
     let _ = builder;
     Ok(())
 }
@@ -557,8 +561,8 @@ mod tests {
     #[cfg(feature = "all-languages")]
     #[test]
     fn all_languages_register() {
-        // json + url + 55 language crates
-        assert_eq!(builtin_registry().len(), 57);
+        // json + url + 56 language crates
+        assert_eq!(builtin_registry().len(), 58);
     }
 
     #[cfg(feature = "top20")]

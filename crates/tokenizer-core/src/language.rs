@@ -67,6 +67,7 @@ impl LanguageId {
     pub const VHDL: Self = Self("vhdl");
     pub const VERILOG: Self = Self("verilog");
     pub const GRAPHQL: Self = Self("graphql");
+    pub const RUSH: Self = Self("rush");
 
     #[must_use]
     pub const fn as_str(self) -> &'static str {
