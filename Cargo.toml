@@ -12,6 +12,7 @@ members = [
     "crates/tokenizer-sql",
     "crates/tokenizer-mongo",
     "crates/tokenizer-bash",
+    "crates/tokenizer-rush",
     "crates/tokenizer-powershell",
     "crates/tokenizer-javascript",
     "crates/tokenizer-typescript",
@@ -93,6 +94,7 @@ themoretheless-tokenizer-markdown = { path = "crates/tokenizer-markdown", versio
 themoretheless-tokenizer-sql = { path = "crates/tokenizer-sql", version = "0.4.0", optional = true }
 themoretheless-tokenizer-mongo = { path = "crates/tokenizer-mongo", version = "0.4.0", optional = true }
 themoretheless-tokenizer-bash = { path = "crates/tokenizer-bash", version = "0.4.0", optional = true }
+themoretheless-tokenizer-rush = { path = "crates/tokenizer-rush", version = "0.4.0", optional = true }
 themoretheless-tokenizer-powershell = { path = "crates/tokenizer-powershell", version = "0.4.0", optional = true }
 themoretheless-tokenizer-javascript = { path = "crates/tokenizer-javascript", version = "0.4.0", optional = true }
 themoretheless-tokenizer-typescript = { path = "crates/tokenizer-typescript", version = "0.4.0", optional = true }
@@ -153,6 +155,7 @@ markdown = ["dep:themoretheless-tokenizer-markdown"]
 sql = ["dep:themoretheless-tokenizer-sql"]
 mongo = ["dep:themoretheless-tokenizer-mongo"]
 bash = ["dep:themoretheless-tokenizer-bash"]
+rush = ["dep:themoretheless-tokenizer-rush"]
 powershell = ["dep:themoretheless-tokenizer-powershell"]
 javascript = ["dep:themoretheless-tokenizer-javascript"]
 typescript = ["dep:themoretheless-tokenizer-typescript"]

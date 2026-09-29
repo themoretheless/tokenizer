@@ -168,6 +168,7 @@ dependencies = [
  "themoretheless-tokenizer-python",
  "themoretheless-tokenizer-r",
  "themoretheless-tokenizer-ruby",
+ "themoretheless-tokenizer-rush",
  "themoretheless-tokenizer-rust",
  "themoretheless-tokenizer-scala",
  "themoretheless-tokenizer-scheme",
@@ -478,6 +479,13 @@ dependencies = [
 
 [[package]]
 name = "themoretheless-tokenizer-ruby"
+version = "0.4.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-rush"
 version = "0.4.0"
 dependencies = [
  "themoretheless-tokenizer-core",

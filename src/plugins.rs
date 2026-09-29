@@ -267,6 +267,10 @@ pub fn register_builtins(
     {
         builder.register(&themoretheless_tokenizer_bash::ENGINE)?;
     }
+    #[cfg(feature = "rush")]
+    {
+        builder.register(&themoretheless_tokenizer_rush::ENGINE)?;
+    }
     #[cfg(feature = "powershell")]
     {
         builder.register(&themoretheless_tokenizer_powershell::ENGINE)?;
