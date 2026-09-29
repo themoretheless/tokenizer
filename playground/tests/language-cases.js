@@ -513,6 +513,15 @@ export const LANGUAGE_CASES = {
       { name: 'empty', source: '', minTokens: 0 },
     ],
   },
+  rush: {
+    modes: ['default'],
+    cases: [
+      { name: 'fn', source: 'fn add(a, b) { return a + b; }\n', expectKinds: ['keyword'] },
+      { name: 'comment', source: '// c\nlet x = 1;\n', expectKinds: ['comment'] },
+      { name: 'string', source: 'let s = "hi";\n', expectKinds: ['string'] },
+      { name: 'empty', source: '', minTokens: 0 },
+    ],
+  },
 }
 
 /** Every language id that must be present in the WASM build. */

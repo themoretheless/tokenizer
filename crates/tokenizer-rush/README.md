@@ -1,20 +1,17 @@
 # themoretheless-tokenizer-rush
 
-Full rush engine (lex → parse → AST → semantic) for
-[themoretheless-tokenizer](https://github.com/themoretheless/tokenizer).
+Rush editor engine: lossless lexing, recovering parse, shared AST, semantic
+highlighting and diagnostics, using the shared fullkit profile.
 
-rush is the single language of [ruos](https://github.com/themoretheless) and
-open-scad-viewer: Python-style indentation blocks, `fn` headers, fluent
-method chains, `foreach ... yield`, `match`, hash comments, `$variables`,
-and shell pipe sugar (`|`). One grammar serves both the system shell and
-the CAD workbench; domain libraries are the only difference.
+Rush uses `//` line comments, `/* ... */` block comments, `return`, and `.r`
+files. The profile supports brace and indentation blocks, `$variables`,
+fluent chains, `foreach ... yield`, `match`, and pipes.
 
 ```rust
-let parsed = themoretheless_tokenizer_rush::parse(
-    "if $status = 0:\n    echo ok\n"
-);
-assert!(parsed.diagnostics.is_empty());
+let source = "fn main() { return 1; } // demo\n";
+let parsed = themoretheless_tokenizer_rush::parse(source);
+assert!(parsed.lexed.is_lossless(source));
 ```
 
-File extensions: `.r` (ruos shell scripts), `.mg` (ModelGraph Text in the
-CAD workbench — same core grammar).
+The R engine also claims `.r`; hosts should select Rush explicitly by its
+`rush` language id when the extension is ambiguous.

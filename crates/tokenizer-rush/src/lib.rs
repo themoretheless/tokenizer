@@ -2,7 +2,7 @@
 //!
 //! rush is the single language of ruos and open-scad-viewer: indentation
 //! blocks, `fn` headers, fluent chains, `foreach ... yield`, `match`,
-//! `$variables`, hash comments and shell pipe sugar.
+//! `$variables`, `//` comments and shell pipe sugar.
 
 use themoretheless_tokenizer_core::{
     Diagnostic, FullProfile, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage,
@@ -14,13 +14,17 @@ use themoretheless_tokenizer_core::{
 fn profile() -> FullProfile {
     FullProfile {
         keywords: &[
-            "if", "else", "fn", "ret", "for", "foreach", "in", "yield", "match", "where", "select",
-            "count", "run", "and", "or", "not", "param", "show", "assert", "let",
+            "if", "else", "fn", "return", "for", "foreach", "in", "yield", "match", "where",
+            "select", "count", "run", "and", "or", "not", "param", "show", "assert", "let",
+            "async", "await", "break", "const", "continue", "false", "import", "print", "true",
+            "while",
         ],
-        types: &["int", "f64", "str", "bool", "T", "Geometry", "Row"],
-        line_comment: None,
-        block_comment: None,
-        hash_line_comment: true,
+        types: &[
+            "int", "f64", "str", "bool", "T", "Geometry", "Row", "float", "string", "list", "map",
+        ],
+        line_comment: Some("//"),
+        block_comment: Some(("/*", "*/")),
+        hash_line_comment: false,
         dollar_ident: true,
         triple_strings: false,
         soft_indent_blocks: true,
@@ -61,7 +65,7 @@ pub static DESCRIPTOR: LanguageDescriptor = full_descriptor(
     LanguageId::RUSH,
     "rush",
     &["modelgraph-text", "mg"],
-    &[".r", ".mg"],
+    &[".r"],
     &["text/x-rush"],
     env!("CARGO_PKG_VERSION"),
 );
@@ -115,6 +119,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn chosen_syntax_and_extension() {
+        use themoretheless_tokenizer_core::SyntaxKind;
+        assert_eq!(DESCRIPTOR.extensions, &[".r"]);
+        let source = "fn main() { return 1; } // comment\n";
+        let lexed = lex(source);
+        assert!(lexed.is_lossless(source));
+        assert!(
+            lexed
+                .tokens
+                .iter()
+                .any(|t| t.kind == SyntaxKind::Keyword && &source[t.span.range()] == "return")
+        );
+        assert!(
+            lexed
+                .tokens
+                .iter()
+                .any(|t| t.kind == SyntaxKind::LineComment
+                    && &source[t.span.range()] == "// comment")
+        );
+        let old = lex("ret # text");
+        assert!(
+            !old.tokens
+                .iter()
+                .any(|t| matches!(t.kind, SyntaxKind::Keyword | SyntaxKind::LineComment))
+        );
+    }
+
+    #[test]
     fn lossless_lex() {
         let source = "big = ls(\"/docs\").where(size > 100).select(name)\n";
         assert!(lex(source).is_lossless(source));
@@ -130,7 +162,7 @@ mod tests {
 
     #[test]
     fn fn_header_and_pipes() {
-        let source = "fn greet who: T -> T\n    ret who\n\nls | where size > 0 | select name\n";
+        let source = "fn greet who: T -> T\n    return who\n\nls | where size > 0 | select name\n";
         assert!(lex(source).is_lossless(source));
     }
 
