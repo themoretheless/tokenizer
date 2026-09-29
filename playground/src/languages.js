@@ -89,7 +89,7 @@ export const LANGUAGES = [
     label: 'HCL',
     group: 'data',
     modes: ['default'],
-    sample: '# cluster settings\nservice "api" {\n  enabled  = true\n  port     = 8080\n  ratio    = 0.25\n  owner    = null\n  tags     = ["web", "edge"]\n  defaults = { cpu = 2 }\n  greeting = "hello ${local.name}!"\n  banner   = <<EOT\n    cluster ${local.region} online\n    EOT\n  toggle   = enabled ? "on" : "off"\n}\n',
+    sample: '# cluster settings\nservice "api" {\n  enabled  = true\n  port     = 8080\n  ratio    = 0.25\n  owner    = null\n  tags     = ["web", "edge"]\n  defaults = { cpu = 2 }\n  greeting = "hello ${local.name}!"\n  banner   = <<-EOT\n    cluster ${local.region} online\n    EOT\n  toggle   = enabled ? "on" : "off"\n}\n',
   },
   {
     id: 'edn',

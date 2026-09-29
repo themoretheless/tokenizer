@@ -229,7 +229,7 @@ export const LANGUAGE_CASES = {
       { name: 'labeled-block-and-attribute', source: 'service "api" {\n  port = 8080\n}\n', expectValid: true, expectKinds: ['block-type', 'block-label', 'attribute-name', 'number'] },
       { name: 'typed-literals', source: 'a = true\nb = null\nc = -1.5e3\n', expectValid: true, expectKinds: ['boolean', 'null', 'number'] },
       { name: 'interpolation', source: 'greeting = "hello ${local.name}!"\n', expectValid: true, expectKinds: ['interpolation', 'string'] },
-      { name: 'heredoc', source: 'note = <<EOT\n  cluster online\n  EOT\n', expectValid: true, expectKinds: ['heredoc-open', 'heredoc-body', 'heredoc-close'] },
+      { name: 'heredoc', source: 'note = <<-EOT\n  cluster online\n  EOT\n', expectValid: true, expectKinds: ['heredoc-open', 'heredoc-body', 'heredoc-close'] },
       { name: 'both-comment-shapes', source: '# line\n/* block */\nk = v\n', expectValid: true, expectKinds: ['line-comment', 'block-comment'] },
       { name: 'escape-inside-string', source: 'q = "said \\"hi\\"\\n"\n', expectValid: true, expectKinds: ['escape'] },
       { name: 'syntax-layer-is-unlabeled', source: 'service "api" {\n  port = 8080\n}\n', layer: 'syntax', expectValid: true, expectKinds: ['identifier'] },
