@@ -137,8 +137,7 @@ pub fn parse_records(source: &str, options: ParseOptions) -> Jsonl<'_> {
     let mut records = Vec::new();
     let mut line_breaks = Vec::new();
     let mut diagnostics = Vec::new();
-    let mut index = 0_usize;
-    for (start, end, terminator) in split_lines(source) {
+    for (index, (start, end, terminator)) in split_lines(source).into_iter().enumerate() {
         if let Some(break_span) = terminator {
             line_breaks.push(break_span);
         }
@@ -151,7 +150,6 @@ pub fn parse_records(source: &str, options: ParseOptions) -> Jsonl<'_> {
             span: Span::new(start, end),
             parsed,
         });
-        index += 1;
     }
     Jsonl {
         source,
