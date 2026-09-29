@@ -2,7 +2,11 @@
 
 use std::fmt::Write as _;
 
-use themoretheless_tokenizer_core::{HostError, HostTokenization, TokenLayer};
+use themoretheless_tokenizer_core::{
+    Capability, Family, HostError, HostTokenization, TokenLayer, presets_of,
+};
+
+use crate::plugins::builtin_registry;
 
 use crate::plugins::analyze_host;
 
@@ -72,6 +76,93 @@ fn success_payload(
     }
     output.push_str("]}");
     output
+}
+
+/// Registry catalog as JSON: every enabled engine with its family, curated
+/// presets, capability bits and dialects.
+///
+/// The playground picker renders from this instead of restating the Rust-side
+/// lists.
+#[must_use]
+pub fn catalog() -> String {
+    let engines = builtin_registry();
+    let mut out = String::from("{\"count\":");
+    let _ = write!(out, "{},\"engines\":[", engines.len());
+    for (index, engine) in engines.iter().enumerate() {
+        if index != 0 {
+            out.push(',');
+        }
+        let descriptor = engine.descriptor();
+        out.push_str("{\"id\":");
+        push_json_string(&mut out, descriptor.language.as_str());
+        out.push_str(",\"displayName\":");
+        push_json_string(&mut out, descriptor.display_name);
+        out.push_str(",\"family\":");
+        push_json_string(&mut out, Family::of(descriptor.language).as_str());
+        out.push_str(",\"presets\":[");
+        for (preset_index, preset) in presets_of(descriptor.language).iter().enumerate() {
+            if preset_index != 0 {
+                out.push(',');
+            }
+            push_json_string(&mut out, preset.as_str());
+        }
+        out.push_str("],\"capabilities\":[");
+        let mut first_capability = true;
+        for capability in CAPABILITY_ORDER {
+            if descriptor.capabilities.contains(capability.bits()) {
+                if !first_capability {
+                    out.push(',');
+                }
+                first_capability = false;
+                push_json_string(&mut out, capability.as_str());
+            }
+        }
+        out.push_str("],\"defaultDialect\":");
+        push_json_string(&mut out, descriptor.default_dialect.as_str());
+        out.push_str(",\"dialects\":[");
+        for (dialect_index, dialect) in descriptor.dialects.iter().enumerate() {
+            if dialect_index != 0 {
+                out.push(',');
+            }
+            out.push_str("{\"id\":");
+            push_json_string(&mut out, dialect.id.as_str());
+            out.push_str(",\"displayName\":");
+            push_json_string(&mut out, dialect.display_name);
+            out.push('}');
+        }
+        out.push_str("],\"aliases\":");
+        push_string_array(&mut out, descriptor.aliases);
+        out.push_str(",\"extensions\":");
+        push_string_array(&mut out, descriptor.extensions);
+        out.push_str(",\"mimeTypes\":");
+        push_string_array(&mut out, descriptor.mime_types);
+        out.push_str(",\"engineVersion\":");
+        push_json_string(&mut out, descriptor.engine_version);
+        out.push('}');
+    }
+    out.push_str("]}");
+    out
+}
+
+const CAPABILITY_ORDER: [Capability; 7] = [
+    Capability::Lex,
+    Capability::Parse,
+    Capability::Semantic,
+    Capability::Cst,
+    Capability::Navigate,
+    Capability::Visitor,
+    Capability::Validate,
+];
+
+fn push_string_array(out: &mut String, values: &[&'static str]) {
+    out.push('[');
+    for (index, value) in values.iter().enumerate() {
+        if index != 0 {
+            out.push(',');
+        }
+        push_json_string(out, value);
+    }
+    out.push(']');
 }
 
 fn host_error_payload(error: &HostError) -> String {
@@ -170,6 +261,15 @@ mod tests {
         assert!(output.contains("\"language\":\"json\""));
         assert!(output.contains("\"kind\":\"property\""));
         assert!(output.contains("Тбилиси"));
+    }
+
+    #[test]
+    fn catalog_reports_family_and_preset_per_engine() {
+        let output = catalog();
+        assert!(output.contains("\"id\":\"json\""));
+        assert!(output.contains("\"family\":\"format\""));
+        assert!(output.contains("\"presets\":[\"formats\"]"));
+        assert!(output.contains("\"capabilities\":[\"lex\",\"parse\",\"semantic\",\"cst\",\"navigate\",\"visitor\",\"validate\"]"));
     }
 
     #[test]

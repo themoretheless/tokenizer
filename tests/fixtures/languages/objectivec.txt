@@ -1,0 +1,4 @@
+@interface Foo : NSObject
+@end
+// comment
+NSString *s = @"hi";

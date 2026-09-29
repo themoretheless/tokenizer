@@ -1,0 +1,4 @@
+#!/bin/bash
+if [ "$1" = "ok" ]; then
+  echo "hi"
+fi

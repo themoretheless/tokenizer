@@ -125,8 +125,8 @@ pub fn semantic_tokens(parsed: &Parse<'_>) -> SemanticTokenization {
                 SyntaxKind::Whitespace | SyntaxKind::Bom => SemanticKind::Whitespace,
                 SyntaxKind::LineComment | SyntaxKind::BlockComment => SemanticKind::Comment,
                 kind if kind.is_punctuation() => SemanticKind::Punctuation,
-                SyntaxKind::String
-                    if property_spans.get(property_cursor).copied() == Some(token.span) =>
+                kind if property_spans.get(property_cursor).copied() == Some(token.span)
+                    && matches!(kind, SyntaxKind::String | SyntaxKind::Identifier) =>
                 {
                     SemanticKind::Property
                 }
@@ -134,6 +134,7 @@ pub fn semantic_tokens(parsed: &Parse<'_>) -> SemanticTokenization {
                 SyntaxKind::Number => SemanticKind::Number,
                 SyntaxKind::True | SyntaxKind::False => SemanticKind::Boolean,
                 SyntaxKind::Null => SemanticKind::Null,
+                SyntaxKind::Identifier => SemanticKind::Invalid,
                 SyntaxKind::Error => SemanticKind::Invalid,
                 _ => SemanticKind::Invalid,
             }

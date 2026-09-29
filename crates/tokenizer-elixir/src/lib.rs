@@ -62,6 +62,7 @@ fn profile() -> FullProfile {
         block_comment: None,
         hash_line_comment: true,
         dollar_ident: false,
+        backtick_strings: false,
         triple_strings: false,
         soft_indent_blocks: false,
     }

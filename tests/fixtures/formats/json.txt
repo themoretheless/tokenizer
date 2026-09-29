@@ -1,0 +1,6 @@
+{
+  "project": "tokenizer",
+  "unicode": "Тбилиси 😀",
+  "stable": true,
+  "versions": [1, 2, 3]
+}

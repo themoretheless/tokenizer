@@ -43,6 +43,31 @@ impl ParseOptions {
     }
 
     #[must_use]
+    pub const fn json5() -> Self {
+        Self {
+            lexer: LexerOptions::json5().max_diagnostics(128),
+            allow_trailing_commas: true,
+            max_depth: MAX_SUPPORTED_DEPTH,
+            max_diagnostics: 128,
+        }
+    }
+
+    #[must_use]
+    pub const fn json5_enabled(self) -> bool {
+        self.lexer.json5_enabled()
+    }
+
+    /// Turns the JSON5 grammar on or off without touching resource limits.
+    /// Turning it off also drops the comments and byte-order marks that
+    /// [`LexerOptions::json5_mode`] implies, leaving trailing commas alone
+    /// because those are a parser option, not a lexer mode.
+    #[must_use]
+    pub const fn json5_mode(mut self, yes: bool) -> Self {
+        self.lexer = self.lexer.json5_mode(yes);
+        self
+    }
+
+    #[must_use]
     pub const fn allow_comments(mut self, yes: bool) -> Self {
         self.lexer = self.lexer.allow_comments(yes);
         self
@@ -217,6 +242,7 @@ pub struct Parse<'source> {
     diagnostics: Vec<ParseDiagnostic>,
     property_spans: Vec<Span>,
     invalid_value_spans: Vec<Span>,
+    trailing_comma_spans: Vec<Span>,
 }
 
 impl<'source> Parse<'source> {
@@ -259,6 +285,13 @@ impl<'source> Parse<'source> {
         &self.invalid_value_spans
     }
 
+    /// Commas that closed a container, which strict JSON rejects and JSON5 and
+    /// JSONC allow. Empty unless the options permitted them.
+    #[must_use]
+    pub fn trailing_comma_spans(&self) -> &[Span] {
+        &self.trailing_comma_spans
+    }
+
     #[must_use]
     pub fn has_errors(&self) -> bool {
         !self.diagnostics.is_empty()
@@ -290,6 +323,7 @@ pub fn parse_with(source: &str, options: ParseOptions) -> Parse<'_> {
         truncation_offset: None,
         property_spans: Vec::new(),
         invalid_value_spans: Vec::new(),
+        trailing_comma_spans: Vec::new(),
     };
     for diagnostic in lexed.diagnostics() {
         if diagnostic.kind == LexDiagnosticKind::TooManyDiagnostics {
@@ -306,12 +340,14 @@ pub fn parse_with(source: &str, options: ParseOptions) -> Parse<'_> {
     let diagnostics = parser.diagnostics;
     let property_spans = parser.property_spans;
     let invalid_value_spans = parser.invalid_value_spans;
+    let trailing_comma_spans = parser.trailing_comma_spans;
     Parse {
         lexed,
         value,
         diagnostics,
         property_spans,
         invalid_value_spans,
+        trailing_comma_spans,
     }
 }
 
@@ -325,6 +361,7 @@ struct Parser<'source, 'tokens> {
     truncation_offset: Option<usize>,
     property_spans: Vec<Span>,
     invalid_value_spans: Vec<Span>,
+    trailing_comma_spans: Vec<Span>,
 }
 
 impl<'source> Parser<'source, '_> {
@@ -444,11 +481,16 @@ impl<'source> Parser<'source, '_> {
             };
             if token.kind == SyntaxKind::RightBracket {
                 let close = self.bump().expect("current token exists");
-                if after_comma && !elements.is_empty() && !self.options.allow_trailing_commas {
-                    self.problem(
-                        ParseDiagnosticKind::TrailingCommaNotAllowed,
-                        Span::new(end.saturating_sub(1), end),
-                    );
+                if after_comma && !elements.is_empty() {
+                    if self.options.allow_trailing_commas {
+                        self.trailing_comma_spans
+                            .push(Span::new(end.saturating_sub(1), end));
+                    } else {
+                        self.problem(
+                            ParseDiagnosticKind::TrailingCommaNotAllowed,
+                            Span::new(end.saturating_sub(1), end),
+                        );
+                    }
                 }
                 end = close.span.end;
                 break;
@@ -524,11 +566,16 @@ impl<'source> Parser<'source, '_> {
             };
             if token.kind == SyntaxKind::RightBrace {
                 let close = self.bump().expect("current token exists");
-                if after_comma && !members.is_empty() && !self.options.allow_trailing_commas {
-                    self.problem(
-                        ParseDiagnosticKind::TrailingCommaNotAllowed,
-                        Span::new(end.saturating_sub(1), end),
-                    );
+                if after_comma && !members.is_empty() {
+                    if self.options.allow_trailing_commas {
+                        self.trailing_comma_spans
+                            .push(Span::new(end.saturating_sub(1), end));
+                    } else {
+                        self.problem(
+                            ParseDiagnosticKind::TrailingCommaNotAllowed,
+                            Span::new(end.saturating_sub(1), end),
+                        );
+                    }
                 }
                 end = close.span.end;
                 break;
@@ -544,7 +591,16 @@ impl<'source> Parser<'source, '_> {
                 after_comma = true;
                 continue;
             }
-            if token.kind != SyntaxKind::String {
+            let bare_key = self.options.json5_enabled()
+                && matches!(
+                    token.kind,
+                    SyntaxKind::Identifier
+                        | SyntaxKind::True
+                        | SyntaxKind::False
+                        | SyntaxKind::Null
+                        | SyntaxKind::Number
+                );
+            if token.kind != SyntaxKind::String && !bare_key {
                 self.problem(ParseDiagnosticKind::ExpectedObjectKey, token.span);
                 self.recover_to_member();
                 end = self.previous_end().max(end);
@@ -554,7 +610,11 @@ impl<'source> Parser<'source, '_> {
 
             let key_token = self.bump().expect("current token exists");
             self.property_spans.push(key_token.span);
-            let key = self.string_value(key_token);
+            let key = if key_token.kind == SyntaxKind::String {
+                self.string_value(key_token)
+            } else {
+                StringValue::new(&self.source[key_token.span.range()], None, key_token.span)
+            };
             end = key_token.span.end;
             let has_colon = self.consume(SyntaxKind::Colon).is_some();
             if !has_colon {
@@ -668,7 +728,7 @@ impl<'source> Parser<'source, '_> {
                     return;
                 }
                 SyntaxKind::RightBrace | SyntaxKind::RightBracket if nesting == 0 => return,
-                SyntaxKind::String
+                SyntaxKind::String | SyntaxKind::Identifier
                     if nesting == 0 && self.next_significant_kind() == Some(SyntaxKind::Colon) =>
                 {
                     return;

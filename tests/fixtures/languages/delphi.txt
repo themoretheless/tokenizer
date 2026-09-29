@@ -1,0 +1,5 @@
+program P;
+begin
+  // comment
+  WriteLn('hi');
+end.

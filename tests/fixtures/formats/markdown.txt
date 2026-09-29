@@ -1,0 +1,7 @@
+# Title
+
+Use `code` and a fence:
+
+```js
+const x = 1
+```

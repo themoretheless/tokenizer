@@ -5,25 +5,11 @@ import { defineConfig } from 'vite'
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url))
 
-function tokenize(source, language, mode, layer) {
+function runBridge(args, source) {
   return new Promise((resolve, reject) => {
     const child = spawn(
       'cargo',
-      [
-        'run',
-        '--quiet',
-        '--features',
-        'web-bridge,all-languages',
-        '--bin',
-        'tokenizer-web-bridge',
-        '--',
-        '--language',
-        language,
-        '--mode',
-        mode,
-        '--layer',
-        layer,
-      ],
+      ['run', '--quiet', '--features', 'web-bridge,all-languages', '--bin', 'tokenizer-web-bridge', '--', ...args],
       { cwd: repositoryRoot, stdio: ['pipe', 'pipe', 'pipe'] },
     )
     let stdout = ''
@@ -32,14 +18,38 @@ function tokenize(source, language, mode, layer) {
     child.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk })
     child.on('error', reject)
     child.on('close', (code) => code === 0 ? resolve(stdout) : reject(new Error(stderr || `Rust bridge exited with code ${code}`)))
-    child.stdin.end(source)
+    child.stdin.end(source ?? '')
   })
+}
+
+function tokenize(source, language, mode, layer) {
+  return runBridge(['--language', language, '--mode', mode, '--layer', layer], source)
+}
+
+// The registry only changes when Rust code is rebuilt, so one cargo run per server.
+let catalogPromise
+function catalog() {
+  catalogPromise ??= runBridge(['--catalog']).then((stdout) => stdout.trim())
+  return catalogPromise
 }
 
 function rustBridge() {
   return {
     name: 'tokenizer-rust-bridge',
     configureServer(server) {
+      server.middlewares.use('/api/catalog', async (request, response) => {
+        if (request.method !== 'GET') { response.statusCode = 405; response.end('GET required'); return }
+        try {
+          response.setHeader('content-type', 'application/json; charset=utf-8')
+          response.setHeader('cache-control', 'no-store')
+          response.end(await catalog())
+        } catch (error) {
+          catalogPromise = undefined
+          response.statusCode = 500
+          response.setHeader('content-type', 'application/json; charset=utf-8')
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+        }
+      })
       server.middlewares.use('/api/tokenize', async (request, response) => {
         if (request.method !== 'POST') { response.statusCode = 405; response.end('POST required'); return }
         const chunks = []
