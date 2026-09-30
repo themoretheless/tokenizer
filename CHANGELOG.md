@@ -6,6 +6,17 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Rush now has a dedicated lexer, recovering parser and syntax validation.
+  Blocks respect indentation/newlines; functions preserve signatures, loops
+  preserve bindings, and pipelines/match expressions have explicit AST nodes.
+  **API change:** `rush::parse` returns Rush's own `Parse`, `StmtKind` and
+  `ExprKind`, replacing the generic fullkit AST. See the Rush README.
+- Rush diagnostics now cover missing expressions, malformed blocks and invalid
+  control-flow placement, and respect host analysis limits. Both token layers
+  report the same syntax validity. Reserved async/import syntax is rejected.
+
 ### Added
 
 - Format family as first-class core data: `core::family` (`Family`,

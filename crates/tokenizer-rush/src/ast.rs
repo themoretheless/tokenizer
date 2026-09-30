@@ -1,0 +1,151 @@
+//! Rush syntax tree. Names and literal spellings borrow the source document.
+use themoretheless_tokenizer_core::{Diagnostic, Lexed, Span};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Name<'s> {
+    pub text: &'s str,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Type<'s> {
+    pub name: Name<'s>,
+    pub arguments: Vec<Type<'s>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parameter<'s> {
+    pub name: Name<'s>,
+    pub ty: Option<Type<'s>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Module<'s> {
+    pub span: Span,
+    pub items: Vec<Stmt<'s>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Block<'s> {
+    pub span: Span,
+    pub stmts: Vec<Stmt<'s>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stmt<'s> {
+    pub span: Span,
+    pub kind: StmtKind<'s>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StmtKind<'s> {
+    Function {
+        name: Name<'s>,
+        parameters: Vec<Parameter<'s>>,
+        result: Option<Type<'s>>,
+        body: Block<'s>,
+    },
+    Declaration {
+        name: Name<'s>,
+        constant: bool,
+        ty: Option<Type<'s>>,
+        value: Expr<'s>,
+    },
+    Return(Option<Expr<'s>>),
+    Yield(Expr<'s>),
+    If {
+        condition: Expr<'s>,
+        then_block: Block<'s>,
+        else_block: Option<Block<'s>>,
+    },
+    While {
+        condition: Expr<'s>,
+        body: Block<'s>,
+    },
+    For {
+        binding: Name<'s>,
+        iterable: Expr<'s>,
+        body: Block<'s>,
+    },
+    Break,
+    Continue,
+    Expr(Expr<'s>),
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Expr<'s> {
+    pub span: Span,
+    pub kind: ExprKind<'s>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExprKind<'s> {
+    Name(Name<'s>),
+    Number(&'s str),
+    String(&'s str),
+    Bool(bool),
+    Null,
+    Unary {
+        operator: &'s str,
+        value: Box<Expr<'s>>,
+    },
+    Binary {
+        operator: &'s str,
+        left: Box<Expr<'s>>,
+        right: Box<Expr<'s>>,
+    },
+    Assign {
+        operator: &'s str,
+        target: Box<Expr<'s>>,
+        value: Box<Expr<'s>>,
+    },
+    Call {
+        callee: Box<Expr<'s>>,
+        arguments: Vec<Expr<'s>>,
+    },
+    Member {
+        object: Box<Expr<'s>>,
+        field: Name<'s>,
+    },
+    Index {
+        object: Box<Expr<'s>>,
+        index: Box<Expr<'s>>,
+    },
+    List(Vec<Expr<'s>>),
+    Map(Vec<(Expr<'s>, Expr<'s>)>),
+    Pipeline {
+        input: Box<Expr<'s>>,
+        stages: Vec<Expr<'s>>,
+    },
+    Match {
+        value: Box<Expr<'s>>,
+        arms: Vec<MatchArm<'s>>,
+    },
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchArm<'s> {
+    pub span: Span,
+    pub pattern: Expr<'s>,
+    pub value: Expr<'s>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parse<'s> {
+    pub source: &'s str,
+    pub lexed: Lexed,
+    pub module: Module<'s>,
+    pub diagnostics: Vec<Diagnostic>,
+    /// Independent of diagnostic storage limits, including a zero limit.
+    pub(crate) valid: bool,
+    pub(crate) roles: Vec<(Span, &'static str)>,
+}
+
+impl Parse<'_> {
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        self.valid
+    }
+}

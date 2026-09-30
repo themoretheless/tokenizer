@@ -601,24 +601,19 @@ fn every_format_diagnostic_code_is_kebab_case() {
     );
 }
 
-/// `VALIDATE` says a grammar rejects input its own specification forbids. What
-/// the shared fullkit pipeline can prove about a document is bracket balance and
-/// closed literals ([`every_language_engine_flags_unbalanced_delimiters`]), not
-/// that the grammar was followed — `SELECT * FROM` is a valid prefix as far as it
-/// is concerned. So the badge belongs to the format family only, and
-/// [`every_format_engine_knows_its_own_vocabulary`] already proves those 20 stay
-/// silent on valid documents. This pins the partition so a new engine cannot
-/// claim validation by inheriting the shared descriptor.
+/// Validation is advertised by native format parsers and the dedicated Rush
+/// grammar. Generic fullkit language profiles must not inherit this capability.
 #[cfg(feature = "all-languages")]
 #[test]
-fn only_format_engines_advertise_validate() {
+fn only_native_grammars_advertise_validate() {
     use themoretheless_tokenizer::builtin_registry;
     use themoretheless_tokenizer::core::Capabilities;
 
-    let formats: BTreeSet<String> = FORMAT_IDS
+    let mut formats: BTreeSet<String> = FORMAT_IDS
         .iter()
         .map(|id| id.as_str().to_string())
         .collect();
+    formats.insert("rush".to_owned());
     let mut claimers = BTreeSet::new();
     let mut total = 0;
     for engine in builtin_registry().iter() {
@@ -634,7 +629,7 @@ fn only_format_engines_advertise_validate() {
     assert_eq!(
         claimers,
         formats,
-        "{total} engines registered: validate must be claimed by exactly the {} formats",
+        "{total} engines registered: validate must be claimed by exactly the {} native grammars",
         formats.len(),
     );
 }

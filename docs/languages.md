@@ -26,6 +26,15 @@ use themoretheless_tokenizer::html;
 html::parse("<div/>"); // MarkupDoc AST
 ```
 
+## Rush
+
+Rush uses a dedicated grammar and borrowing AST, with `//`, `return`, and `.r`.
+`rush::parse` returns Rush's own `Parse` / `StmtKind` / `ExprKind`, preserving
+function signatures, block boundaries, loop headers, match arms and pipelines.
+It advertises `LEX|PARSE|SEMANTIC|VALIDATE`; validation covers the documented
+syntax and control-flow placement, not type checking or execution.
+See [the Rush grammar and migration notes](../crates/tokenizer-rush/README.md).
+
 ## Feature groups
 
 | Feature | Contents |
