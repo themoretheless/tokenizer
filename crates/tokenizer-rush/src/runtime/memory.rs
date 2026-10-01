@@ -1791,8 +1791,40 @@ impl<T> Record<T> {
         budget: &Budget,
         mut values: Slots<(Text, T)>,
     ) -> Result<Self, AllocationError> {
-        values.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        Buffer::from_slots(budget, values).map(Self)
+        // Keep source order explicitly: unstable sorting by key alone loses
+        // the runtime's last-definition-wins rule for duplicate record keys.
+        let mut indexed = Slots::new(budget, values.len())?;
+        while let Some(entry) = values.pop() {
+            indexed
+                .push((values.len(), Some(entry)))
+                .expect("index capacity reserved");
+        }
+        drop(values);
+        indexed.sort_unstable_by(|a, b| {
+            a.1.as_ref()
+                .unwrap()
+                .0
+                .cmp(&b.1.as_ref().unwrap().0)
+                .then(a.0.cmp(&b.0))
+        });
+        let unique = usize::from(!indexed.is_empty())
+            + indexed
+                .windows(2)
+                .filter(|pair| pair[0].1.as_ref().unwrap().0 != pair[1].1.as_ref().unwrap().0)
+                .count();
+        let mut entries: Slots<(Text, T)> = Slots::new(budget, unique)?;
+        for (_, entry) in indexed.iter_mut() {
+            let entry = entry.take().expect("each indexed entry is moved once");
+            if let Some(previous) = entries.last_mut()
+                && previous.0 == entry.0
+            {
+                *previous = entry;
+            } else {
+                entries.push(entry).expect("unique entry capacity reserved");
+            }
+        }
+        drop(indexed);
+        Buffer::from_slots(budget, entries).map(Self)
     }
     pub(super) fn get(&self, key: &str) -> Option<&T> {
         self.0
@@ -1908,5 +1940,40 @@ fn prototype_text_records_and_dynamic_reservations_release_their_budget() {
     let values: Vec<_> = record.into_iter().map(|(_, value)| value).collect();
     assert_eq!(values, [1, 2]);
     drop((left, right, joined));
+    assert_eq!(budget.live_bytes(), 0);
+}
+
+#[test]
+fn prototype_records_preserve_last_definition_and_release_failed_construction() {
+    let budget = Budget::new(100_000);
+    let build = || {
+        let mut entries = Slots::new(&budget, 4).unwrap();
+        for (key, value) in [("z", 1), ("a", 2), ("z", 3), ("a", 4)] {
+            entries
+                .push((Text::from_str(&budget, key).unwrap(), value))
+                .unwrap();
+        }
+        entries
+    };
+    let record = Record::from_slots(&budget, build()).unwrap();
+    assert_eq!(record.len(), 2);
+    assert_eq!(record.get("a"), Some(&4));
+    assert_eq!(record.get("z"), Some(&3));
+    drop(record);
+    assert_eq!(budget.live_bytes(), 0);
+    // Index, unique-entry storage, then shared header each fail independently.
+    for index in 0..3 {
+        let entries = build();
+        let failure = AllocationFailure::after(index);
+        assert!(matches!(
+            Record::from_slots(&budget, entries),
+            Err(AllocationError::Allocator)
+        ));
+        drop(failure);
+        assert_eq!(budget.live_bytes(), 0, "allocation {index}");
+    }
+    let empty = Record::<i32>::from_slots(&budget, Slots::new(&budget, 0).unwrap()).unwrap();
+    assert_eq!(empty.len(), 0);
+    drop(empty);
     assert_eq!(budget.live_bytes(), 0);
 }
