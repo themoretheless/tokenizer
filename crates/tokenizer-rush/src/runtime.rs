@@ -852,7 +852,8 @@ impl<'s> Program<'s> {
         let mut runtime = Runtime {
             module: None,
             modules: HashMap::new(),
-            module_cache: HashMap::new(),
+            module_cache: memory::Slots::new(&memory, 0)
+                .expect("empty module cache requires no allocation"),
             loading: memory::Slots::new(&memory, 0)
                 .expect("empty module stack requires no allocation"),
             module_globals: Environment::new(),
@@ -951,7 +952,7 @@ enum Flow {
 struct Runtime<'a, 's> {
     module: Option<&'s str>,
     modules: HashMap<&'s str, crate::Module<'s>>,
-    module_cache: HashMap<&'s str, Value<'s>>,
+    module_cache: memory::Slots<(&'s str, Value<'s>)>,
     loading: memory::Slots<&'s str>,
     module_globals: Environment<'s>,
     references: HashMap<Option<&'s str>, Rc<Vec<CaptureReference<'s>>>>,
@@ -1486,8 +1487,11 @@ impl<'s> Runtime<'_, 's> {
             match &statement.kind {
                 StmtKind::Import(name) => {
                     value = Value::Null;
-                    if let Some(value) = self.module_cache.get(name.text) {
-                        environment.insert(name.text, value.clone());
+                    if let Ok(index) = self
+                        .module_cache
+                        .binary_search_by_key(&name.text, |(key, _)| *key)
+                    {
+                        environment.insert(name.text, self.module_cache[index].1.clone());
                         continue;
                     }
                     if self.loading.contains(&name.text) {
@@ -1529,7 +1533,17 @@ impl<'s> Runtime<'_, 's> {
                         return self.error(name.span, "Module must evaluate to an export record");
                     }
                     self.enforce_retained_limit(name.span, Some(&exports))?;
-                    self.module_cache.insert(name.text, exports.clone());
+                    let index = self
+                        .module_cache
+                        .binary_search_by_key(&name.text, |(key, _)| *key)
+                        .expect_err("an active module cannot already be cached");
+                    if let Err(error) = self.module_cache.push((name.text, exports.clone())) {
+                        return self.error(
+                            name.span,
+                            &format!("Runtime module cache allocation failed: {error:?}"),
+                        );
+                    }
+                    self.module_cache[index..].rotate_right(1);
                     environment.insert(name.text, exports);
                 }
 

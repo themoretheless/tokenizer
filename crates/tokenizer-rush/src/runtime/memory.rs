@@ -1087,3 +1087,50 @@ fn module_stack_allocation_failure_leaves_instance_reusable() {
         super::Value::Number(42.0)
     );
 }
+
+#[test]
+fn module_cache_failure_preserves_previous_exports_and_allows_retry() {
+    let program = super::Program::compile(
+        "fn first() { import z; return z.answer }; fn second() { import a; return a.answer }",
+    )
+    .unwrap();
+    let module = super::Program::compile("{answer: 42}").unwrap();
+    let token = super::CancellationToken::default();
+    let limits = super::ExecutionLimits::new(1000);
+    let mut instance = program
+        .instantiate(
+            limits,
+            &token,
+            &[],
+            &[],
+            &[],
+            &[("z", &module), ("a", &module)],
+        )
+        .unwrap();
+    assert_eq!(
+        instance.call("first", &[], limits).unwrap(),
+        super::Value::Number(42.0)
+    );
+    {
+        let _failure = AllocationFailure::after(0);
+        let error = instance.call("second", &[], limits).unwrap_err();
+        assert_eq!(
+            error.message,
+            "Runtime module cache allocation failed: Allocator"
+        );
+        assert_eq!(
+            instance.call("first", &[], limits).unwrap(),
+            super::Value::Number(42.0)
+        );
+    }
+    assert!(instance.runtime.loading.is_empty());
+    assert_eq!(instance.runtime.module_cache.len(), 1);
+    assert_eq!(instance.runtime.module, None);
+    assert_eq!(instance.runtime.depth, 0);
+    assert_eq!(
+        instance.call("second", &[], limits).unwrap(),
+        super::Value::Number(42.0)
+    );
+    assert_eq!(instance.runtime.module_cache[0].0, "a");
+    assert_eq!(instance.runtime.module_cache[1].0, "z");
+}

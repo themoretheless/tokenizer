@@ -355,7 +355,7 @@ impl Runtime<'_, '_> {
         if let Some(environment) = &self.instance_roots {
             usage.environment(environment);
         }
-        for value in self.module_cache.values() {
+        for (_, value) in self.module_cache.iter() {
             usage.value(value);
         }
         usage
