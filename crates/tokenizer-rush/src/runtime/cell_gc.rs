@@ -9,6 +9,7 @@ enum Key {
     Environment(usize),
     Sequence(usize),
     List(usize),
+    Stages(usize),
 }
 struct Node {
     strong: usize,
@@ -22,6 +23,7 @@ enum Work<'a, 's> {
     Environment(&'a Environment<'s>),
     Sequence(&'a Sequence<'s>),
     List(&'a [Value<'s>]),
+    Stages(&'a [SequenceStage<'s>]),
 }
 struct Graph<'a, 's> {
     runtime: &'a Runtime<'a, 's>,
@@ -205,7 +207,6 @@ impl<'a, 's> Graph<'a, 's> {
                     }
                 }
                 Work::Sequence(sequence) => {
-                    self.charge(sequence.stages.len())?;
                     if let SequenceSource::List(values) = &sequence.source {
                         self.edge(
                             from,
@@ -214,10 +215,20 @@ impl<'a, 's> Graph<'a, 's> {
                             Work::List(values),
                         )?;
                     }
+                    if let Some(stages) = &sequence.stages.0 {
+                        self.edge(
+                            from,
+                            Key::Stages(memory::Shared::as_ptr(stages) as usize),
+                            memory::Shared::strong_count(stages),
+                            Work::Stages(stages),
+                        )?;
+                    }
+                }
+                Work::Stages(stages) => {
+                    self.charge(stages.len())?;
                     self.work
                         .extend(
-                            sequence
-                                .stages
+                            stages
                                 .iter()
                                 .map(|stage| (from, Work::Value(&stage.callback))),
                         )
@@ -311,5 +322,58 @@ impl Runtime<'_, '_> {
         }
         self.reclaim_cells();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn colliding_graph_keys_survive_growth_and_search_obeys_step_budget() {
+        let program = Program::compile("0").unwrap();
+        let token = CancellationToken::default();
+        let limits = ExecutionLimits::new(100_000);
+        let instance = program
+            .instantiate(limits, &token, &[], &[], &[], &[])
+            .unwrap();
+        let runtime = &instance.runtime;
+        let mut graph = Graph {
+            runtime,
+            ids: runtime.gc_slots(),
+            nodes: runtime.gc_slots(),
+            work: runtime.gc_slots(),
+            remaining: limits.steps,
+            span: instance.span,
+        };
+        // All keys collide through the 16 -> 32 -> 64 bucket growth sequence.
+        let keys: Vec<_> = (0..)
+            .map(Key::Cell)
+            .filter(|key| Graph::hash(*key) & 63 == 0)
+            .take(21)
+            .collect();
+        for (index, key) in keys[..20].iter().copied().enumerate() {
+            assert_eq!(graph.node(key, 1, Work::Cell(index)).unwrap(), index);
+        }
+        assert_eq!(graph.ids.len(), 64);
+        for (index, key) in keys[..20].iter().copied().enumerate() {
+            assert_eq!(graph.lookup(key).unwrap(), Some(index));
+            assert_eq!(graph.node(key, 1, Work::Cell(index)).unwrap(), index);
+        }
+        assert_eq!(graph.nodes.len(), 20);
+        graph.remaining = 3;
+        assert_eq!(
+            graph.lookup(keys[20]).unwrap_err().message,
+            "Execution limit exceeded"
+        );
+        assert_eq!(graph.remaining, 0);
+        graph.remaining = 100;
+        assert_eq!(graph.lookup(keys[20]).unwrap(), None);
+        assert_eq!(graph.remaining, 79);
+        token.cancel();
+        assert_eq!(
+            graph.lookup(keys[0]).unwrap_err().message,
+            "Execution cancelled"
+        );
     }
 }

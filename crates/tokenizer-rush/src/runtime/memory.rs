@@ -52,7 +52,7 @@ impl Drop for AllocationFailure {
 
 #[derive(Debug)]
 struct Ledger {
-    limit: usize,
+    limit: Cell<usize>,
     live: Cell<usize>,
     peak: Cell<usize>,
 }
@@ -66,7 +66,7 @@ struct LimitExceeded;
 /// A unique reservation must travel with the allocation it accounts for.
 /// Sharing the allocation shares its reservation; copying it reserves again.
 #[derive(Debug)]
-struct Reservation {
+pub(super) struct Reservation {
     ledger: Rc<Ledger>,
     bytes: usize,
 }
@@ -74,12 +74,28 @@ struct Reservation {
 impl Budget {
     pub(super) fn new(limit: usize) -> Self {
         Self(Rc::new(Ledger {
-            limit,
+            limit: Cell::new(limit),
             live: Cell::new(0),
             peak: Cell::new(0),
         }))
     }
 
+    pub(super) fn live_bytes(&self) -> usize {
+        self.0.live.get()
+    }
+    pub(super) fn peak_bytes(&self) -> usize {
+        self.0.peak.get()
+    }
+    pub(super) fn set_limit(&self, bytes: usize) -> Result<(), AllocationError> {
+        if self.live_bytes() > bytes {
+            return Err(AllocationError::Limit);
+        }
+        self.0.limit.set(bytes);
+        Ok(())
+    }
+    pub(super) fn reservation(&self, bytes: usize) -> Result<Reservation, AllocationError> {
+        self.reserve(bytes).map_err(|_| AllocationError::Limit)
+    }
     fn reserve(&self, bytes: usize) -> Result<Reservation, LimitExceeded> {
         let mut reservation = Reservation {
             ledger: self.0.clone(),
@@ -96,7 +112,7 @@ impl Reservation {
     fn resize(&mut self, bytes: usize) -> Result<(), LimitExceeded> {
         let other = self.ledger.live.get() - self.bytes;
         let next = other.checked_add(bytes).ok_or(LimitExceeded)?;
-        if next > self.ledger.limit {
+        if next > self.ledger.limit.get() {
             return Err(LimitExceeded);
         }
         self.ledger.live.set(next);
@@ -1595,4 +1611,211 @@ fn collection_allocation_failure_preserves_live_cells_and_releases_temporary_gra
         }
     }
     assert!(completed && failures >= 8);
+}
+
+#[test]
+fn sequence_stage_copy_failure_preserves_shared_original() {
+    let budget = Budget::new(100_000);
+    let stage = super::SequenceStage {
+        callback: super::Value::Builtin(super::Builtin::Some),
+        filter: false,
+        span: themoretheless_tokenizer_core::Span { start: 0, end: 0 },
+        module: None,
+    };
+    let mut original = super::SequenceStages::default();
+    original.append(&budget, stage.clone()).unwrap();
+    let baseline = budget.0.live.get();
+    for index in 0..2 {
+        let mut copy = original.clone();
+        assert_eq!(budget.0.live.get(), baseline);
+        {
+            let _failure = AllocationFailure::after(index);
+            assert_eq!(
+                copy.append(&budget, stage.clone()),
+                Err(AllocationError::Allocator)
+            );
+        }
+        assert_eq!(copy, original);
+        assert_eq!(budget.0.live.get(), baseline);
+    }
+    let mut copy = original.clone();
+    copy.append(&budget, stage).unwrap();
+    assert_eq!(original.len(), 1);
+    assert_eq!(copy.len(), 2);
+    drop(original);
+    assert!(budget.0.live.get() > 0);
+    drop(copy);
+    assert_eq!(budget.0.live.get(), 0);
+}
+
+/// Shared immutable buffer. Clone shares the allocation and its reservation.
+/// Construction and growth use Slots, so no infallible Vec growth bypasses the ledger.
+#[derive(Debug)]
+pub(super) struct Shared<T>(Rc<SharedStorage<T>>);
+#[derive(Debug)]
+struct SharedStorage<T> {
+    values: Slots<T>,
+    _header: Reservation,
+}
+impl<T> Clone for Shared<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+impl<T: PartialEq> PartialEq for Shared<T> {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+impl<T> std::ops::Deref for Shared<T> {
+    type Target = [T];
+    fn deref(&self) -> &[T] {
+        &self.0.values
+    }
+}
+impl<T> Shared<T> {
+    pub(super) fn from_slots(budget: &Budget, values: Slots<T>) -> Result<Self, AllocationError> {
+        // Rc allocates its counters together with the payload. Include alignment padding.
+        let bytes = std::mem::size_of::<SharedStorage<T>>()
+            .checked_add(2 * std::mem::size_of::<usize>())
+            .and_then(|v| v.checked_add(std::mem::align_of::<SharedStorage<T>>() - 1))
+            .ok_or(AllocationError::Capacity)?;
+        let header = budget.reservation(bytes)?;
+        Ok(Self(Rc::new(SharedStorage {
+            values,
+            _header: header,
+        })))
+    }
+    pub(super) fn from_iter(
+        budget: &Budget,
+        values: impl IntoIterator<Item = T>,
+    ) -> Result<Self, AllocationError> {
+        let values = values.into_iter();
+        let mut storage = Slots::new(budget, values.size_hint().0)?;
+        for value in values {
+            storage.push(value)?;
+        }
+        Self::from_slots(budget, storage)
+    }
+    pub(super) fn capacity(&self) -> usize {
+        self.0.values.capacity()
+    }
+}
+impl<'a, T> IntoIterator for &'a Shared<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+pub(super) struct SharedIterator<T> {
+    values: Shared<T>,
+    index: usize,
+}
+impl<T: Clone> Iterator for SharedIterator<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        let item = self.values.get(self.index)?.clone();
+        self.index += 1;
+        Some(item)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.values.len() - self.index;
+        (n, Some(n))
+    }
+}
+impl<T: Clone> IntoIterator for Shared<T> {
+    type Item = T;
+    type IntoIter = SharedIterator<T>;
+    fn into_iter(self) -> Self::IntoIter {
+        SharedIterator {
+            values: self,
+            index: 0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Text(Shared<u8>);
+impl Text {
+    pub(super) fn from_str(budget: &Budget, value: &str) -> Result<Self, AllocationError> {
+        Shared::from_iter(budget, value.bytes()).map(Self)
+    }
+    pub(super) fn from_chars(
+        budget: &Budget,
+        values: impl IntoIterator<Item = char>,
+    ) -> Result<Self, AllocationError> {
+        let mut buffer = Slots::new(budget, 0)?;
+        for value in values {
+            let mut bytes = [0; 4];
+            for b in value.encode_utf8(&mut bytes).bytes() {
+                buffer.push(b)?;
+            }
+        }
+        Shared::from_slots(budget, buffer).map(Self)
+    }
+    pub(super) fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.0).expect("Text is constructed from UTF-8")
+    }
+    pub(super) fn concat(&self, budget: &Budget, other: &Self) -> Result<Self, AllocationError> {
+        Shared::from_iter(budget, self.0.iter().chain(other.0.iter()).copied()).map(Self)
+    }
+}
+impl std::ops::Deref for Text {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl PartialOrd for Text {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Text {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
+impl Eq for Text {}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Record<T>(Shared<(Text, T)>);
+impl<T> Record<T> {
+    pub(super) fn from_slots(
+        budget: &Budget,
+        mut values: Slots<(Text, T)>,
+    ) -> Result<Self, AllocationError> {
+        values.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        Shared::from_slots(budget, values).map(Self)
+    }
+    pub(super) fn get(&self, key: &str) -> Option<&T> {
+        self.0
+            .binary_search_by(|(k, _)| k.as_str().cmp(key))
+            .ok()
+            .map(|i| &self.0[i].1)
+    }
+    pub(super) fn contains_key(&self, key: &str) -> bool {
+        self.get(key).is_some()
+    }
+    pub(super) fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub(super) fn iter(&self) -> std::slice::Iter<'_, (Text, T)> {
+        self.0.iter()
+    }
+}
+impl<'a, T> IntoIterator for &'a Record<T> {
+    type Item = &'a (Text, T);
+    type IntoIter = std::slice::Iter<'a, (Text, T)>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+impl<T: Clone> IntoIterator for Record<T> {
+    type Item = (Text, T);
+    type IntoIter = SharedIterator<(Text, T)>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
 }

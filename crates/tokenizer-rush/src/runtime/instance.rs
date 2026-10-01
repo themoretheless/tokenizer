@@ -316,10 +316,7 @@ impl Usage {
                 }
             }
             Value::Sequence(sequence) if self.seen.insert((3, Rc::as_ptr(sequence) as usize)) => {
-                self.add(
-                    std::mem::size_of::<Sequence<'_>>()
-                        + sequence.stages.capacity() * std::mem::size_of::<SequenceStage<'_>>(),
-                );
+                self.add(std::mem::size_of::<Sequence<'_>>());
                 if let SequenceSource::List(list) = &sequence.source
                     && self.seen.insert((4, Rc::as_ptr(list) as usize))
                 {
@@ -328,8 +325,15 @@ impl Usage {
                         self.value(v);
                     }
                 }
-                for stage in &sequence.stages {
-                    self.value(&stage.callback);
+                if let Some(stages) = &sequence.stages.0
+                    && self
+                        .seen
+                        .insert((6, memory::Shared::as_ptr(stages) as usize))
+                {
+                    self.add(sequence.stages.capacity() * std::mem::size_of::<SequenceStage<'_>>());
+                    for stage in stages.iter() {
+                        self.value(&stage.callback);
+                    }
                 }
             }
             Value::Mesh(mesh) if self.seen.insert((5, Rc::as_ptr(mesh) as usize)) => {

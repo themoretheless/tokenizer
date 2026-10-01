@@ -197,7 +197,7 @@ impl<'s> Value<'s> {
     pub fn host_sequence(factory: Rc<dyn HostSequence>, item_type: ValueType) -> Self {
         Self::Sequence(Rc::new(Sequence {
             source: SequenceSource::Host(HostSource { factory, item_type }),
-            stages: Vec::new(),
+            stages: SequenceStages::default(),
         }))
     }
 }
@@ -206,7 +206,7 @@ impl<'s> Value<'s> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sequence<'s> {
     source: SequenceSource<'s>,
-    stages: Vec<SequenceStage<'s>>,
+    stages: SequenceStages<'s>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -222,6 +222,45 @@ struct SequenceStage<'s> {
     filter: bool,
     span: Span,
     module: Option<&'s str>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct SequenceStages<'s>(Option<memory::Shared<memory::Slots<SequenceStage<'s>>>>);
+impl PartialEq for SequenceStages<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+impl<'s> std::ops::Deref for SequenceStages<'s> {
+    type Target = [SequenceStage<'s>];
+    fn deref(&self) -> &Self::Target {
+        self.0.as_deref().map(|slots| &**slots).unwrap_or(&[])
+    }
+}
+impl<'s> SequenceStages<'s> {
+    fn capacity(&self) -> usize {
+        self.0.as_ref().map_or(0, |slots| slots.capacity())
+    }
+    fn append(
+        &mut self,
+        budget: &memory::Budget,
+        stage: SequenceStage<'s>,
+    ) -> std::result::Result<(), memory::AllocationError> {
+        let size = self
+            .len()
+            .checked_add(1)
+            .ok_or(memory::AllocationError::Capacity)?;
+        let mut slots = memory::Slots::new(budget, size)?;
+        for existing in self.iter() {
+            slots
+                .push(existing.clone())
+                .expect("stage capacity reserved");
+        }
+        slots.push(stage).expect("stage capacity reserved");
+        let shared = memory::Shared::new(budget, slots)?;
+        self.0 = Some(shared);
+        Ok(())
+    }
 }
 
 struct SequenceCursor<'s> {
@@ -1234,11 +1273,11 @@ impl<'s> Runtime<'_, 's> {
             Value::Sequence(sequence) => sequence,
             Value::Range { start, end, step } => Rc::new(Sequence {
                 source: SequenceSource::Range { start, end, step },
-                stages: Vec::new(),
+                stages: SequenceStages::default(),
             }),
             Value::List(items) => Rc::new(Sequence {
                 source: SequenceSource::List(Rc::new(items)),
-                stages: Vec::new(),
+                stages: SequenceStages::default(),
             }),
             _ => return self.error(span, "Expected a list or sequence"),
         };
@@ -1328,7 +1367,7 @@ impl<'s> Runtime<'_, 's> {
                 span,
                 message: "Sequence index overflow".into(),
             })?;
-            for stage in &cursor.sequence.stages {
+            for stage in cursor.sequence.stages.iter() {
                 let previous_module = self.module;
                 self.module = stage.module;
                 let result = self
@@ -2638,12 +2677,24 @@ impl<'s> Runtime<'_, 's> {
                 let cursor = self.sequence_cursor(source.clone(), span)?;
                 self.charge(cursor.sequence.stages.len() + 1, span)?;
                 let mut sequence = (*cursor.sequence).clone();
-                sequence.stages.push(SequenceStage {
-                    callback: callback.clone(),
-                    filter: builtin == Builtin::Filter,
-                    span,
-                    module: self.module,
-                });
+                sequence
+                    .stages
+                    .append(
+                        &self.memory,
+                        SequenceStage {
+                            callback: callback.clone(),
+                            filter: builtin == Builtin::Filter,
+                            span,
+                            module: self.module,
+                        },
+                    )
+                    .map_err(|e| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
+                        module: self.module.map(str::to_owned),
+                        span,
+                        message: format!("Runtime sequence allocation failed: {e:?}"),
+                    })?;
                 return Ok(Value::Sequence(Rc::new(sequence)));
             }
             if matches!(builtin, Builtin::Any | Builtin::All) {
