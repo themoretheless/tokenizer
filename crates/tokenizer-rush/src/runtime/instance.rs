@@ -318,7 +318,7 @@ impl Usage {
             Value::Sequence(sequence) if self.seen.insert((3, Rc::as_ptr(sequence) as usize)) => {
                 self.add(std::mem::size_of::<Sequence<'_>>());
                 if let SequenceSource::List(list) = &sequence.source
-                    && self.seen.insert((4, Rc::as_ptr(list) as usize))
+                    && self.seen.insert((4, memory::Buffer::as_ptr(list) as usize))
                 {
                     self.add(list.capacity() * std::mem::size_of::<Value<'_>>());
                     for v in list.iter() {

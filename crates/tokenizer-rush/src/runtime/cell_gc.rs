@@ -210,8 +210,8 @@ impl<'a, 's> Graph<'a, 's> {
                     if let SequenceSource::List(values) = &sequence.source {
                         self.edge(
                             from,
-                            Key::List(Rc::as_ptr(values) as usize),
-                            Rc::strong_count(values),
+                            Key::List(memory::Buffer::as_ptr(values) as usize),
+                            memory::Buffer::strong_count(values),
                             Work::List(values),
                         )?;
                     }

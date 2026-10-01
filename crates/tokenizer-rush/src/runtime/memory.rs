@@ -80,12 +80,15 @@ impl Budget {
         }))
     }
 
+    #[cfg(test)]
     pub(super) fn live_bytes(&self) -> usize {
         self.0.live.get()
     }
+    #[cfg(test)]
     pub(super) fn peak_bytes(&self) -> usize {
         self.0.peak.get()
     }
+    #[cfg(test)]
     pub(super) fn set_limit(&self, bytes: usize) -> Result<(), AllocationError> {
         if self.live_bytes() > bytes {
             return Err(AllocationError::Limit);
@@ -93,6 +96,7 @@ impl Budget {
         self.0.limit.set(bytes);
         Ok(())
     }
+    #[cfg(test)]
     pub(super) fn reservation(&self, bytes: usize) -> Result<Reservation, AllocationError> {
         self.reserve(bytes).map_err(|_| AllocationError::Limit)
     }
@@ -1651,40 +1655,33 @@ fn sequence_stage_copy_failure_preserves_shared_original() {
 /// Shared immutable buffer. Clone shares the allocation and its reservation.
 /// Construction and growth use Slots, so no infallible Vec growth bypasses the ledger.
 #[derive(Debug)]
-pub(super) struct Shared<T>(Rc<SharedStorage<T>>);
-#[derive(Debug)]
-struct SharedStorage<T> {
-    values: Slots<T>,
-    _header: Reservation,
-}
-impl<T> Clone for Shared<T> {
+pub(super) struct Buffer<T>(Shared<Slots<T>>);
+impl<T> Clone for Buffer<T> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
-impl<T: PartialEq> PartialEq for Shared<T> {
+impl<T: PartialEq> PartialEq for Buffer<T> {
     fn eq(&self, other: &Self) -> bool {
         **self == **other
     }
 }
-impl<T> std::ops::Deref for Shared<T> {
+impl<T> std::ops::Deref for Buffer<T> {
     type Target = [T];
     fn deref(&self) -> &[T] {
-        &self.0.values
+        &self.0
     }
 }
-impl<T> Shared<T> {
+impl<T> Buffer<T> {
+    pub(super) fn as_ptr(this: &Self) -> *const Slots<T> {
+        Shared::as_ptr(&this.0)
+    }
+    pub(super) fn strong_count(this: &Self) -> usize {
+        Shared::strong_count(&this.0)
+    }
+
     pub(super) fn from_slots(budget: &Budget, values: Slots<T>) -> Result<Self, AllocationError> {
-        // Rc allocates its counters together with the payload. Include alignment padding.
-        let bytes = std::mem::size_of::<SharedStorage<T>>()
-            .checked_add(2 * std::mem::size_of::<usize>())
-            .and_then(|v| v.checked_add(std::mem::align_of::<SharedStorage<T>>() - 1))
-            .ok_or(AllocationError::Capacity)?;
-        let header = budget.reservation(bytes)?;
-        Ok(Self(Rc::new(SharedStorage {
-            values,
-            _header: header,
-        })))
+        Shared::new(budget, values).map(Self)
     }
     pub(super) fn from_iter(
         budget: &Budget,
@@ -1698,21 +1695,21 @@ impl<T> Shared<T> {
         Self::from_slots(budget, storage)
     }
     pub(super) fn capacity(&self) -> usize {
-        self.0.values.capacity()
+        self.0.capacity()
     }
 }
-impl<'a, T> IntoIterator for &'a Shared<T> {
+impl<'a, T> IntoIterator for &'a Buffer<T> {
     type Item = &'a T;
     type IntoIter = std::slice::Iter<'a, T>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
-pub(super) struct SharedIterator<T> {
-    values: Shared<T>,
+pub(super) struct BufferIterator<T> {
+    values: Buffer<T>,
     index: usize,
 }
-impl<T: Clone> Iterator for SharedIterator<T> {
+impl<T: Clone> Iterator for BufferIterator<T> {
     type Item = T;
     fn next(&mut self) -> Option<T> {
         let item = self.values.get(self.index)?.clone();
@@ -1724,22 +1721,24 @@ impl<T: Clone> Iterator for SharedIterator<T> {
         (n, Some(n))
     }
 }
-impl<T: Clone> IntoIterator for Shared<T> {
+impl<T: Clone> IntoIterator for Buffer<T> {
     type Item = T;
-    type IntoIter = SharedIterator<T>;
+    type IntoIter = BufferIterator<T>;
     fn into_iter(self) -> Self::IntoIter {
-        SharedIterator {
+        BufferIterator {
             values: self,
             index: 0,
         }
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct Text(Shared<u8>);
+pub(super) struct Text(Buffer<u8>);
+#[cfg(test)]
 impl Text {
     pub(super) fn from_str(budget: &Budget, value: &str) -> Result<Self, AllocationError> {
-        Shared::from_iter(budget, value.bytes()).map(Self)
+        Buffer::from_iter(budget, value.bytes()).map(Self)
     }
     pub(super) fn from_chars(
         budget: &Budget,
@@ -1752,42 +1751,48 @@ impl Text {
                 buffer.push(b)?;
             }
         }
-        Shared::from_slots(budget, buffer).map(Self)
+        Buffer::from_slots(budget, buffer).map(Self)
     }
     pub(super) fn as_str(&self) -> &str {
         std::str::from_utf8(&self.0).expect("Text is constructed from UTF-8")
     }
     pub(super) fn concat(&self, budget: &Budget, other: &Self) -> Result<Self, AllocationError> {
-        Shared::from_iter(budget, self.0.iter().chain(other.0.iter()).copied()).map(Self)
+        Buffer::from_iter(budget, self.0.iter().chain(other.0.iter()).copied()).map(Self)
     }
 }
+#[cfg(test)]
 impl std::ops::Deref for Text {
     type Target = str;
     fn deref(&self) -> &str {
         self.as_str()
     }
 }
+#[cfg(test)]
 impl PartialOrd for Text {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
+#[cfg(test)]
 impl Ord for Text {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.as_str().cmp(other.as_str())
     }
 }
+#[cfg(test)]
 impl Eq for Text {}
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct Record<T>(Shared<(Text, T)>);
+pub(super) struct Record<T>(Buffer<(Text, T)>);
+#[cfg(test)]
 impl<T> Record<T> {
     pub(super) fn from_slots(
         budget: &Budget,
         mut values: Slots<(Text, T)>,
     ) -> Result<Self, AllocationError> {
         values.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        Shared::from_slots(budget, values).map(Self)
+        Buffer::from_slots(budget, values).map(Self)
     }
     pub(super) fn get(&self, key: &str) -> Option<&T> {
         self.0
@@ -1805,6 +1810,7 @@ impl<T> Record<T> {
         self.0.iter()
     }
 }
+#[cfg(test)]
 impl<'a, T> IntoIterator for &'a Record<T> {
     type Item = &'a (Text, T);
     type IntoIter = std::slice::Iter<'a, (Text, T)>;
@@ -1812,10 +1818,95 @@ impl<'a, T> IntoIterator for &'a Record<T> {
         self.iter()
     }
 }
+#[cfg(test)]
 impl<T: Clone> IntoIterator for Record<T> {
     type Item = (Text, T);
-    type IntoIter = SharedIterator<(Text, T)>;
+    type IntoIter = BufferIterator<(Text, T)>;
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
+}
+
+#[test]
+fn sequence_source_allocation_failure_releases_partial_buffer_and_allows_retry() {
+    let program = super::Program::compile("0").unwrap();
+    let token = super::CancellationToken::default();
+    let limits = super::ExecutionLimits::new(1000);
+    let mut instance = program
+        .instantiate(limits, &token, &[], &[], &[], &[])
+        .unwrap();
+    let ledger = instance.runtime.memory.0.clone();
+    let baseline = ledger.live.get();
+    let items = vec![super::Value::Number(1.0), super::Value::Number(2.0)];
+    for index in 0..2 {
+        let failure = AllocationFailure::after(index);
+        let result = instance
+            .runtime
+            .sequence_cursor(super::Value::List(items.clone()), instance.span);
+        drop(failure);
+        assert!(
+            matches!(result, Err(error) if error.message == "Runtime sequence source allocation failed: Allocator")
+        );
+        assert_eq!(ledger.live.get(), baseline);
+    }
+    let mut cursor = instance
+        .runtime
+        .sequence_cursor(super::Value::List(items), instance.span)
+        .unwrap();
+    assert_eq!(
+        instance
+            .runtime
+            .sequence_next(&mut cursor, instance.span)
+            .unwrap(),
+        Some(super::Value::Number(1.0))
+    );
+    assert_eq!(
+        instance
+            .runtime
+            .sequence_next(&mut cursor, instance.span)
+            .unwrap(),
+        Some(super::Value::Number(2.0))
+    );
+    assert_eq!(
+        instance
+            .runtime
+            .sequence_next(&mut cursor, instance.span)
+            .unwrap(),
+        None
+    );
+    assert!(ledger.live.get() > baseline);
+    drop(cursor);
+    assert_eq!(ledger.live.get(), baseline);
+    drop(instance);
+    assert_eq!(ledger.live.get(), 0);
+}
+
+#[test]
+fn prototype_text_records_and_dynamic_reservations_release_their_budget() {
+    let budget = Budget::new(10_000);
+    let reservation = budget.reservation(100).unwrap();
+    assert_eq!(budget.live_bytes(), 100);
+    assert_eq!(budget.set_limit(99), Err(AllocationError::Limit));
+    budget.set_limit(100).unwrap();
+    assert!(budget.reservation(1).is_err());
+    drop(reservation);
+    assert_eq!(budget.live_bytes(), 0);
+    assert_eq!(budget.peak_bytes(), 100);
+    budget.set_limit(10_000).unwrap();
+    let left = Text::from_str(&budget, "α").unwrap();
+    let right = Text::from_chars(&budget, ['β', '🙂']).unwrap();
+    let joined = left.concat(&budget, &right).unwrap();
+    assert_eq!(joined.as_str(), "αβ🙂");
+    let mut entries = Slots::new(&budget, 2).unwrap();
+    entries.push((right.clone(), 2)).unwrap();
+    entries.push((left.clone(), 1)).unwrap();
+    let record = Record::from_slots(&budget, entries).unwrap();
+    assert_eq!(record.len(), 2);
+    assert!(record.contains_key("α"));
+    assert_eq!(record.get("β🙂"), Some(&2));
+    assert_eq!(record.iter().next().unwrap().0.as_str(), "α");
+    let values: Vec<_> = record.into_iter().map(|(_, value)| value).collect();
+    assert_eq!(values, [1, 2]);
+    drop((left, right, joined));
+    assert_eq!(budget.live_bytes(), 0);
 }

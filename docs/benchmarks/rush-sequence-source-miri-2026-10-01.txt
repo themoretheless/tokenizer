@@ -1,0 +1,61 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running unittests src/lib.rs (/tmp/rush-managed-memory-miri/miri/aarch64-apple-darwin/debug/build/themoretheless-tokenizer-rush/bc295cd2c466c3e9/out/themoretheless_tokenizer_rush-bc295cd2c466c3e9)
+warning: methods `live_bytes`, `peak_bytes`, `set_limit`, and `reservation` are never used
+  --> crates/tokenizer-rush/src/runtime/memory.rs:83:19
+   |
+74 | impl Budget {
+   | ----------- methods in this implementation
+...
+83 |     pub(super) fn live_bytes(&self) -> usize {
+   |                   ^^^^^^^^^^
+...
+86 |     pub(super) fn peak_bytes(&self) -> usize {
+   |                   ^^^^^^^^^^
+...
+89 |     pub(super) fn set_limit(&self, bytes: usize) -> Result<(), AllocationError> {
+   |                   ^^^^^^^^^
+...
+96 |     pub(super) fn reservation(&self, bytes: usize) -> Result<Reservation, AllocationError> {
+   |                   ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: associated items `from_str`, `from_chars`, and `concat` are never used
+    --> crates/tokenizer-rush/src/runtime/memory.rs:1734:19
+     |
+1733 | impl Text {
+     | --------- associated items in this implementation
+1734 |     pub(super) fn from_str(budget: &Budget, value: &str) -> Result<Self, AllocationError> {
+     |                   ^^^^^^^^
+...
+1737 |     pub(super) fn from_chars(
+     |                   ^^^^^^^^^^
+...
+1753 |     pub(super) fn concat(&self, budget: &Budget, other: &Self) -> Result<Self, AllocationError> {
+     |                   ^^^^^^
+
+warning: associated items `from_slots`, `get`, `contains_key`, and `len` are never used
+    --> crates/tokenizer-rush/src/runtime/memory.rs:1778:19
+     |
+1777 | impl<T> Record<T> {
+     | ----------------- associated items in this implementation
+1778 |     pub(super) fn from_slots(
+     |                   ^^^^^^^^^^
+...
+1785 |     pub(super) fn get(&self, key: &str) -> Option<&T> {
+     |                   ^^^
+...
+1791 |     pub(super) fn contains_key(&self, key: &str) -> bool {
+     |                   ^^^^^^^^^^^^
+...
+1794 |     pub(super) fn len(&self) -> usize {
+     |                   ^^^
+
+
+running 1 test
+test runtime::memory::sequence_source_allocation_failure_releases_partial_buffer_and_allows_retry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 0.62s
+
+warning: 3 warnings emitted
+

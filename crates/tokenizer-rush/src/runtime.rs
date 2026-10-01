@@ -212,7 +212,7 @@ pub struct Sequence<'s> {
 #[derive(Clone, Debug, PartialEq)]
 enum SequenceSource<'s> {
     Range { start: f64, end: f64, step: f64 },
-    List(Rc<Vec<Value<'s>>>),
+    List(memory::Buffer<Value<'s>>),
     Host(HostSource),
 }
 
@@ -1276,7 +1276,15 @@ impl<'s> Runtime<'_, 's> {
                 stages: SequenceStages::default(),
             }),
             Value::List(items) => Rc::new(Sequence {
-                source: SequenceSource::List(Rc::new(items)),
+                source: SequenceSource::List(
+                    memory::Buffer::from_iter(&self.memory, items).map_err(|e| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
+                        module: self.module.map(str::to_owned),
+                        span,
+                        message: format!("Runtime sequence source allocation failed: {e:?}"),
+                    })?,
+                ),
                 stages: SequenceStages::default(),
             }),
             _ => return self.error(span, "Expected a list or sequence"),
