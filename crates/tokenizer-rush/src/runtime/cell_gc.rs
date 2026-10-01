@@ -13,7 +13,7 @@ enum Key {
 struct Node {
     strong: usize,
     incoming: usize,
-    edges: Vec<usize>,
+    edges: memory::Slots<usize>,
 }
 enum Work<'a, 's> {
     Cell(usize),
@@ -25,9 +25,9 @@ enum Work<'a, 's> {
 }
 struct Graph<'a, 's> {
     runtime: &'a Runtime<'a, 's>,
-    ids: HashMap<Key, usize>,
-    nodes: Vec<Node>,
-    work: Vec<(usize, Work<'a, 's>)>,
+    ids: memory::Slots<Option<(Key, usize)>>,
+    nodes: memory::Slots<Node>,
+    work: memory::Slots<(usize, Work<'a, 's>)>,
     remaining: usize,
     span: Span,
 }
@@ -41,38 +41,105 @@ impl<'a, 's> Graph<'a, 's> {
         self.remaining = remaining;
         Ok(())
     }
-    fn node(&mut self, key: Key, strong: usize, work: Work<'a, 's>) -> usize {
-        if let Some(&index) = self.ids.get(&key) {
-            return index;
+    fn hash(key: Key) -> usize {
+        use std::hash::{Hash, Hasher};
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&mut hash);
+        hash.finish() as usize
+    }
+    fn lookup(&mut self, key: Key) -> Result<Option<usize>> {
+        if self.ids.is_empty() {
+            return Ok(None);
+        }
+        let mut slot = Self::hash(key) & (self.ids.len() - 1);
+        loop {
+            self.charge(1)?;
+            match self.ids[slot] {
+                None => return Ok(None),
+                Some((candidate, index)) if candidate == key => return Ok(Some(index)),
+                _ => slot = (slot + 1) & (self.ids.len() - 1),
+            }
+        }
+    }
+    fn insert_id(&mut self, key: Key, index: usize) -> Result<()> {
+        // Keep at least half the buckets empty, guaranteeing probe termination.
+        if self.nodes.len() >= self.ids.len() / 2 {
+            let capacity = self
+                .ids
+                .len()
+                .checked_mul(2)
+                .filter(|n| *n > 0)
+                .unwrap_or(16);
+            if capacity <= self.ids.len() {
+                return Err(self
+                    .runtime
+                    .gc_allocation_error(self.span, memory::AllocationError::Capacity));
+            }
+            self.charge(capacity)?;
+            let mut replacement = self.runtime.gc_slots();
+            replacement
+                .extend(std::iter::repeat_n(None, capacity))
+                .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
+            for old in 0..self.ids.len() {
+                if let Some((key, index)) = self.ids[old] {
+                    let mut slot = Self::hash(key) & (capacity - 1);
+                    while replacement[slot].is_some() {
+                        self.charge(1)?;
+                        slot = (slot + 1) & (capacity - 1);
+                    }
+                    replacement[slot] = Some((key, index));
+                }
+            }
+            self.ids = replacement;
+        }
+        let mut slot = Self::hash(key) & (self.ids.len() - 1);
+        while self.ids[slot].is_some() {
+            self.charge(1)?;
+            slot = (slot + 1) & (self.ids.len() - 1);
+        }
+        self.ids[slot] = Some((key, index));
+        Ok(())
+    }
+    fn node(&mut self, key: Key, strong: usize, work: Work<'a, 's>) -> Result<usize> {
+        if let Some(index) = self.lookup(key)? {
+            return Ok(index);
         }
         let index = self.nodes.len();
-        self.ids.insert(key, index);
-        self.nodes.push(Node {
-            strong,
-            incoming: 0,
-            edges: Vec::new(),
-        });
-        self.work.push((index, work));
-        index
+        self.insert_id(key, index)?;
+        self.nodes
+            .push(Node {
+                strong,
+                incoming: 0,
+                edges: self.runtime.gc_slots(),
+            })
+            .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
+        self.work
+            .push((index, work))
+            .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
+        Ok(index)
     }
-    fn edge(&mut self, from: usize, key: Key, strong: usize, work: Work<'a, 's>) {
-        let to = self.node(key, strong, work);
+    fn edge(&mut self, from: usize, key: Key, strong: usize, work: Work<'a, 's>) -> Result<()> {
+        let to = self.node(key, strong, work)?;
         self.nodes[to].incoming += 1;
-        self.nodes[from].edges.push(to);
+        self.nodes[from]
+            .edges
+            .push(to)
+            .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
+        Ok(())
     }
-    fn environment(&mut self, from: usize, env: &'a memory::Shared<Environment<'s>>) {
+    fn environment(&mut self, from: usize, env: &'a memory::Shared<Environment<'s>>) -> Result<()> {
         self.edge(
             from,
             Key::Environment(memory::Shared::as_ptr(env) as usize),
             memory::Shared::strong_count(env),
             Work::Environment(env),
-        );
+        )
     }
     fn build(&mut self) -> Result<()> {
         self.charge(self.runtime.cell_ids.len())?;
         for (index, id) in self.runtime.cell_ids.iter().enumerate() {
             if id.strong_count() != 0 {
-                self.node(Key::Cell(index), id.strong_count(), Work::Cell(index));
+                self.node(Key::Cell(index), id.strong_count(), Work::Cell(index))?;
             }
         }
         while let Some((from, work)) = self.work.pop() {
@@ -80,41 +147,47 @@ impl<'a, 's> Graph<'a, 's> {
             match work {
                 Work::Cell(index) => self
                     .work
-                    .push((from, Work::Value(&self.runtime.cells[index].0))),
+                    .push((from, Work::Value(&self.runtime.cells[index].0)))
+                    .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?,
                 Work::Value(value) => match value {
                     Value::Function(function) => self.edge(
                         from,
                         Key::Function(Rc::as_ptr(function) as usize),
                         Rc::strong_count(function),
                         Work::Function(function),
-                    ),
+                    )?,
                     Value::Sequence(sequence) => self.edge(
                         from,
                         Key::Sequence(Rc::as_ptr(sequence) as usize),
                         Rc::strong_count(sequence),
                         Work::Sequence(sequence),
-                    ),
+                    )?,
                     Value::List(values) | Value::Tuple(values) | Value::Variant(_, values) => {
                         self.charge(values.len())?;
                         self.work
-                            .extend(values.iter().map(|value| (from, Work::Value(value))));
+                            .extend(values.iter().map(|value| (from, Work::Value(value))))
+                            .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
                     }
                     Value::Record(fields) => {
                         self.charge(fields.len())?;
                         self.work
-                            .extend(fields.values().map(|value| (from, Work::Value(value))));
+                            .extend(fields.values().map(|value| (from, Work::Value(value))))
+                            .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
                     }
                     _ => {}
                 },
-                Work::Function(function) => self.environment(from, &function.environment),
+                Work::Function(function) => self.environment(from, &function.environment)?,
                 Work::Environment(environment) => {
                     if let Some(parent) = &environment.parent {
-                        self.environment(from, parent);
+                        self.environment(from, parent)?;
                     }
                     for (_, binding) in environment.bindings.iter() {
                         self.charge(1)?;
                         match binding {
-                            Binding::Value(value) => self.work.push((from, Work::Value(value))),
+                            Binding::Value(value) => self
+                                .work
+                                .push((from, Work::Value(value)))
+                                .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?,
                             Binding::Cell(id) => {
                                 // An opaque host can retain a value from another run. It
                                 // must not be interpreted as a slot in this runtime.
@@ -125,7 +198,7 @@ impl<'a, 's> Graph<'a, 's> {
                                         Key::Cell(id.index),
                                         Rc::strong_count(id),
                                         Work::Cell(id.index),
-                                    );
+                                    )?;
                                 }
                             }
                         }
@@ -139,35 +212,43 @@ impl<'a, 's> Graph<'a, 's> {
                             Key::List(Rc::as_ptr(values) as usize),
                             Rc::strong_count(values),
                             Work::List(values),
-                        );
+                        )?;
                     }
-                    self.work.extend(
-                        sequence
-                            .stages
-                            .iter()
-                            .map(|stage| (from, Work::Value(&stage.callback))),
-                    );
+                    self.work
+                        .extend(
+                            sequence
+                                .stages
+                                .iter()
+                                .map(|stage| (from, Work::Value(&stage.callback))),
+                        )
+                        .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
                 }
                 Work::List(values) => {
                     self.charge(values.len())?;
                     self.work
-                        .extend(values.iter().map(|value| (from, Work::Value(value))));
+                        .extend(values.iter().map(|value| (from, Work::Value(value))))
+                        .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
                 }
             }
         }
         Ok(())
     }
-    fn unreachable_cells(&mut self) -> Result<Vec<usize>> {
+    fn unreachable_cells(&mut self) -> Result<memory::Slots<usize>> {
         self.charge(self.nodes.len())?;
-        let mut reachable = vec![false; self.nodes.len()];
-        let mut pending = Vec::new();
+        let mut reachable = self.runtime.gc_slots();
+        reachable
+            .extend(std::iter::repeat_n(false, self.nodes.len()))
+            .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
+        let mut pending = self.runtime.gc_slots();
         for (index, node) in self.nodes.iter().enumerate() {
             // Do not collect anything if an accounting invariant ever fails.
             if node.incoming > node.strong {
-                return Ok(Vec::new());
+                return Ok(self.runtime.gc_slots());
             }
             if node.strong > node.incoming {
-                pending.push(index);
+                pending
+                    .push(index)
+                    .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
             }
         }
         while let Some(index) = pending.pop() {
@@ -176,27 +257,47 @@ impl<'a, 's> Graph<'a, 's> {
                 continue;
             }
             self.charge(self.nodes[index].edges.len())?;
-            pending.extend(self.nodes[index].edges.iter().copied());
+            pending
+                .extend(self.nodes[index].edges.iter().copied())
+                .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
         }
-        Ok(self
-            .ids
-            .iter()
-            .filter_map(|(key, &index)| match key {
-                Key::Cell(cell) if !reachable[index] => Some(*cell),
-                _ => None,
-            })
-            .collect())
+        let mut result = self.runtime.gc_slots();
+        result
+            .extend(
+                self.ids
+                    .iter()
+                    .flatten()
+                    .filter_map(|(key, index)| match key {
+                        Key::Cell(cell) if !reachable[*index] => Some(*cell),
+                        _ => None,
+                    }),
+            )
+            .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
+        Ok(result)
     }
 }
 
 impl Runtime<'_, '_> {
+    fn gc_slots<T>(&self) -> memory::Slots<T> {
+        memory::Slots::new(&self.memory, 0).expect("empty GC storage requires no allocation")
+    }
+    fn gc_allocation_error(&self, span: Span, error: memory::AllocationError) -> RuntimeError {
+        RuntimeError {
+            stack: Vec::new(),
+            location: None,
+            module: self.module.map(str::to_owned),
+            span,
+            message: format!("Runtime collection allocation failed: {error:?}"),
+        }
+    }
+
     pub(super) fn collect_cell_cycles(&mut self, span: Span) -> Result<()> {
         let (unreachable, remaining) = {
             let mut graph = Graph {
                 runtime: self,
-                ids: HashMap::new(),
-                nodes: Vec::new(),
-                work: Vec::new(),
+                ids: self.gc_slots(),
+                nodes: self.gc_slots(),
+                work: self.gc_slots(),
                 remaining: self.remaining,
                 span,
             };
@@ -205,7 +306,7 @@ impl Runtime<'_, '_> {
         };
         self.remaining = remaining;
         // No graph references remain while values and their captured IDs drop.
-        for index in unreachable? {
+        for &index in unreachable?.iter() {
             self.cells[index] = (Value::Null, None);
         }
         self.reclaim_cells();

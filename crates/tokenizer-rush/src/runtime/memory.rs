@@ -737,6 +737,18 @@ impl<T> Slots<T> {
         Ok(())
     }
 
+    pub(super) fn extend(
+        &mut self,
+        values: impl IntoIterator<Item = T>,
+    ) -> Result<(), AllocationError> {
+        let values = values.into_iter();
+        self.reserve(values.size_hint().0)?;
+        for value in values {
+            self.push(value)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn pop(&mut self) -> Option<T> {
         if self.length == 0 {
             return None;
@@ -1528,6 +1540,54 @@ fn nested_import_allocation_failures_restore_context_and_release_captures() {
             super::Value::Number(42.0),
             "allocation {index}"
         );
+        drop(instance);
+        assert_eq!(ledger.live.get(), 0, "allocation {index}");
+        if completed {
+            break;
+        }
+    }
+    assert!(completed && failures >= 8);
+}
+
+#[test]
+fn collection_allocation_failure_preserves_live_cells_and_releases_temporary_graph() {
+    let program = super::Program::compile(
+        "mut live=42; fn next() { return live }; fn garbage() { mut f=()=>1; f=()=>f; return 0 }",
+    )
+    .unwrap();
+    let token = super::CancellationToken::default();
+    let limits = super::ExecutionLimits::new(100_000);
+    let mut completed = false;
+    let mut failures = 0;
+    for index in 0..128 {
+        let mut instance = program
+            .instantiate(limits, &token, &[], &[], &[], &[])
+            .unwrap();
+        for _ in 0..4 {
+            instance.call("garbage", &[], limits).unwrap();
+        }
+        let ledger = instance.runtime.memory.0.clone();
+        let baseline = ledger.live.get();
+        let failure = AllocationFailure::after(index);
+        let result = instance.runtime.collect_cell_cycles(instance.span);
+        drop(failure);
+        match result {
+            Ok(()) => completed = true,
+            Err(error) => {
+                assert_eq!(
+                    error.message,
+                    "Runtime collection allocation failed: Allocator"
+                );
+                assert_eq!(ledger.live.get(), baseline, "allocation {index}");
+                failures += 1;
+            }
+        }
+        assert_eq!(
+            instance.call("next", &[], limits).unwrap(),
+            super::Value::Number(42.0)
+        );
+        instance.runtime.collect_cell_cycles(instance.span).unwrap();
+        assert!(!instance.runtime.free_cells.is_empty());
         drop(instance);
         assert_eq!(ledger.live.get(), 0, "allocation {index}");
         if completed {
