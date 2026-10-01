@@ -60,11 +60,11 @@ impl<'a, 's> Graph<'a, 's> {
         self.nodes[to].incoming += 1;
         self.nodes[from].edges.push(to);
     }
-    fn environment(&mut self, from: usize, env: &'a Rc<Environment<'s>>) {
+    fn environment(&mut self, from: usize, env: &'a memory::Shared<Environment<'s>>) {
         self.edge(
             from,
-            Key::Environment(Rc::as_ptr(env) as usize),
-            Rc::strong_count(env),
+            Key::Environment(memory::Shared::as_ptr(env) as usize),
+            memory::Shared::strong_count(env),
             Work::Environment(env),
         );
     }

@@ -277,7 +277,9 @@ impl Usage {
             }
         }
         if let Some(parent) = &environment.parent
-            && self.seen.insert((1, Rc::as_ptr(parent) as usize))
+            && self
+                .seen
+                .insert((1, memory::Shared::as_ptr(parent) as usize))
         {
             self.environment(parent);
         }
@@ -306,7 +308,10 @@ impl Usage {
             }
             Value::Function(f) if self.seen.insert((2, Rc::as_ptr(f) as usize)) => {
                 self.add(std::mem::size_of::<Closure<'_>>());
-                if self.seen.insert((1, Rc::as_ptr(&f.environment) as usize)) {
+                if self
+                    .seen
+                    .insert((1, memory::Shared::as_ptr(&f.environment) as usize))
+                {
                     self.environment(&f.environment);
                 }
             }

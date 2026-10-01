@@ -528,6 +528,101 @@ fn managed_copy_preserves_source_on_failure_and_charges_destination_budget() {
     assert_eq!(destination.0.live.get(), 0);
 }
 
+/// Single-threaded shared ownership with one reservation for the whole node.
+/// No weak pointers: environments only expose strong, immutable ownership.
+struct SharedNode<T> {
+    references: Cell<usize>,
+    value: T,
+    reservation: std::mem::ManuallyDrop<Reservation>,
+}
+pub(super) struct Shared<T> {
+    pointer: NonNull<SharedNode<T>>,
+    // Match Rc ownership/drop checking and prohibit Send/Sync even for T: Send.
+    marker: std::marker::PhantomData<Rc<T>>,
+}
+impl<T> Shared<T> {
+    pub(super) fn new(budget: &Budget, value: T) -> Result<Self, AllocationError> {
+        let layout = Layout::new::<SharedNode<T>>();
+        let reservation = budget
+            .reserve(layout.size())
+            .map_err(|_| AllocationError::Limit)?;
+        let pointer = NonNull::new(allocate(layout, false).cast::<SharedNode<T>>())
+            .ok_or(AllocationError::Allocator)?;
+        // SAFETY: freshly allocated, correctly aligned storage for one node.
+        unsafe {
+            pointer.as_ptr().write(SharedNode {
+                references: Cell::new(1),
+                value,
+                reservation: std::mem::ManuallyDrop::new(reservation),
+            })
+        };
+        Ok(Self {
+            pointer,
+            marker: std::marker::PhantomData,
+        })
+    }
+    pub(super) fn as_ptr(this: &Self) -> *const T {
+        // SAFETY: every handle owns a strong reference to a live node.
+        unsafe { std::ptr::addr_of!((*this.pointer.as_ptr()).value) }
+    }
+    pub(super) fn strong_count(this: &Self) -> usize {
+        // SAFETY: same live-node invariant as as_ptr; access is single-threaded.
+        unsafe { this.pointer.as_ref().references.get() }
+    }
+}
+impl<T> Clone for Shared<T> {
+    fn clone(&self) -> Self {
+        let count = Self::strong_count(self)
+            .checked_add(1)
+            .expect("shared reference count overflow");
+        // SAFETY: the node is live; Cell permits mutation without a mutable T.
+        unsafe { self.pointer.as_ref().references.set(count) };
+        Self {
+            pointer: self.pointer,
+            marker: std::marker::PhantomData,
+        }
+    }
+}
+impl<T> std::ops::Deref for Shared<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        // SAFETY: a handle keeps value initialized and alive for this borrow.
+        unsafe { &*Self::as_ptr(self) }
+    }
+}
+impl<T: std::fmt::Debug> std::fmt::Debug for Shared<T> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (**self).fmt(formatter)
+    }
+}
+impl<T: PartialEq> PartialEq for Shared<T> {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+impl<T> Drop for Shared<T> {
+    fn drop(&mut self) {
+        let count = Self::strong_count(self);
+        if count > 1 {
+            // SAFETY: another handle keeps the node alive after this decrement.
+            unsafe { self.pointer.as_ref().references.set(count - 1) };
+            return;
+        }
+        // SAFETY: this is the last owner. Move the reservation into a storage
+        // guard before dropping T so memory is freed even if its Drop unwinds.
+        // No reference to the node is used after the guard deallocates it.
+        unsafe {
+            let pointer = self.pointer.as_ptr();
+            let _storage = Storage {
+                pointer: self.pointer,
+                layout: Layout::new::<SharedNode<T>>(),
+                reservation: std::mem::ManuallyDrop::take(&mut (*pointer).reservation),
+            };
+            std::ptr::drop_in_place(std::ptr::addr_of_mut!((*pointer).value));
+        }
+    }
+}
+
 /// Owns raw storage, independently of element destruction. This field's Drop
 /// still runs if an element destructor unwinds while Slots is being dropped.
 #[derive(Debug)]
@@ -1259,19 +1354,20 @@ fn every_environment_allocation_failure_preserves_instance_and_releases_storage(
 #[test]
 fn environment_budget_counts_shared_parents_and_snapshot_copy_separately() {
     let slot = std::mem::size_of::<(&str, super::Binding<'_>)>();
-    let budget = Budget::new(slot * 2);
+    let node = std::mem::size_of::<SharedNode<super::Environment<'_>>>();
+    let budget = Budget::new(slot * 2 + node);
     let mut parent = super::Environment::new(&budget);
     parent.insert("x", super::Value::Number(1.0)).unwrap();
-    let parent = Rc::new(parent);
+    let parent = Shared::new(&budget, parent).unwrap();
     let child = super::Environment::child(parent.clone());
-    assert_eq!(budget.0.live.get(), slot);
+    assert_eq!(budget.0.live.get(), slot + node);
     let copy = parent.try_clone().unwrap();
-    assert_eq!(budget.0.live.get(), slot * 2);
+    assert_eq!(budget.0.live.get(), slot * 2 + node);
     assert!(matches!(parent.try_clone(), Err(AllocationError::Limit)));
-    assert_eq!(budget.0.live.get(), slot * 2);
+    assert_eq!(budget.0.live.get(), slot * 2 + node);
     drop(copy);
     drop(parent);
-    assert_eq!(budget.0.live.get(), slot);
+    assert_eq!(budget.0.live.get(), slot + node);
     assert!(child.contains_key("x"));
     drop(child);
     assert_eq!(budget.0.live.get(), 0);
@@ -1319,10 +1415,64 @@ fn returned_closure_keeps_capture_reservation_until_last_owner_drops() {
     assert_eq!(
         ledger.live.get(),
         std::mem::size_of::<(&str, super::Binding<'_>)>()
+            + std::mem::size_of::<SharedNode<super::Environment<'_>>>()
     );
     let shared = exported.clone();
     drop(exported);
     assert!(ledger.live.get() > 0);
     drop(shared);
     assert_eq!(ledger.live.get(), 0);
+}
+
+#[test]
+fn shared_node_is_fallible_aligned_and_drops_payload_once() {
+    #[derive(Debug)]
+    #[repr(align(128))]
+    struct Payload(Rc<Cell<usize>>);
+    impl Drop for Payload {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+    let drops = Rc::new(Cell::new(0));
+    let budget = Budget::new(10_000);
+    {
+        let _failure = AllocationFailure::after(0);
+        assert!(matches!(
+            Shared::new(&budget, Payload(drops.clone())),
+            Err(AllocationError::Allocator)
+        ));
+    }
+    assert_eq!(drops.get(), 1);
+    assert_eq!(budget.0.live.get(), 0);
+    let first = Shared::new(&budget, Payload(drops.clone())).unwrap();
+    assert_eq!(Shared::as_ptr(&first) as usize % 128, 0);
+    let second = first.clone();
+    assert_eq!(Shared::strong_count(&first), 2);
+    assert_eq!(Shared::as_ptr(&first), Shared::as_ptr(&second));
+    assert_eq!(
+        budget.0.live.get(),
+        std::mem::size_of::<SharedNode<Payload>>()
+    );
+    drop(first);
+    assert_eq!(drops.get(), 1);
+    assert_eq!(Shared::strong_count(&second), 1);
+    drop(second);
+    assert_eq!(drops.get(), 2);
+    assert_eq!(budget.0.live.get(), 0);
+}
+
+#[test]
+fn shared_node_releases_storage_when_payload_drop_panics() {
+    struct Panics;
+    impl Drop for Panics {
+        fn drop(&mut self) {
+            panic!("expected destructor failure");
+        }
+    }
+    let budget = Budget::new(1000);
+    let value = Shared::new(&budget, Panics).unwrap();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(value)));
+    assert!(result.is_err());
+    assert_eq!(budget.0.live.get(), 0);
 }

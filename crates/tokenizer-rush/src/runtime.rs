@@ -47,7 +47,7 @@ impl Drop for CellId {
 struct Environment<'s> {
     bindings: memory::Slots<(&'s str, Binding<'s>)>,
     budget: memory::Budget,
-    parent: Option<Rc<Environment<'s>>>,
+    parent: Option<memory::Shared<Environment<'s>>>,
 }
 impl PartialEq for Environment<'_> {
     fn eq(&self, other: &Self) -> bool {
@@ -62,7 +62,7 @@ impl<'s> Environment<'s> {
             parent: None,
         }
     }
-    fn child(parent: Rc<Self>) -> Self {
+    fn child(parent: memory::Shared<Self>) -> Self {
         let mut child = Self::new(&parent.budget);
         child.parent = Some(parent);
         child
@@ -373,7 +373,7 @@ pub struct Closure<'s> {
     result_type: Option<ValueType>,
     body: FunctionBody<'s>,
     name: Option<&'s str>,
-    environment: Rc<Environment<'s>>,
+    environment: memory::Shared<Environment<'s>>,
     references: Rc<Vec<CaptureReference<'s>>>,
 }
 
@@ -1052,7 +1052,11 @@ impl<'s> Runtime<'_, 's> {
         }
         Ok(cell.index)
     }
-    fn capture(&self, span: Span, environment: &Environment<'s>) -> Result<Rc<Environment<'s>>> {
+    fn capture(
+        &self,
+        span: Span,
+        environment: &Environment<'s>,
+    ) -> Result<memory::Shared<Environment<'s>>> {
         let references = &self.current_references;
         let start = references.partition_point(|reference| reference.usage.start < span.start);
         let mut captured = Environment::new(&self.memory);
@@ -1073,7 +1077,7 @@ impl<'s> Runtime<'_, 's> {
                     .map_err(|e| self.environment_error(span, e))?;
             }
         }
-        Ok(Rc::new(captured))
+        memory::Shared::new(&self.memory, captured).map_err(|e| self.environment_error(span, e))
     }
     fn reclaim_cells(&mut self) {
         // Dropping a value can release captured bindings. Drain again without
