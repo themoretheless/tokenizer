@@ -1,6 +1,6 @@
 [package]
 name = "themoretheless-tokenizer-hcl"
-version = "0.4.0"
+version = "0.7.0"
 edition = "2024"
 authors = ['Denis Mezhov']
 description = "Full HCL engine (lex/parse/validate) for themoretheless-tokenizer"
@@ -16,7 +16,7 @@ name = "themoretheless_tokenizer_hcl"
 path = "src/lib.rs"
 
 [dependencies]
-themoretheless-tokenizer-core = { path = "../tokenizer-core", version = "0.4.0" }
+themoretheless-tokenizer-core = { path = "../tokenizer-core", version = "0.7.0" }
 
 [package.metadata.docs.rs]
 all-features = true

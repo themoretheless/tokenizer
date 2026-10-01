@@ -10,9 +10,8 @@ use std::sync::{
 };
 use themoretheless_tokenizer_core::Span;
 mod cell_gc;
-// Allocation accounting is being prepared before changing Value storage.
-// Keep the prototype out of production until every allocation path participates.
-#[cfg(test)]
+mod instance;
+pub use instance::{OwnedScriptInstance, ScriptState, StateValue};
 mod memory;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -27,7 +26,7 @@ enum Binding<'s> {
 #[derive(Debug)]
 struct CellId {
     index: usize,
-    released: Weak<RefCell<Vec<usize>>>,
+    released: Weak<RefCell<memory::Slots<usize>>>,
 }
 impl PartialEq for CellId {
     fn eq(&self, other: &Self) -> bool {
@@ -37,7 +36,10 @@ impl PartialEq for CellId {
 impl Drop for CellId {
     fn drop(&mut self) {
         if let Some(released) = self.released.upgrade() {
-            released.borrow_mut().push(self.index);
+            released
+                .borrow_mut()
+                .push(self.index)
+                .expect("release queue reserved with cell");
         }
     }
 }
@@ -338,6 +340,35 @@ pub struct RuntimeError {
     pub module: Option<String>,
     pub span: Span,
     pub message: String,
+    /// Innermost frame first; positions are one-based UTF-8 character columns.
+    pub stack: Vec<CallFrame>,
+    pub location: Option<SourceLocation>,
+}
+
+/// A callable and the source position at which it was invoked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CallFrame {
+    pub function: String,
+    pub module: Option<String>,
+    pub span: Span,
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceLocation {
+    pub line: usize,
+    pub column: usize,
+}
+impl RuntimeError {
+    fn locate(mut self, source: &str) -> Self {
+        let prefix = source.get(..self.span.start).unwrap_or("");
+        self.location = Some(SourceLocation {
+            line: prefix.bytes().filter(|b| *b == b'\n').count() + 1,
+            column: prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1,
+        });
+        self
+    }
 }
 
 type Result<T> = std::result::Result<T, RuntimeError>;
@@ -443,6 +474,8 @@ impl ValueType {
             return Ok(Self::List(Box::new(Self::annotation(&ty.arguments[0])?)));
         }
         Err(RuntimeError {
+            stack: Vec::new(),
+            location: None,
             module: None,
             span: ty.name.span,
             message: format!("Unsupported type annotation: {}", ty.name.text),
@@ -567,6 +600,7 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         arguments: &[Value<'s>],
         limits: ExecutionLimits,
     ) -> Result<Value<'s>> {
+        self.runtime.reclaim_cells();
         if limits.max_depth > 64 {
             return self
                 .runtime
@@ -578,6 +612,8 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         self.runtime.max_string_bytes = limits.max_string_bytes;
         self.runtime.check(self.span)?;
         let function = self.get(name).ok_or_else(|| RuntimeError {
+            stack: Vec::new(),
+            location: None,
             module: None,
             span: self.span,
             message: format!("Unknown function: {name}"),
@@ -585,8 +621,12 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         for value in arguments {
             self.runtime.host_value_size(value, self.span, 0)?;
         }
-        self.runtime
-            .call(function, Cow::Borrowed(arguments), self.span)
+        self.enforce_memory_limit()?;
+        let value = self
+            .runtime
+            .call(function, Cow::Borrowed(arguments), self.span)?;
+        self.enforce_memory_limit()?;
+        Ok(value)
     }
 }
 
@@ -635,6 +675,8 @@ impl<'s> Program<'s> {
         for (name, program) in modules {
             if registry.insert(*name, *program).is_some() {
                 return Err(RuntimeError {
+                    stack: Vec::new(),
+                    location: None,
                     module: None,
                     span: self.parsed.module.span,
                     message: format!("Duplicate module: {name}"),
@@ -658,6 +700,8 @@ impl<'s> Program<'s> {
             *index += 1;
             let Some(program) = registry.get(import.text) else {
                 return Err(RuntimeError {
+                    stack: Vec::new(),
+                    location: None,
                     module: module.map(str::to_owned),
                     span: import.span,
                     message: format!("Unknown module: {}", import.text),
@@ -665,6 +709,8 @@ impl<'s> Program<'s> {
             };
             if active.contains(import.text) {
                 return Err(RuntimeError {
+                    stack: Vec::new(),
+                    location: None,
                     module: module.map(str::to_owned),
                     span: import.span,
                     message: format!("Cyclic module import: {}", import.text),
@@ -685,6 +731,8 @@ impl<'s> Program<'s> {
         if !parsed.is_valid() {
             let diagnostic = parsed.diagnostics.first();
             return Err(RuntimeError {
+                stack: Vec::new(),
+                location: None,
                 module: None,
                 span: diagnostic.map_or(parsed.module.span, |d| d.span),
                 message: diagnostic.map_or_else(
@@ -755,6 +803,8 @@ impl<'s> Program<'s> {
     ) -> Result<Value<'s>> {
         if inputs.iter().any(|(_, value)| !value.is_finite()) {
             return Err(RuntimeError {
+                stack: Vec::new(),
+                location: None,
                 module: None,
                 span: self.parsed.module.span,
                 message: "Invalid or duplicate input parameter".into(),
@@ -791,11 +841,14 @@ impl<'s> Program<'s> {
     ) -> Result<ScriptInstance<'a, 's>> {
         if limits.max_depth > 64 {
             return Err(RuntimeError {
+                stack: Vec::new(),
+                location: None,
                 module: None,
                 span: self.parsed.module.span,
                 message: "Maximum evaluation depth cannot exceed 64".into(),
             });
         }
+        let memory = memory::Budget::new(usize::MAX);
         let mut runtime = Runtime {
             module: None,
             modules: HashMap::new(),
@@ -804,10 +857,15 @@ impl<'s> Program<'s> {
             module_globals: Environment::new(),
             references: HashMap::from([(None, self.references.clone())]),
             current_references: self.references.clone(),
-            cells: Vec::new(),
-            released_cells: Rc::new(RefCell::new(Vec::new())),
-            free_cells: Vec::new(),
-            cell_ids: Vec::new(),
+            cells: memory::Slots::new(&memory, 0)
+                .expect("empty cell storage requires no allocation"),
+            released_cells: Rc::new(RefCell::new(
+                memory::Slots::new(&memory, 0).expect("empty release queue requires no allocation"),
+            )),
+            free_cells: memory::Slots::new(&memory, 0)
+                .expect("empty free cell storage requires no allocation"),
+            cell_ids: memory::Slots::new(&memory, 0)
+                .expect("empty cell ID storage requires no allocation"),
             cell_allocations: 0,
             cell_collection_interval: 64,
             remaining: limits.steps,
@@ -815,6 +873,10 @@ impl<'s> Program<'s> {
             max_collection_items: limits.max_collection_items,
             max_string_bytes: limits.max_string_bytes,
             depth: 0,
+            sources: HashMap::from([(None, self.parsed.source)]),
+            memory_limit: usize::MAX,
+            initial_data_bytes: 0,
+            instance_roots: None,
             cancellation,
             contextual: contextual
                 .iter()
@@ -847,6 +909,7 @@ impl<'s> Program<'s> {
         }
         runtime.module_globals = environment.clone();
         for (name, program) in modules {
+            runtime.sources.insert(Some(*name), program.parsed.source);
             if runtime
                 .modules
                 .insert(*name, program.parsed.module.clone())
@@ -859,12 +922,15 @@ impl<'s> Program<'s> {
                 .insert(Some(*name), program.references.clone());
         }
         let (initial_value, _) = runtime.statements(&self.parsed.module.items, &mut environment)?;
-        Ok(ScriptInstance {
+        runtime.instance_roots = Some(environment.clone());
+        let mut instance = ScriptInstance {
             runtime,
             environment,
             span: self.parsed.module.span,
             initial_value,
-        })
+        };
+        instance.initialize_usage();
+        Ok(instance)
     }
 }
 
@@ -889,10 +955,10 @@ struct Runtime<'a, 's> {
     module_globals: Environment<'s>,
     references: HashMap<Option<&'s str>, Rc<Vec<CaptureReference<'s>>>>,
     current_references: Rc<Vec<CaptureReference<'s>>>,
-    cells: Vec<(Value<'s>, Option<ValueType>)>,
-    released_cells: Rc<RefCell<Vec<usize>>>,
-    free_cells: Vec<usize>,
-    cell_ids: Vec<Weak<CellId>>,
+    cells: memory::Slots<(Value<'s>, Option<ValueType>)>,
+    released_cells: Rc<RefCell<memory::Slots<usize>>>,
+    free_cells: memory::Slots<usize>,
+    cell_ids: memory::Slots<Weak<CellId>>,
     cell_allocations: usize,
     cell_collection_interval: usize,
     remaining: usize,
@@ -900,6 +966,10 @@ struct Runtime<'a, 's> {
     max_depth: usize,
     max_collection_items: usize,
     max_string_bytes: usize,
+    sources: HashMap<Option<&'s str>, &'s str>,
+    memory_limit: usize,
+    initial_data_bytes: usize,
+    instance_roots: Option<Environment<'s>>,
     cancellation: &'a CancellationToken,
     contextual: HashMap<*const HostFunction, ContextualHostCallback>,
 }
@@ -947,7 +1017,9 @@ impl<'s> Runtime<'_, 's> {
                 break;
             };
             self.cells[index] = (Value::Null, None);
-            self.free_cells.push(index);
+            self.free_cells
+                .push(index)
+                .expect("free list reserved with cell");
         }
     }
     fn allocate_cell(
@@ -957,6 +1029,7 @@ impl<'s> Runtime<'_, 's> {
         span: Span,
     ) -> Result<Rc<CellId>> {
         self.reclaim_cells();
+        self.enforce_cell_limit(&value, span)?;
         self.cell_allocations += 1;
         if self.cell_allocations >= self.cell_collection_interval {
             self.collect_cell_cycles(span)?;
@@ -968,8 +1041,30 @@ impl<'s> Runtime<'_, 's> {
             index
         } else {
             let index = self.cells.len();
-            self.cells.push((value, contract));
-            self.cell_ids.push(Weak::new());
+            self.cells
+                .reserve(1)
+                .and_then(|()| self.cell_ids.reserve(1))
+                .and_then(|()| self.free_cells.reserve(index + 1 - self.free_cells.len()))
+                .and_then(|()| {
+                    let mut released = self.released_cells.borrow_mut();
+                    let additional = index + 1 - released.len();
+                    released.reserve(additional)
+                })
+                .map_err(|error| RuntimeError {
+                    stack: Vec::new(),
+                    location: None,
+                    module: self.module.map(str::to_owned),
+                    span,
+                    message: format!("Runtime cell allocation failed: {error:?}"),
+                })?;
+            // Reserve every table, including reclamation queues, before
+            // publishing a cell. Dropping a cell ID must never allocate.
+            self.cells
+                .push((value, contract))
+                .expect("reserved cell slot");
+            self.cell_ids
+                .push(Weak::new())
+                .expect("reserved cell ID slot");
             index
         };
         let id = Rc::new(CellId {
@@ -1055,6 +1150,8 @@ impl<'s> Runtime<'_, 's> {
             .remaining
             .checked_sub(amount)
             .ok_or_else(|| RuntimeError {
+                stack: Vec::new(),
+                location: None,
                 module: self.module.map(str::to_owned),
                 span,
                 message: "Execution limit exceeded".into(),
@@ -1099,6 +1196,8 @@ impl<'s> Runtime<'_, 's> {
                         cursor.host =
                             Some(source.factory.open(self.cancellation).map_err(|message| {
                                 RuntimeError {
+                                    stack: Vec::new(),
+                                    location: None,
                                     module: self.module.map(str::to_owned),
                                     span,
                                     message,
@@ -1112,6 +1211,8 @@ impl<'s> Runtime<'_, 's> {
                         .unwrap()
                         .next(self.cancellation)
                         .map_err(|message| RuntimeError {
+                            stack: Vec::new(),
+                            location: None,
                             module: self.module.map(str::to_owned),
                             span,
                             message,
@@ -1150,6 +1251,8 @@ impl<'s> Runtime<'_, 's> {
                 }
             };
             cursor.index = cursor.index.checked_add(1).ok_or_else(|| RuntimeError {
+                stack: Vec::new(),
+                location: None,
                 module: self.module.map(str::to_owned),
                 span,
                 message: "Sequence index overflow".into(),
@@ -1394,6 +1497,8 @@ impl<'s> Runtime<'_, 's> {
                             .get(name.text)
                             .cloned()
                             .ok_or_else(|| RuntimeError {
+                                stack: Vec::new(),
+                                location: None,
                                 module: self.module.map(str::to_owned),
                                 span: name.span,
                                 message: format!("Unknown module: {}", name.text),
@@ -1417,6 +1522,7 @@ impl<'s> Runtime<'_, 's> {
                     if !matches!(exports, Value::Record(_)) {
                         return self.error(name.span, "Module must evaluate to an export record");
                     }
+                    self.enforce_retained_limit(name.span, Some(&exports))?;
                     self.module_cache.insert(name.text, exports.clone());
                     environment.insert(name.text, exports);
                 }
@@ -1548,6 +1654,8 @@ impl<'s> Runtime<'_, 's> {
     }
     fn error<T>(&self, span: Span, message: &str) -> Result<T> {
         Err(RuntimeError {
+            stack: Vec::new(),
+            location: None,
             module: self.module.map(str::to_owned),
             span,
             message: message.into(),
@@ -1614,6 +1722,8 @@ impl<'s> Runtime<'_, 's> {
             .filter(|n| n.is_finite())
             .map(Value::Number)
             .ok_or_else(|| RuntimeError {
+                stack: Vec::new(),
+                location: None,
                 module: self.module.map(str::to_owned),
                 span,
                 message: "Unsupported or non-finite number".into(),
@@ -1667,7 +1777,11 @@ impl<'s> Runtime<'_, 's> {
                 {
                     return self.error(span, "Assignment violates variable type");
                 }
-                self.cells[index].0 = assigned.clone();
+                let previous = std::mem::replace(&mut self.cells[index].0, assigned.clone());
+                if let Err(error) = self.enforce_retained_limit(span, None) {
+                    self.cells[index].0 = previous;
+                    return Err(error);
+                }
                 Ok(assigned)
             }
             ExprKind::Lambda { parameters, body } => Ok(Value::Function(Rc::new(Closure {
@@ -1738,6 +1852,8 @@ impl<'s> Runtime<'_, 's> {
                 }
                 if let Value::Record(fields) = object {
                     return fields.get(field.text).cloned().ok_or_else(|| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
                         module: self.module.map(str::to_owned),
                         span: field.span,
                         message: format!("Unknown field: {}", field.text),
@@ -1759,6 +1875,8 @@ impl<'s> Runtime<'_, 's> {
                         .copied()
                         .map(Value::Number)
                         .ok_or_else(|| RuntimeError {
+                            stack: Vec::new(),
+                            location: None,
                             module: self.module.map(str::to_owned),
                             span: field.span,
                             message: "Vector component out of bounds".into(),
@@ -1774,6 +1892,8 @@ impl<'s> Runtime<'_, 's> {
                         return self.error(span, "Record index must be a string");
                     };
                     return fields.get(&key).cloned().ok_or_else(|| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
                         module: self.module.map(str::to_owned),
                         span,
                         message: format!("Unknown field: {key}"),
@@ -1793,6 +1913,8 @@ impl<'s> Runtime<'_, 's> {
                     _ => return self.error(span, "Indexing requires a list or vector"),
                 };
                 result.ok_or_else(|| RuntimeError {
+                    stack: Vec::new(),
+                    location: None,
                     module: self.module.map(str::to_owned),
                     span,
                     message: "Index out of bounds".into(),
@@ -1912,6 +2034,8 @@ impl<'s> Runtime<'_, 's> {
                         .multiply(b)
                         .map(|matrix| Value::Matrix(Box::new(matrix)))
                         .ok_or_else(|| RuntimeError {
+                            stack: Vec::new(),
+                            location: None,
                             module: self.module.map(str::to_owned),
                             span,
                             message: "Matrix multiplication overflow".into(),
@@ -2000,6 +2124,8 @@ impl<'s> Runtime<'_, 's> {
                     .slerp(b, *t)
                     .map(|q| Value::Quaternion(Box::new(q)))
                     .ok_or_else(|| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
                         module: self.module.map(str::to_owned),
                         span,
                         message: "slerp requires a finite fraction between 0 and 1".into(),
@@ -2015,6 +2141,8 @@ impl<'s> Runtime<'_, 's> {
                 return crate::Quaternion::axis_angle([axis[0], axis[1], axis[2]], *angle)
                     .map(|q| Value::Quaternion(Box::new(q)))
                     .ok_or_else(|| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
                         module: self.module.map(str::to_owned),
                         span,
                         message: "Rotation requires a finite nonzero axis and angle".into(),
@@ -2062,6 +2190,8 @@ impl<'s> Runtime<'_, 's> {
                     .apply(v, builtin == Builtin::TransformPoint)
                     .map(Value::Vector)
                     .ok_or_else(|| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
                         module: self.module.map(str::to_owned),
                         span,
                         message: "Invalid matrix transformation".into(),
@@ -2116,6 +2246,8 @@ impl<'s> Runtime<'_, 's> {
         };
         if let Some(shape) = shape {
             return shape.map(Value::Polygon).map_err(|message| RuntimeError {
+                stack: Vec::new(),
+                location: None,
                 module: self.module.map(str::to_owned),
                 span,
                 message: message.into(),
@@ -2124,6 +2256,8 @@ impl<'s> Runtime<'_, 's> {
         let number = match (builtin, arguments) {
             (Builtin::Random, [Value::Number(seed), Value::Number(index)]) => {
                 crate::noise::random(*seed, *index).ok_or_else(|| RuntimeError {
+                    stack: Vec::new(),
+                    location: None,
                     module: self.module.map(str::to_owned),
                     span,
                     message: "random requires nonnegative exact integer seed and index".into(),
@@ -2131,6 +2265,8 @@ impl<'s> Runtime<'_, 's> {
             }
             (Builtin::Noise, [Value::Number(x), Value::Number(seed)]) => {
                 crate::noise::noise(*x, *seed).ok_or_else(|| RuntimeError {
+                    stack: Vec::new(),
+                    location: None,
                     module: self.module.map(str::to_owned),
                     span,
                     message:
@@ -2226,6 +2362,46 @@ impl<'s> Runtime<'_, 's> {
             return self.error(span, "Execution limit exceeded");
         }
         self.remaining -= 1;
+        let name = match &function {
+            Value::Function(f) => f.name.unwrap_or("<lambda>").to_owned(),
+            Value::Host(f) => f.name.to_owned(),
+            Value::Builtin(b) => format!("{b:?}"),
+            _ => "<non-callable>".to_owned(),
+        };
+        let module = self.module.map(str::to_owned);
+        let source = self.sources.get(&self.module).copied().unwrap_or("");
+        let prefix = &source[..span.start.min(source.len())];
+        let line = prefix.bytes().filter(|b| *b == b'\n').count() + 1;
+        let column = prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1;
+        let result = match function {
+            Value::Function(function) => self.call_user(function, arguments, span),
+            other => self.call_inner(other, arguments, span),
+        };
+        result.map_err(|mut error| {
+            if error.location.is_none()
+                && let Some((_, source)) = self
+                    .sources
+                    .iter()
+                    .find(|(module, _)| module.map(str::to_owned) == error.module)
+            {
+                error = error.locate(source);
+            }
+            error.stack.push(CallFrame {
+                function: name,
+                module,
+                span,
+                line,
+                column,
+            });
+            error
+        })
+    }
+    fn call_inner(
+        &mut self,
+        function: Value<'s>,
+        arguments: Cow<'_, [Value<'s>]>,
+        span: Span,
+    ) -> Result<Value<'s>> {
         if let Value::Host(function) = function {
             if arguments.len() != function.parameters.len()
                 || !function
@@ -2241,6 +2417,8 @@ impl<'s> Runtime<'_, 's> {
                 None => (function.callback)(&arguments, self.cancellation),
             }
             .map_err(|message| RuntimeError {
+                stack: Vec::new(),
+                location: None,
                 module: self.module.map(str::to_owned),
                 span,
                 message,
@@ -2475,6 +2653,8 @@ impl<'s> Runtime<'_, 's> {
                 return crate::Mesh::new(vertices, triangles)
                     .map(|mesh| Value::Mesh(Rc::new(mesh)))
                     .map_err(|message| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
                         module: self.module.map(str::to_owned),
                         span,
                         message: message.into(),
@@ -2490,6 +2670,8 @@ impl<'s> Runtime<'_, 's> {
                 for vertex in mesh.vertices() {
                     self.charge(1, span)?;
                     let transformed = matrix.apply(vertex, true).ok_or_else(|| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
                         module: self.module.map(str::to_owned),
                         span,
                         message: "Mesh transformation overflow".into(),
@@ -2500,6 +2682,8 @@ impl<'s> Runtime<'_, 's> {
                 return crate::Mesh::new(vertices, mesh.triangles().to_vec())
                     .map(|mesh| Value::Mesh(Rc::new(mesh)))
                     .map_err(|message| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
                         module: self.module.map(str::to_owned),
                         span,
                         message: message.into(),
@@ -2516,6 +2700,8 @@ impl<'s> Runtime<'_, 's> {
                     return self.error(span, "Grid requires at least two coordinates per axis");
                 }
                 let count = xs.len().checked_mul(ys.len()).ok_or_else(|| RuntimeError {
+                    stack: Vec::new(),
+                    location: None,
                     module: self.module.map(str::to_owned),
                     span,
                     message: "Grid size overflow".into(),
@@ -2525,6 +2711,8 @@ impl<'s> Runtime<'_, 's> {
                     .checked_mul(ys.len() - 1)
                     .and_then(|n| n.checked_mul(2))
                     .ok_or_else(|| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
                         module: self.module.map(str::to_owned),
                         span,
                         message: "Grid size overflow".into(),
@@ -2562,6 +2750,8 @@ impl<'s> Runtime<'_, 's> {
                 return crate::Mesh::new(vertices, triangles)
                     .map(|mesh| Value::Mesh(Rc::new(mesh)))
                     .map_err(|message| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
                         module: self.module.map(str::to_owned),
                         span,
                         message: message.into(),
@@ -2770,9 +2960,15 @@ impl<'s> Runtime<'_, 's> {
                 Ok(Value::List(output))
             };
         }
-        let Value::Function(function) = function else {
-            return self.error(span, "Value is not callable");
-        };
+        self.error(span, "Value is not callable")
+    }
+
+    fn call_user(
+        &mut self,
+        function: Rc<Closure<'s>>,
+        arguments: Cow<'_, [Value<'s>]>,
+        span: Span,
+    ) -> Result<Value<'s>> {
         if arguments.len() != function.parameters.len() {
             return self.error(span, "Incorrect argument count");
         }

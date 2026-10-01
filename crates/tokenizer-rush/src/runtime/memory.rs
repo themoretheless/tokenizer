@@ -4,6 +4,52 @@ use std::alloc::{Layout, alloc, alloc_zeroed, dealloc};
 use std::ptr::NonNull;
 use std::{cell::Cell, rc::Rc};
 
+#[cfg(test)]
+thread_local! {
+    static FAIL_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+fn allocate(layout: Layout, zeroed: bool) -> *mut u8 {
+    if layout.size() == 0 {
+        return std::ptr::null_mut();
+    }
+    #[cfg(test)]
+    if FAIL_AFTER.with(|remaining| match remaining.get() {
+        Some(0) => true,
+        Some(n) => {
+            remaining.set(Some(n - 1));
+            false
+        }
+        None => false,
+    }) {
+        return std::ptr::null_mut();
+    }
+    // SAFETY: Layout is valid by construction and zero-sized requests were
+    // rejected. Callers own a successful allocation and handle null on failure.
+    unsafe {
+        if zeroed {
+            alloc_zeroed(layout)
+        } else {
+            alloc(layout)
+        }
+    }
+}
+
+#[cfg(test)]
+struct AllocationFailure(Option<usize>);
+#[cfg(test)]
+impl AllocationFailure {
+    fn after(successes: usize) -> Self {
+        Self(FAIL_AFTER.with(|remaining| remaining.replace(Some(successes))))
+    }
+}
+#[cfg(test)]
+impl Drop for AllocationFailure {
+    fn drop(&mut self) {
+        FAIL_AFTER.with(|remaining| remaining.set(self.0));
+    }
+}
+
 #[derive(Debug)]
 struct Ledger {
     limit: usize,
@@ -12,7 +58,7 @@ struct Ledger {
 }
 
 #[derive(Clone, Debug)]
-struct Budget(Rc<Ledger>);
+pub(super) struct Budget(Rc<Ledger>);
 
 #[derive(Debug, PartialEq, Eq)]
 struct LimitExceeded;
@@ -26,7 +72,7 @@ struct Reservation {
 }
 
 impl Budget {
-    fn new(limit: usize) -> Self {
+    pub(super) fn new(limit: usize) -> Self {
         Self(Rc::new(Ledger {
             limit,
             live: Cell::new(0),
@@ -67,10 +113,419 @@ impl Drop for Reservation {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum AllocationError {
+pub(super) enum AllocationError {
     Limit,
     Capacity,
     Allocator,
+    #[cfg(test)]
+    Depth,
+    #[cfg(test)]
+    Unsupported,
+    #[cfg(test)]
+    Steps,
+    #[cfg(test)]
+    Cancelled,
+}
+
+#[cfg(test)]
+struct Transfer<'a> {
+    remaining: usize,
+    cancellation: &'a super::CancellationToken,
+}
+#[cfg(test)]
+impl Transfer<'_> {
+    fn charge(&mut self, amount: usize) -> Result<(), AllocationError> {
+        if self.cancellation.is_cancelled() {
+            return Err(AllocationError::Cancelled);
+        }
+        self.remaining = self
+            .remaining
+            .checked_sub(amount)
+            .ok_or(AllocationError::Steps)?;
+        Ok(())
+    }
+}
+
+/// Data-only boundary prototype. Executable values still need managed storage
+/// before this can replace the runtime's Value.
+#[derive(Debug)]
+#[cfg(test)]
+enum Data {
+    Number(f64),
+    Angle(f64),
+    Bool(bool),
+    Null,
+    String(Bytes),
+    Vector(Slots<f64>),
+    List(Slots<Data>),
+    Tuple(Slots<Data>),
+    Variant(&'static str, Slots<Data>),
+    Record(Slots<(Bytes, Data)>),
+    Matrix(Slots<crate::Matrix4>),
+    Quaternion(Slots<crate::Quaternion>),
+    Polygon(Slots<[f64; 2]>),
+    Mesh {
+        vertices: Slots<[f64; 3]>,
+        triangles: Slots<[usize; 3]>,
+    },
+}
+
+#[cfg(test)]
+impl Data {
+    fn import(
+        value: &super::Value<'_>,
+        budget: &Budget,
+        depth: usize,
+    ) -> Result<Self, AllocationError> {
+        Self::import_checked(
+            value,
+            budget,
+            depth,
+            &mut Transfer {
+                remaining: usize::MAX,
+                cancellation: &super::CancellationToken::default(),
+            },
+        )
+    }
+
+    fn import_checked(
+        value: &super::Value<'_>,
+        budget: &Budget,
+        depth: usize,
+        transfer: &mut Transfer<'_>,
+    ) -> Result<Self, AllocationError> {
+        use super::Value;
+        transfer.charge(1)?;
+        if depth > 64 {
+            return Err(AllocationError::Depth);
+        }
+        Ok(match value {
+            Value::Number(n) => Self::Number(*n),
+            Value::Angle(n) => Self::Angle(*n),
+            Value::Bool(b) => Self::Bool(*b),
+            Value::Null => Self::Null,
+            Value::String(s) => Self::String(Bytes::copy_checked(budget, s.as_bytes(), transfer)?),
+            Value::Matrix(matrix) => {
+                let mut items = Slots::new(budget, 1)?;
+                items.push((**matrix).clone())?;
+                Self::Matrix(items)
+            }
+            Value::Quaternion(quaternion) => {
+                let mut items = Slots::new(budget, 1)?;
+                items.push((**quaternion).clone())?;
+                Self::Quaternion(items)
+            }
+            Value::Polygon(polygon) => {
+                Self::Polygon(Slots::copy_from_slice(budget, polygon.points(), transfer)?)
+            }
+            Value::Mesh(mesh) => Self::Mesh {
+                vertices: Slots::copy_from_slice(budget, mesh.vertices(), transfer)?,
+                triangles: Slots::copy_from_slice(budget, mesh.triangles(), transfer)?,
+            },
+            Value::Vector(v) => {
+                let mut items = Slots::new(budget, v.len())?;
+                for item in v {
+                    transfer.charge(1)?;
+                    items.push(*item)?;
+                }
+                Self::Vector(items)
+            }
+            Value::List(v) | Value::Tuple(v) | Value::Variant(_, v) => {
+                let mut items = Slots::new(budget, v.len())?;
+                for item in v {
+                    items.push(Self::import_checked(item, budget, depth + 1, transfer)?)?;
+                }
+                match value {
+                    Value::List(_) => Self::List(items),
+                    Value::Tuple(_) => Self::Tuple(items),
+                    Value::Variant(tag, _) => Self::Variant(tag, items),
+                    _ => unreachable!(),
+                }
+            }
+            Value::Record(v) => {
+                let mut fields = Slots::new(budget, v.len())?;
+                for (key, value) in v {
+                    let key = Bytes::copy_checked(budget, key.as_bytes(), transfer)?;
+                    fields.push((
+                        key,
+                        Self::import_checked(value, budget, depth + 1, transfer)?,
+                    ))?;
+                }
+                Self::Record(fields)
+            }
+            _ => return Err(AllocationError::Unsupported),
+        })
+    }
+
+    fn try_copy(
+        &self,
+        budget: &Budget,
+        transfer: &mut Transfer<'_>,
+    ) -> Result<Self, AllocationError> {
+        transfer.charge(1)?;
+        Ok(match self {
+            Self::Number(n) => Self::Number(*n),
+            Self::Angle(n) => Self::Angle(*n),
+            Self::Bool(b) => Self::Bool(*b),
+            Self::Null => Self::Null,
+            Self::String(s) => Self::String(Bytes::copy_checked(budget, s.as_slice(), transfer)?),
+            Self::Vector(v) => {
+                Self::Vector(Slots::copy_from_slice(budget, v.as_slice(), transfer)?)
+            }
+            Self::Polygon(v) => {
+                Self::Polygon(Slots::copy_from_slice(budget, v.as_slice(), transfer)?)
+            }
+            Self::Mesh {
+                vertices,
+                triangles,
+            } => Self::Mesh {
+                vertices: Slots::copy_from_slice(budget, vertices.as_slice(), transfer)?,
+                triangles: Slots::copy_from_slice(budget, triangles.as_slice(), transfer)?,
+            },
+            Self::Matrix(v) => {
+                let mut copy = Slots::new(budget, 1)?;
+                copy.push(v.as_slice()[0].clone())?;
+                Self::Matrix(copy)
+            }
+            Self::Quaternion(v) => {
+                let mut copy = Slots::new(budget, 1)?;
+                copy.push(v.as_slice()[0].clone())?;
+                Self::Quaternion(copy)
+            }
+            Self::List(v) | Self::Tuple(v) | Self::Variant(_, v) => {
+                let mut copy = Slots::new(budget, v.length)?;
+                for item in v.as_slice() {
+                    copy.push(item.try_copy(budget, transfer)?)?;
+                }
+                match self {
+                    Self::List(_) => Self::List(copy),
+                    Self::Tuple(_) => Self::Tuple(copy),
+                    Self::Variant(tag, _) => Self::Variant(tag, copy),
+                    _ => unreachable!(),
+                }
+            }
+            Self::Record(v) => {
+                let mut copy = Slots::new(budget, v.length)?;
+                for (key, value) in v.as_slice() {
+                    let key = Bytes::copy_checked(budget, key.as_slice(), transfer)?;
+                    copy.push((key, value.try_copy(budget, transfer)?))?;
+                }
+                Self::Record(copy)
+            }
+        })
+    }
+
+    fn matches(&self, value: &super::Value<'_>) -> bool {
+        use super::Value;
+        fn items_match(items: &Slots<Data>, values: &[Value<'_>]) -> bool {
+            items.length == values.len()
+                && items
+                    .as_slice()
+                    .iter()
+                    .zip(values)
+                    .all(|(a, b)| a.matches(b))
+        }
+        match (self, value) {
+            (Self::Number(a), Value::Number(b)) | (Self::Angle(a), Value::Angle(b)) => {
+                a.to_bits() == b.to_bits()
+            }
+            (Self::Bool(a), Value::Bool(b)) => a == b,
+            (Self::Null, Value::Null) => true,
+            (Self::String(a), Value::String(b)) => a.as_slice() == b.as_bytes(),
+            (Self::Vector(a), Value::Vector(b)) => a.as_slice() == b,
+            (Self::Matrix(a), Value::Matrix(b)) => a.as_slice() == std::slice::from_ref(b.as_ref()),
+            (Self::Quaternion(a), Value::Quaternion(b)) => {
+                a.as_slice() == std::slice::from_ref(b.as_ref())
+            }
+            (Self::Polygon(a), Value::Polygon(b)) => a.as_slice() == b.points(),
+            (
+                Self::Mesh {
+                    vertices,
+                    triangles,
+                },
+                Value::Mesh(b),
+            ) => vertices.as_slice() == b.vertices() && triangles.as_slice() == b.triangles(),
+            (Self::List(a), Value::List(b)) | (Self::Tuple(a), Value::Tuple(b)) => {
+                items_match(a, b)
+            }
+            (Self::Variant(a, items), Value::Variant(b, values)) => {
+                a == b && items_match(items, values)
+            }
+            (Self::Record(a), Value::Record(b)) => {
+                a.length == b.len()
+                    && a.as_slice()
+                        .iter()
+                        .zip(b)
+                        .all(|((key, item), (name, value))| {
+                            key.as_slice() == name.as_bytes() && item.matches(value)
+                        })
+            }
+            _ => false,
+        }
+    }
+}
+
+#[test]
+fn managed_data_imports_runtime_results_and_releases_all_nested_storage() {
+    let value = super::evaluate(
+        "{name:'привет',values:[vec3(1,2,3),Some(-0),degrees(90)],pair:(true,null)}",
+        1000,
+    )
+    .unwrap();
+    let budget = Budget::new(100_000);
+    let data = Data::import(&value, &budget, 0).unwrap();
+    assert!(data.matches(&value));
+    let live = budget.0.live.get();
+    assert!(live > 0);
+    let tight = Budget::new(live - 1);
+    assert!(matches!(
+        Data::import(&value, &tight, 0),
+        Err(AllocationError::Limit)
+    ));
+    assert_eq!(
+        tight.0.live.get(),
+        0,
+        "Partial record construction leaked reservations"
+    );
+    let exact = Budget::new(live);
+    let imported = Data::import(&value, &exact, 0).unwrap();
+    assert!(imported.matches(&value));
+    assert!(matches!(
+        Data::import(&super::Value::String("x".into()), &exact, 0),
+        Err(AllocationError::Limit)
+    ));
+    drop((data, imported));
+    assert_eq!(budget.0.live.get(), 0);
+    assert_eq!(exact.0.live.get(), 0);
+}
+
+#[test]
+fn unsupported_and_deep_data_fail_without_leaving_allocations() {
+    let budget = Budget::new(1_000_000);
+    let unsupported = super::evaluate("['prefix', x=>x]", 1000).unwrap();
+    assert!(matches!(
+        Data::import(&unsupported, &budget, 0),
+        Err(AllocationError::Unsupported)
+    ));
+    assert_eq!(budget.0.live.get(), 0);
+    let mut deep = super::Value::Null;
+    for _ in 0..66 {
+        deep = super::Value::List(vec![deep]);
+    }
+    assert!(matches!(
+        Data::import(&deep, &budget, 0),
+        Err(AllocationError::Depth)
+    ));
+    assert_eq!(budget.0.live.get(), 0);
+}
+
+#[test]
+fn geometry_uses_the_same_budget_and_mesh_failure_releases_vertices() {
+    for (source, expected) in [
+        ("identity()", std::mem::size_of::<crate::Matrix4>()),
+        (
+            "axis_angle(vec3(0,1,0),degrees(90))",
+            std::mem::size_of::<crate::Quaternion>(),
+        ),
+        (
+            "polygon([vec2(0,0),vec2(1,0),vec2(0,1)])",
+            3 * std::mem::size_of::<[f64; 2]>(),
+        ),
+        (
+            "mesh([vec3(0,0,0),vec3(1,0,0),vec3(0,1,0)],[[0,1,2]])",
+            3 * std::mem::size_of::<[f64; 3]>() + std::mem::size_of::<[usize; 3]>(),
+        ),
+    ] {
+        let value = super::evaluate(source, 10_000).unwrap();
+        let budget = Budget::new(expected);
+        let data = Data::import(&value, &budget, 0).unwrap();
+        assert!(data.matches(&value), "{source}");
+        assert_eq!(budget.0.live.get(), expected, "{source}");
+        drop(data);
+        assert_eq!(budget.0.live.get(), 0);
+        let tight = Budget::new(expected - 1);
+        assert!(
+            matches!(Data::import(&value, &tight, 0), Err(AllocationError::Limit)),
+            "{source}"
+        );
+        assert_eq!(tight.0.live.get(), 0, "{source}");
+    }
+}
+
+#[test]
+fn transfer_budget_and_cancellation_release_partial_data() {
+    let value = super::Value::List(vec![
+        super::Value::String("first".into()),
+        super::Value::String("second".into()),
+    ]);
+    let budget = Budget::new(10_000);
+    let token = super::CancellationToken::default();
+    // Three value nodes and eleven bytes of text.
+    for steps in 0..14 {
+        let mut transfer = Transfer {
+            remaining: steps,
+            cancellation: &token,
+        };
+        assert!(matches!(
+            Data::import_checked(&value, &budget, 0, &mut transfer),
+            Err(AllocationError::Steps)
+        ));
+        assert_eq!(budget.0.live.get(), 0);
+    }
+    let mut transfer = Transfer {
+        remaining: 14,
+        cancellation: &token,
+    };
+    let data = Data::import_checked(&value, &budget, 0, &mut transfer).unwrap();
+    assert!(data.matches(&value));
+    assert_eq!(transfer.remaining, 0);
+    drop(data);
+    token.cancel();
+    let mut transfer = Transfer {
+        remaining: 100,
+        cancellation: &token,
+    };
+    assert!(matches!(
+        Data::import_checked(&value, &budget, 0, &mut transfer),
+        Err(AllocationError::Cancelled)
+    ));
+    assert_eq!(transfer.remaining, 100);
+    assert_eq!(budget.0.live.get(), 0);
+}
+
+#[test]
+fn managed_copy_preserves_source_on_failure_and_charges_destination_budget() {
+    let value = super::evaluate("{items:[Some('abc'),vec3(1,2,3),identity(),axis_angle(vec3(1,0,0),0)],pair:(true,null),angle:degrees(90),number:-0,shape:polygon([vec2(0,0),vec2(1,0),vec2(0,1)]),model:mesh([vec3(0,0,0),vec3(1,0,0),vec3(0,1,0)],[[0,1,2]])}", 10_000).unwrap();
+    let source_budget = Budget::new(100_000);
+    let source = Data::import(&value, &source_budget, 0).unwrap();
+    let bytes = source_budget.0.live.get();
+    let token = super::CancellationToken::default();
+    for limit in [0, bytes / 2, bytes - 1] {
+        let destination = Budget::new(limit);
+        let mut transfer = Transfer {
+            remaining: 100_000,
+            cancellation: &token,
+        };
+        assert!(matches!(
+            source.try_copy(&destination, &mut transfer),
+            Err(AllocationError::Limit)
+        ));
+        assert_eq!(destination.0.live.get(), 0);
+        assert!(source.matches(&value));
+        assert_eq!(source_budget.0.live.get(), bytes);
+    }
+    let destination = Budget::new(bytes);
+    let mut transfer = Transfer {
+        remaining: 100_000,
+        cancellation: &token,
+    };
+    let copy = source.try_copy(&destination, &mut transfer).unwrap();
+    assert_eq!(destination.0.live.get(), bytes);
+    drop(source);
+    assert_eq!(source_budget.0.live.get(), 0);
+    assert!(copy.matches(&value));
+    drop(copy);
+    assert_eq!(destination.0.live.get(), 0);
 }
 
 /// Owns raw storage, independently of element destruction. This field's Drop
@@ -92,14 +547,31 @@ impl<T> Drop for Storage<T> {
 }
 
 #[derive(Debug)]
-struct Slots<T> {
+pub(super) struct Slots<T> {
     storage: Storage<T>,
     capacity: usize,
     length: usize,
 }
 
 impl<T> Slots<T> {
-    fn new(budget: &Budget, capacity: usize) -> Result<Self, AllocationError> {
+    #[cfg(test)]
+    fn copy_from_slice(
+        budget: &Budget,
+        values: &[T],
+        transfer: &mut Transfer<'_>,
+    ) -> Result<Self, AllocationError>
+    where
+        T: Copy,
+    {
+        transfer.charge(values.len())?;
+        let mut result = Self::new(budget, values.len())?;
+        for value in values {
+            transfer.charge(0)?;
+            result.push(*value)?;
+        }
+        Ok(result)
+    }
+    pub(super) fn new(budget: &Budget, capacity: usize) -> Result<Self, AllocationError> {
         let layout = Layout::array::<T>(capacity).map_err(|_| AllocationError::Capacity)?;
         let reservation = budget
             .reserve(layout.size())
@@ -107,8 +579,8 @@ impl<T> Slots<T> {
         let pointer = if layout.size() == 0 {
             NonNull::dangling()
         } else {
-            // SAFETY: nonzero validated layout. No element is read until initialized.
-            NonNull::new(unsafe { alloc(layout) }.cast::<T>()).ok_or(AllocationError::Allocator)?
+            // No element is read until initialized.
+            NonNull::new(allocate(layout, false).cast::<T>()).ok_or(AllocationError::Allocator)?
         };
         Ok(Self {
             storage: Storage {
@@ -148,20 +620,48 @@ impl<T> Slots<T> {
         Ok(())
     }
 
-    fn push(&mut self, value: T) -> Result<(), AllocationError> {
-        if self.length == self.capacity {
-            let next = self
-                .capacity
-                .checked_mul(2)
-                .filter(|n| *n > self.capacity)
-                .or_else(|| self.capacity.checked_add(1))
-                .ok_or(AllocationError::Capacity)?;
-            self.grow(next)?;
+    pub(super) fn reserve(&mut self, additional: usize) -> Result<(), AllocationError> {
+        let needed = self
+            .length
+            .checked_add(additional)
+            .ok_or(AllocationError::Capacity)?;
+        if needed > self.capacity {
+            self.grow(self.capacity.checked_mul(2).unwrap_or(needed).max(needed))?;
         }
+        Ok(())
+    }
+
+    pub(super) fn push(&mut self, value: T) -> Result<(), AllocationError> {
+        self.reserve(1)?;
         // SAFETY: this slot lies in spare capacity and is currently uninitialized.
         unsafe { self.storage.pointer.as_ptr().add(self.length).write(value) };
         self.length += 1;
         Ok(())
+    }
+
+    pub(super) fn pop(&mut self) -> Option<T> {
+        if self.length == 0 {
+            return None;
+        }
+        self.length -= 1;
+        // SAFETY: the previous last slot was initialized. Reducing length
+        // transfers its ownership to the caller and excludes it from Drop.
+        Some(unsafe { self.storage.pointer.as_ptr().add(self.length).read() })
+    }
+}
+
+impl<T> std::ops::Deref for Slots<T> {
+    type Target = [T];
+    fn deref(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+
+impl<T> std::ops::DerefMut for Slots<T> {
+    fn deref_mut(&mut self) -> &mut [T] {
+        // SAFETY: only the initialized prefix is exposed, under an exclusive
+        // borrow that prevents growth, deallocation or simultaneous access.
+        unsafe { std::slice::from_raw_parts_mut(self.storage.pointer.as_ptr(), self.length) }
     }
 }
 
@@ -256,21 +756,41 @@ fn typed_storage_releases_reservation_when_element_drop_unwinds() {
 /// Exact-sized, initialized byte storage. No infallible Clone implementation:
 /// a deep copy must acquire its own reservation before allocating.
 #[derive(Debug)]
+#[cfg(test)]
 struct Bytes {
     pointer: NonNull<u8>,
     reservation: Reservation,
 }
 
+#[cfg(test)]
 impl Bytes {
+    fn copy_checked(
+        budget: &Budget,
+        input: &[u8],
+        transfer: &mut Transfer<'_>,
+    ) -> Result<Self, AllocationError> {
+        // Reject an unaffordable copy before allocating the destination.
+        transfer.charge(input.len())?;
+        let mut result = Self::zeroed(budget, input.len())?;
+        for (target, source) in result
+            .as_mut_slice()
+            .chunks_mut(4096)
+            .zip(input.chunks(4096))
+        {
+            transfer.charge(0)?;
+            target.copy_from_slice(source);
+        }
+        Ok(result)
+    }
     fn zeroed(budget: &Budget, length: usize) -> Result<Self, AllocationError> {
         let layout = Layout::array::<u8>(length).map_err(|_| AllocationError::Capacity)?;
         let reservation = budget.reserve(length).map_err(|_| AllocationError::Limit)?;
         let pointer = if length == 0 {
             NonNull::dangling()
         } else {
-            // SAFETY: layout has nonzero size and was validated above. A null
+            // Layout has nonzero size and was validated above. A null
             // allocation is an ordinary error; the local reservation then drops.
-            NonNull::new(unsafe { alloc_zeroed(layout) }).ok_or(AllocationError::Allocator)?
+            NonNull::new(allocate(layout, true)).ok_or(AllocationError::Allocator)?
         };
         Ok(Self {
             pointer,
@@ -321,6 +841,7 @@ impl Bytes {
     }
 }
 
+#[cfg(test)]
 impl Drop for Bytes {
     fn drop(&mut self) {
         if self.reservation.bytes != 0 {
@@ -348,6 +869,125 @@ fn byte_growth_accounts_for_copy_peak_and_preserves_original_on_failure() {
     assert!(bytes.try_clone().is_err());
     bytes.append(b"").unwrap();
     drop(bytes);
+    assert_eq!(budget.0.live.get(), 0);
+}
+
+#[test]
+fn allocator_failure_during_growth_preserves_storage_and_reservation() {
+    let budget = Budget::new(10_000);
+    let mut bytes = Bytes::from_slice(&budget, b"original").unwrap();
+    let mut slots = Slots::new(&budget, 1).unwrap();
+    slots.push(42u64).unwrap();
+    let before = budget.0.live.get();
+    {
+        let _failure = AllocationFailure::after(0);
+        assert_eq!(bytes.append(b" appended"), Err(AllocationError::Allocator));
+        assert_eq!(slots.push(43), Err(AllocationError::Allocator));
+    }
+    assert_eq!(bytes.as_slice(), b"original");
+    assert_eq!(slots.as_slice(), &[42]);
+    assert_eq!(budget.0.live.get(), before);
+    bytes.append(b" appended").unwrap();
+    slots.push(43).unwrap();
+    drop((bytes, slots));
+    assert_eq!(budget.0.live.get(), 0);
+}
+
+#[test]
+fn runtime_cell_allocation_failure_is_recoverable_between_calls() {
+    let program = super::Program::compile("mut count=0; fn grow() { mut local=1; return local }; fn next() { count+=1; return count }").unwrap();
+    let token = super::CancellationToken::default();
+    let limits = super::ExecutionLimits::new(1000);
+    for index in 0..4 {
+        let _failure = AllocationFailure::after(index);
+        let result = program.instantiate(limits, &token, &[], &[], &[], &[]);
+        assert!(
+            matches!(result, Err(error) if error.message == "Runtime cell allocation failed: Allocator")
+        );
+    }
+    for index in 0..4 {
+        let mut instance = program
+            .instantiate(limits, &token, &[], &[], &[], &[])
+            .unwrap();
+        {
+            let _failure = AllocationFailure::after(index);
+            let error = instance.call("grow", &[], limits).unwrap_err();
+            assert_eq!(error.message, "Runtime cell allocation failed: Allocator");
+        }
+        assert_eq!(instance.runtime.cells.len(), 1);
+        assert_eq!(instance.runtime.cell_ids.len(), 1);
+        assert!(Rc::ptr_eq(
+            &instance.runtime.cells.storage.reservation.ledger,
+            &instance.runtime.cell_ids.storage.reservation.ledger
+        ));
+        assert_eq!(instance.get("count"), Some(super::Value::Number(0.0)));
+        assert_eq!(
+            instance.call("next", &[], limits).unwrap(),
+            super::Value::Number(1.0)
+        );
+        assert_eq!(
+            instance.call("grow", &[], limits).unwrap(),
+            super::Value::Number(1.0)
+        );
+        // Reusing and releasing an existing slot must not allocate, even when
+        // the allocator would refuse every request.
+        let _failure = AllocationFailure::after(0);
+        assert_eq!(
+            instance.call("grow", &[], limits).unwrap(),
+            super::Value::Number(1.0)
+        );
+        drop(instance);
+    }
+}
+
+#[test]
+fn popping_transfers_ownership_without_releasing_the_element_early() {
+    let budget = Budget::new(1000);
+    let mut slots = Slots::new(&budget, 1).unwrap();
+    slots
+        .push(Bytes::from_slice(&budget, b"owned").unwrap())
+        .unwrap();
+    let value = slots.pop().unwrap();
+    assert!(slots.pop().is_none());
+    drop(slots);
+    assert_eq!(budget.0.live.get(), 5);
+    assert_eq!(value.as_slice(), b"owned");
+    drop(value);
+    assert_eq!(budget.0.live.get(), 0);
+}
+
+#[test]
+fn every_failed_nested_allocation_is_released_and_retry_succeeds() {
+    let value = super::evaluate(
+        "{name:'scene',values:[Some('text'),vec3(1,2,3),identity()],pair:(true,null)}",
+        1000,
+    )
+    .unwrap();
+    let budget = Budget::new(100_000);
+    let mut completed = false;
+    let mut failures = 0;
+    for index in 0..64 {
+        let failure = AllocationFailure::after(index);
+        match Data::import(&value, &budget, 0) {
+            Err(AllocationError::Allocator) => {
+                failures += 1;
+            }
+            Ok(data) => {
+                assert!(data.matches(&value));
+                completed = true;
+            }
+            result => panic!("Unexpected result at allocation {index}: {result:?}"),
+        }
+        drop(failure);
+        assert_eq!(budget.0.live.get(), 0, "allocation {index}");
+        if completed {
+            break;
+        }
+    }
+    assert!(completed && failures > 5);
+    let retry = Data::import(&value, &budget, 0).unwrap();
+    assert!(retry.matches(&value));
+    drop(retry);
     assert_eq!(budget.0.live.get(), 0);
 }
 

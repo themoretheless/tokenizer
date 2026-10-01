@@ -1191,3 +1191,58 @@ signature for editor analysis and execution.
 `Program::run_with_values` supplies arbitrary value inputs for one-shot
 execution, with limits, cancellation, host functions, and modules. Existing
 numeric `run` methods and `HostFunction` struct literals remain compatible.
+
+### Owned scripts, diagnostics and saves
+
+`OwnedScriptInstance` owns dynamically loaded entry and module source strings,
+its cancellation token and host registrations. It can be moved into a script
+manager without external lifetimes or leaked strings:
+
+```rust
+use themoretheless_tokenizer_rush::{OwnedScriptInstance, ExecutionLimits, StateValue};
+let limits = ExecutionLimits::new(10_000);
+let source = String::from("mut health=100; fn hit(amount) { health-=amount; return health }");
+let mut script = OwnedScriptInstance::new(source, limits)?;
+assert_eq!(script.call("hit", &[StateValue::Number(7.0)], limits)?, StateValue::Number(93.0));
+let save = script.export_state(&["health"])?;
+let mut reloaded = OwnedScriptInstance::new("mut health=0; fn read() { return health }", limits)?;
+reloaded.restore_state(&save)?;
+assert_eq!(reloaded.call("read", &[], limits)?, StateValue::Number(93.0));
+# Ok::<(), themoretheless_tokenizer_rush::RuntimeError>(())
+```
+
+`with_host` accepts owned inputs, ordinary functions, context registrations and
+`Vec<(String, String)>` module names/source. `cancellation_token()` returns a
+shared signal. `call_values` accepts arbitrary `Value<'static>` arguments and
+returns owned data, including host object handles. `with_instance` provides
+scoped access to the complete borrowed API for function and lazy sequence
+results; these cannot escape the owning instance.
+
+`RuntimeError::stack` contains innermost-first `CallFrame`s: callable name,
+caller module, byte span, and one-based line/Unicode character column of the
+call site. `location` identifies the error's own line and column in `module`.
+For externally invoked functions the outer call site is the entry program span.
+The original message and span remain available.
+
+`export_state` saves only explicitly named variables to `ScriptState`.
+`StateValue` supports finite numbers, strings, booleans, null, lists and records,
+and implements Serde serialization/deserialization (for example JSON).
+Functions, geometry, lazy sequences and host objects are rejected. Store engine
+object IDs as data; Voxy resolves them and supplies fresh host handles.
+`restore_state` validates every target and value before applying anything:
+targets must be existing mutable variables and respect their type annotations,
+data limits and retained-data budget. Invalid saves leave state unchanged.
+
+`set_memory_limit(bytes)` sets an aggregate **retained-data budget** for an
+instance across calls. `memory_usage()` reports the same logical accounting.
+The accounting includes all cell values, captured environments, instance
+bindings, cached module exports and the initialization result; shared Rc
+payloads are visited once within a traversal. Strings and lists use capacity,
+records include logical entry overhead. Exceeding assignments and state
+restores are rejected; already completed earlier mutations are preserved.
+
+This is not a strict limit on total heap allocations: AST/source storage,
+allocator overhead, temporary evaluation values and opaque allocations inside
+host contexts are excluded. The managed-allocation migration is still required
+for a hard ceiling over all runtime-owned allocations. Existing per-string,
+per-collection and execution limits remain independent.

@@ -24,9 +24,10 @@ mod runtime;
 mod string_literal;
 pub use ast::*;
 pub use runtime::{
-    Builtin, CancellationToken, Closure, ExecutionLimits, HostCallback, HostFunction,
-    HostRegistration, HostSequence, HostSequenceIterator, Program, RuntimeError, ScriptInstance,
-    Sequence, Value, ValueType, builtin_catalog, evaluate,
+    Builtin, CallFrame, CancellationToken, Closure, ExecutionLimits, HostCallback, HostFunction,
+    HostRegistration, HostSequence, HostSequenceIterator, OwnedScriptInstance, Program,
+    RuntimeError, ScriptInstance, ScriptState, Sequence, SourceLocation, StateValue, Value,
+    ValueType, builtin_catalog, evaluate,
 };
 
 use themoretheless_tokenizer_core::{
