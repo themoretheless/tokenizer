@@ -38,6 +38,9 @@ fn tracked<'s>(_: &[Value<'s>], _: &CancellationToken) -> Result<Value<'s>, Stri
     })
 }
 fn run(source: &str) -> (Value<'_>, Rc<Counts>) {
+    run_with_functions(source, &[])
+}
+fn run_with_functions<'s>(source: &'s str, extra: &[Rc<HostFunction>]) -> (Value<'s>, Rc<Counts>) {
     let counts = Rc::new(Counts::default());
     COUNTS.with(|slot| *slot.borrow_mut() = counts.clone());
     let function = Rc::new(HostFunction {
@@ -56,14 +59,11 @@ fn run(source: &str) -> (Value<'_>, Rc<Counts>) {
             ))
         },
     });
+    let mut functions = vec![function, live];
+    functions.extend_from_slice(extra);
     let value = Program::compile(source)
         .unwrap()
-        .run_with_host(
-            100_000,
-            &CancellationToken::default(),
-            &[],
-            &[function, live],
-        )
+        .run_with_host(100_000, &CancellationToken::default(), &[], &functions)
         .unwrap();
     (value, counts)
 }
@@ -327,3 +327,29 @@ fn foreign_mutable_captures_fail_without_reading_another_runs_slots() {
     }
 }
 thread_local! { static FOREIGN_SOURCE: Cell<&'static str> = const { Cell::new("") }; }
+
+#[test]
+fn host_cloned_sequences_share_stages_without_retaining_unreachable_cycles() {
+    let duplicate = Rc::new(HostFunction {
+        name: "duplicate_sequence",
+        parameters: vec![ValueType::Sequence],
+        result: ValueType::Sequence,
+        callback: |args, _| {
+            let [Value::Sequence(sequence)] = args else {
+                return Err("expected sequence".into());
+            };
+            // A distinct public Sequence object sharing its managed internals.
+            Ok(Value::Sequence(Rc::new((**sequence).clone())))
+        },
+    });
+    let source = "fn work() { mut resource=tracked(); mut sequence=range_iter(0,1); let transformed=sequence | map(x => (resource,sequence)); sequence=iter([transformed,duplicate_sequence(transformed)]); return 0 }; for i in range_iter(0,200) { work() }; 0";
+    let (value, counts) = run_with_functions(source, &[duplicate]);
+    assert_eq!(value, Value::Number(0.0));
+    assert_eq!(counts.created.get(), 200);
+    assert!(
+        counts.peak.get() <= 64,
+        "peak retained resources: {}",
+        counts.peak.get()
+    );
+    assert_eq!(counts.live.get(), 0);
+}

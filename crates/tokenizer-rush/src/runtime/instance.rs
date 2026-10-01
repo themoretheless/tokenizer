@@ -271,13 +271,15 @@ impl Usage {
                 .capacity()
                 .saturating_mul(std::mem::size_of::<(&str, Binding<'_>)>()),
         );
-        for binding in environment.bindings.values() {
+        for (_, binding) in environment.bindings.iter() {
             if let Binding::Value(value) = binding {
                 self.value(value);
             }
         }
         if let Some(parent) = &environment.parent
-            && self.seen.insert((1, Rc::as_ptr(parent) as usize))
+            && self
+                .seen
+                .insert((1, memory::Shared::as_ptr(parent) as usize))
         {
             self.environment(parent);
         }
@@ -306,25 +308,32 @@ impl Usage {
             }
             Value::Function(f) if self.seen.insert((2, Rc::as_ptr(f) as usize)) => {
                 self.add(std::mem::size_of::<Closure<'_>>());
-                if self.seen.insert((1, Rc::as_ptr(&f.environment) as usize)) {
+                if self
+                    .seen
+                    .insert((1, memory::Shared::as_ptr(&f.environment) as usize))
+                {
                     self.environment(&f.environment);
                 }
             }
             Value::Sequence(sequence) if self.seen.insert((3, Rc::as_ptr(sequence) as usize)) => {
-                self.add(
-                    std::mem::size_of::<Sequence<'_>>()
-                        + sequence.stages.capacity() * std::mem::size_of::<SequenceStage<'_>>(),
-                );
+                self.add(std::mem::size_of::<Sequence<'_>>());
                 if let SequenceSource::List(list) = &sequence.source
-                    && self.seen.insert((4, Rc::as_ptr(list) as usize))
+                    && self.seen.insert((4, memory::Buffer::as_ptr(list) as usize))
                 {
                     self.add(list.capacity() * std::mem::size_of::<Value<'_>>());
                     for v in list.iter() {
                         self.value(v);
                     }
                 }
-                for stage in &sequence.stages {
-                    self.value(&stage.callback);
+                if let Some(stages) = &sequence.stages.0
+                    && self
+                        .seen
+                        .insert((6, memory::Shared::as_ptr(stages) as usize))
+                {
+                    self.add(sequence.stages.capacity() * std::mem::size_of::<SequenceStage<'_>>());
+                    for stage in stages.iter() {
+                        self.value(&stage.callback);
+                    }
                 }
             }
             Value::Mesh(mesh) if self.seen.insert((5, Rc::as_ptr(mesh) as usize)) => {
@@ -355,7 +364,7 @@ impl Runtime<'_, '_> {
         if let Some(environment) = &self.instance_roots {
             usage.environment(environment);
         }
-        for value in self.module_cache.values() {
+        for (_, value) in self.module_cache.iter() {
             usage.value(value);
         }
         usage
