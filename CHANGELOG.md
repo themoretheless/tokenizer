@@ -16,18 +16,17 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and SVG/OBJ export.
 - Editor name resolution, completion and diagnostics using the host function
   catalog, plus isolated WASM execution in the playground.
-- Fallible allocation for mutable-cell storage and reclamation queues.
+- Fallible allocation for mutable-cell storage, reclamation queues, module caches,
+  captured environments, cycle collector storage, and lazy sequence sources and stages.
+- Regression coverage for allocation failures, nested imports, and cycles through
+  host-cloned sequences, with targeted Miri and AddressSanitizer checks.
+- Rush `analyze` / `analyze_with` APIs for scoped duplicate declarations and immutable binding assignments, with bounded diagnostics.
 
 ### Limitations
 
 - General live-heap limiting remains unfinished. Retained instance data checks
   do not bound transient allocations, ASTs, native callbacks or process RSS.
 - The managed-value storage and bytecode experiments remain prototypes.
-
-### Added
-
-- Rush `analyze` / `analyze_with` APIs for scoped duplicate declarations and immutable binding assignments, with bounded diagnostics.
-
 
 ### Changed
 
