@@ -116,7 +116,16 @@ impl<'s> Environment<'s> {
     }
     fn extend(&mut self, mut other: Self) -> std::result::Result<(), memory::AllocationError> {
         debug_assert!(other.parent.is_none());
-        self.bindings.reserve(other.bindings.len())?;
+        let additional = other
+            .bindings
+            .iter()
+            .filter(|(name, _)| {
+                self.bindings
+                    .binary_search_by_key(name, |(key, _)| *key)
+                    .is_err()
+            })
+            .count();
+        self.bindings.reserve(additional)?;
         while let Some((name, binding)) = other.bindings.pop() {
             self.insert_binding(name, binding)
                 .expect("extension capacity reserved");

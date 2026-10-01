@@ -1255,3 +1255,74 @@ fn every_environment_allocation_failure_preserves_instance_and_releases_storage(
     }
     assert!(completed && failures >= 4);
 }
+
+#[test]
+fn environment_budget_counts_shared_parents_and_snapshot_copy_separately() {
+    let slot = std::mem::size_of::<(&str, super::Binding<'_>)>();
+    let budget = Budget::new(slot * 2);
+    let mut parent = super::Environment::new(&budget);
+    parent.insert("x", super::Value::Number(1.0)).unwrap();
+    let parent = Rc::new(parent);
+    let child = super::Environment::child(parent.clone());
+    assert_eq!(budget.0.live.get(), slot);
+    let copy = parent.try_clone().unwrap();
+    assert_eq!(budget.0.live.get(), slot * 2);
+    assert!(matches!(parent.try_clone(), Err(AllocationError::Limit)));
+    assert_eq!(budget.0.live.get(), slot * 2);
+    drop(copy);
+    drop(parent);
+    assert_eq!(budget.0.live.get(), slot);
+    assert!(child.contains_key("x"));
+    drop(child);
+    assert_eq!(budget.0.live.get(), 0);
+}
+
+#[test]
+fn environment_extension_only_reserves_new_names_and_is_atomic_at_limit() {
+    let slot = std::mem::size_of::<(&str, super::Binding<'_>)>();
+    let budget = Budget::new(slot * 2);
+    let mut original = super::Environment::new(&budget);
+    original.insert("x", super::Value::Number(1.0)).unwrap();
+    let mut replacement = super::Environment::new(&budget);
+    replacement.insert("x", super::Value::Number(2.0)).unwrap();
+    // All capacity is occupied. Replacing an existing name still succeeds.
+    original.extend(replacement).unwrap();
+    assert_eq!(
+        original.get("x"),
+        Some(&super::Binding::Value(super::Value::Number(2.0)))
+    );
+    assert_eq!(budget.0.live.get(), slot);
+    let mut extra = super::Environment::new(&budget);
+    extra.insert("y", super::Value::Number(3.0)).unwrap();
+    assert_eq!(original.extend(extra), Err(AllocationError::Limit));
+    assert!(!original.contains_key("y"));
+    assert_eq!(
+        original.get("x"),
+        Some(&super::Binding::Value(super::Value::Number(2.0)))
+    );
+    assert_eq!(budget.0.live.get(), slot);
+    drop(original);
+    assert_eq!(budget.0.live.get(), 0);
+}
+
+#[test]
+fn returned_closure_keeps_capture_reservation_until_last_owner_drops() {
+    let program = super::Program::compile("let base=7; x => base+x").unwrap();
+    let token = super::CancellationToken::default();
+    let limits = super::ExecutionLimits::new(1000);
+    let instance = program
+        .instantiate(limits, &token, &[], &[], &[], &[])
+        .unwrap();
+    let ledger = instance.runtime.memory.0.clone();
+    let exported = instance.initial_value.clone();
+    drop(instance);
+    assert_eq!(
+        ledger.live.get(),
+        std::mem::size_of::<(&str, super::Binding<'_>)>()
+    );
+    let shared = exported.clone();
+    drop(exported);
+    assert!(ledger.live.get() > 0);
+    drop(shared);
+    assert_eq!(ledger.live.get(), 0);
+}
