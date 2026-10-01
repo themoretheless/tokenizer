@@ -26,6 +26,15 @@ use themoretheless_tokenizer::html;
 html::parse("<div/>"); // MarkupDoc AST
 ```
 
+## Rush
+
+Rush uses a dedicated grammar and borrowing AST, with `//`, `return`, and `.r`.
+`rush::parse` returns Rush's own `Parse` / `StmtKind` / `ExprKind`, preserving
+function signatures, block boundaries, loop headers, match arms and pipelines.
+It advertises `LEX|PARSE|SEMANTIC|VALIDATE`; validation covers the documented
+syntax and control-flow placement, not type checking or execution.
+See [the Rush grammar and migration notes](../crates/tokenizer-rush/README.md).
+
 ## Feature groups
 
 | Feature | Contents |
@@ -150,15 +159,15 @@ The partition is now:
 
 | advertised caps | engines | who |
 |-----------------|---------|-----|
-| `LEX|PARSE|SEMANTIC` | 49 | every `fullkit` wave language |
-| `LEX|PARSE|SEMANTIC|VALIDATE` | 18 | hand-written format engines |
+| `LEX|PARSE|SEMANTIC` | 48 | every `fullkit` wave language |
+| `LEX|PARSE|SEMANTIC|VALIDATE` | 19 | 18 hand-written format engines and Rush |
 | `LEX|PARSE|SEMANTIC|VALIDATE|CST|NAVIGATE|VISITOR` | 1 | `json` |
 | `LEX|VALIDATE` | 1 | `url` |
 
-i.e. **exactly the 20 formats advertise validation, and no language does** —
-pinned twice, by `only_format_engines_advertise_validate` in
+i.e. **the 20 formats and Rush advertise validation** —
+pinned twice, by `only_native_grammars_advertise_validate` in
 `tests/wiring_completeness.rs` against the registry, and by
-`only the format family advertises validation` plus
+`only native grammars advertise validation` plus
 `an engine that claims validation is quiet on valid input` in
 `playground/tests/catalog.test.js`: the second one replays all 73
 `expectValid: true` cases of the badge-holding engines and fails if any of them

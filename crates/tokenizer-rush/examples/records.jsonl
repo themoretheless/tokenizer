@@ -1,0 +1,4 @@
+{"group": "design", "amount": 12.5, "active": true}
+{"group": "engineering", "amount": 30, "active": true}
+{"group": "design", "amount": -2, "active": true}
+{"group": "archived", "amount": 100, "active": false}

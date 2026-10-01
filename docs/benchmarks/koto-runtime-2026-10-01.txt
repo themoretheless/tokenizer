@@ -1,0 +1,16 @@
+   Compiling rush-koto-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/koto-runtime)
+    Finished `release` profile [optimized] target(s) in 0.33s
+     Running `docs/benchmarks/koto-runtime/target/release/rush-koto-comparison`
+Koto 0.16.1 · macos aarch64 · default features; no execution budget; exports cleared per run
+Collection input items: 1000; verified expected sum: 333666
+7 samples, 10 warmups; VM construction excluded
+workload	operation	iterations/sample	min_us	median_us	max_us
+closure	compile	100	4.159	4.179	4.430
+closure	prepared_run	100	0.255	0.255	0.269
+closure	compile_and_run	100	4.457	4.470	4.504
+collections	compile	100	9.767	9.926	10.025
+collections	prepared_run	100	311.546	314.529	319.032
+collections	compile_and_run	100	326.208	330.335	331.697
+collections_lazy	compile	100	8.893	8.945	9.263
+collections_lazy	prepared_run	100	279.317	283.151	288.624
+collections_lazy	compile_and_run	100	289.316	290.636	291.261

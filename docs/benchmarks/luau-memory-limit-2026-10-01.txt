@@ -1,0 +1,6 @@
+   Compiling rush-luau-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/luau-runtime)
+    Finished `release` profile [optimized] target(s) in 0.35s
+     Running `docs/benchmarks/luau-runtime/target/release/rush-luau-memory-limit`
+rush-luau-comparison; allocator memory bytes, not RSS or host allocations
+baseline	limit	after_failure	after_cleanup	reuse_result
+452576	714720	714384	403496	3

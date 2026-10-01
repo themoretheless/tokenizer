@@ -74,7 +74,141 @@ fn success_payload(
             diagnostic.span.end,
         );
     }
-    output.push_str("]}");
+    output.push(']');
+    #[cfg(feature = "rush")]
+    if language == "rush" {
+        let names = themoretheless_tokenizer_rush::analyze_names(source, &[]);
+        let calls = themoretheless_tokenizer_rush::analyze_calls(source);
+        output.push_str(",\"executionDiagnostics\":[");
+        let mut emitted = Vec::new();
+        for diagnostic in names.diagnostics.iter().chain(&calls.diagnostics) {
+            let key = (diagnostic.code, diagnostic.span);
+            if emitted.contains(&key)
+                || result
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.code.as_ref() == diagnostic.code && d.span == diagnostic.span.into())
+            {
+                continue;
+            }
+            if !emitted.is_empty() {
+                output.push(',');
+            }
+            push_diagnostic(
+                &mut output,
+                diagnostic.code,
+                diagnostic.message,
+                diagnostic.span.start,
+                diagnostic.span.end,
+            );
+            emitted.push(key);
+        }
+        output.push(']');
+        let editor = themoretheless_tokenizer_rush::analyze_editor_details(source);
+        let references = editor.references;
+        let bindings = editor.bindings;
+        output.push_str(",\"memberCompletions\":[");
+        for (index, completion) in editor.member_completions.iter().enumerate() {
+            if index > 0 {
+                output.push(',');
+            }
+            let _ = write!(
+                output,
+                "{{\"start\":{},\"end\":{},\"members\":[",
+                completion.name_span.start, completion.name_span.end
+            );
+            for (index, member) in completion.members.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(&json_string(member));
+            }
+            output.push_str("]}");
+        }
+        output.push(']');
+        output.push_str(",\"builtins\":[");
+        for (index, (name, builtin)) in themoretheless_tokenizer_rush::builtin_catalog()
+            .iter()
+            .enumerate()
+        {
+            if index != 0 {
+                output.push(',');
+            }
+            let arity = builtin.arity();
+            let _ = write!(
+                output,
+                "{{\"name\":{},\"minArgs\":{},\"maxArgs\":{}}}",
+                json_string(name),
+                arity.start(),
+                arity.end()
+            );
+        }
+        output.push(']');
+        output.push_str(",\"bindings\":[");
+        for (index, binding) in bindings.iter().enumerate() {
+            if index != 0 {
+                output.push(',');
+            }
+            let _ = write!(
+                output,
+                "{{\"name\":{},\"kind\":\"binding\",\"start\":{},\"end\":{},\"depth\":{},\"definition\":{{\"start\":{},\"end\":{}}}}}",
+                json_string(&binding.name),
+                binding.visible.start,
+                binding.visible.end,
+                binding.depth,
+                binding.definition.start,
+                binding.definition.end
+            );
+            output.pop();
+            output.push_str(",\"members\":[");
+            for (index, member) in binding.members.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(&json_string(member));
+            }
+            output.push_str("],\"memberPaths\":{");
+            for (index, (path, members)) in binding.member_paths.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(&json_string(path));
+                output.push_str(":[");
+                for (index, member) in members.iter().enumerate() {
+                    if index > 0 {
+                        output.push(',');
+                    }
+                    output.push_str(&json_string(member));
+                }
+                output.push(']');
+            }
+            output.push_str("}}");
+        }
+        output.push(']');
+        output.push_str(",\"references\":[");
+        for (index, reference) in references.iter().enumerate() {
+            if index != 0 {
+                output.push(',');
+            }
+            let _ = write!(
+                output,
+                "{{\"start\":{},\"end\":{},\"definition\":",
+                reference.usage.start, reference.usage.end
+            );
+            if let Some(definition) = reference.definition {
+                let _ = write!(
+                    output,
+                    "{{\"start\":{},\"end\":{}}}",
+                    definition.start, definition.end
+                );
+            } else {
+                output.push_str("null");
+            }
+            output.push('}');
+        }
+        output.push(']');
+    }
+    output.push('}');
     output
 }
 
@@ -248,6 +382,108 @@ fn push_json_string(output: &mut String, value: &str) {
         }
     }
     output.push('"');
+}
+
+/// Execute Rush with a fixed budget for playground adapters.
+#[must_use]
+pub fn execute_rush(source: &str) -> String {
+    #[cfg(feature = "rush")]
+    {
+        use themoretheless_tokenizer_rush::{CancellationToken, ExecutionLimits, Program, Value};
+        let limits = ExecutionLimits {
+            max_collection_items: 10_000,
+            max_string_bytes: 65_536,
+            ..ExecutionLimits::new(100_000)
+        };
+        let result = Program::compile(source).and_then(|program| {
+            program.run_with_limits(limits, &CancellationToken::default(), &[], &[], &[])
+        });
+        match result {
+            Ok(value) => {
+                let (kind, output) = match value {
+                    Value::Polygon(polygon) => {
+                        match bounded_rush_output(|output| polygon.write_svg(output)) {
+                            Ok(svg) => ("svg", svg),
+                            Err("SVG output write failed") => {
+                                return rush_export_error(
+                                    "output-limit",
+                                    "SVG output byte limit exceeded",
+                                );
+                            }
+                            Err(message) => return rush_export_error("export-error", message),
+                        }
+                    }
+                    Value::Mesh(mesh) => match bounded_rush_output(|output| mesh.write_obj(output))
+                    {
+                        Ok(obj) => ("obj", obj),
+                        Err(_) => {
+                            return rush_export_error(
+                                "output-limit",
+                                "OBJ output byte limit exceeded",
+                            );
+                        }
+                    },
+                    value => match bounded_rush_output(|output| write!(output, "{value:?}")) {
+                        Ok(text) => ("text", text),
+                        Err(_) => {
+                            return rush_export_error(
+                                "output-limit",
+                                "Text output byte limit exceeded",
+                            );
+                        }
+                    },
+                };
+                format!(
+                    "{{\"ok\":true,\"kind\":{},\"output\":{}}}",
+                    json_string(kind),
+                    json_string(&output)
+                )
+            }
+            Err(error) => format!(
+                "{{\"ok\":false,\"error\":{},\"start\":{},\"end\":{}}}",
+                json_string(&error.message),
+                error.span.start,
+                error.span.end
+            ),
+        }
+    }
+    #[cfg(not(feature = "rush"))]
+    {
+        let _ = source;
+        protocol_error("unsupported-language", "Rush is not enabled in this build")
+    }
+}
+
+#[cfg(feature = "rush")]
+fn bounded_rush_output<E>(
+    write: impl FnOnce(&mut StringOutput) -> Result<(), E>,
+) -> Result<String, E> {
+    let mut output = StringOutput(String::new());
+    write(&mut output)?;
+    Ok(output.0)
+}
+
+#[cfg(feature = "rush")]
+struct StringOutput(String);
+#[cfg(feature = "rush")]
+impl std::fmt::Write for StringOutput {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        const MAX_BYTES: usize = 1_048_576;
+        if text.len() > MAX_BYTES.saturating_sub(self.0.len()) {
+            return Err(std::fmt::Error);
+        }
+        self.0.push_str(text);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "rush")]
+fn rush_export_error(code: &str, message: &str) -> String {
+    format!(
+        "{{\"ok\":false,\"code\":{},\"error\":{}}}",
+        json_string(code),
+        json_string(message)
+    )
 }
 
 #[cfg(test)]

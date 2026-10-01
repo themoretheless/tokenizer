@@ -1,0 +1,49 @@
+    Updating crates.io index
+    Blocking waiting for file lock on package cache
+     Locking 45 packages to highest Rust 1.101.0-nightly compatible versions
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+ Downloading crates ...
+  Downloaded thin-vec v0.2.20
+  Downloaded rhai_codegen v3.2.0
+  Downloaded smartstring v1.0.1
+  Downloaded rhai v1.26.1
+   Compiling libc v0.2.189
+   Compiling crunchy v0.2.4
+   Compiling version_check v0.9.5
+   Compiling autocfg v1.5.1
+   Compiling proc-macro2 v1.0.107
+   Compiling tiny-keccak v2.0.2
+   Compiling cfg-if v1.0.5
+   Compiling quote v1.0.47
+   Compiling portable-atomic v1.15.0
+   Compiling unicode-ident v1.0.26
+   Compiling zerocopy v0.8.59
+   Compiling getrandom v0.3.4
+   Compiling once_cell v1.21.4
+   Compiling static_assertions v1.1.0
+   Compiling thin-vec v0.2.20
+   Compiling smallvec v1.16.2
+   Compiling bitflags v2.13.2
+   Compiling ahash v0.8.12
+   Compiling num-traits v0.2.19
+   Compiling smartstring v1.0.1
+   Compiling getrandom v0.2.17
+   Compiling const-random-macro v0.1.16
+   Compiling const-random v0.1.18
+   Compiling syn v2.0.119
+   Compiling rhai_codegen v3.2.0
+   Compiling rhai v1.26.1
+   Compiling rush-rhai-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/rhai-runtime)
+    Finished `release` profile [optimized] target(s) in 22.56s
+     Running `docs/benchmarks/rhai-runtime/target/release/rush-rhai-comparison`
+Rhai · macos aarch64 · default features; max operations 200000
+Collection input items: 1000; verified expected sum: 333666
+7 samples, 10 warmup operations; engine construction excluded
+workload	operation	iterations/sample	min_us	median_us	max_us
+closure	compile	100	4.461	4.510	4.734
+closure	prepared_run	100	0.813	0.815	0.857
+closure	compile_and_run	100	5.439	5.452	6.223
+collections	compile	100	7.405	7.505	7.964
+collections	prepared_run	100	715.715	830.701	2781.561
+collections	compile_and_run	100	733.616	750.468	759.069

@@ -1,0 +1,29 @@
+    Finished `release` profile [optimized] target(s) in 0.02s
+     Running `docs/benchmarks/koto-runtime/target/release/timeout`
+Koto 0.16.1; blocking_host; execution limit 5ms; 25 samples after 3 warmups; elapsed run time, not request latency
+sample	run_us	reuse_result
+0	30296.417	3
+1	30302.500	3
+2	29692.375	3
+3	30294.916	3
+4	30290.084	3
+5	28929.250	3
+6	30289.167	3
+7	30298.791	3
+8	30287.083	3
+9	30300.583	3
+10	30298.584	3
+11	25411.084	3
+12	30295.667	3
+13	30292.292	3
+14	30302.958	3
+15	28992.417	3
+16	30288.125	3
+17	30294.959	3
+18	30292.833	3
+19	30310.417	3
+20	30300.292	3
+21	29214.500	3
+22	30295.708	3
+23	30296.041	3
+24	30293.917	3

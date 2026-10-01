@@ -1,0 +1,5 @@
+Nushell 0.107.0; N=1000; no execution budget; timeit loop includes do/ignore overhead
+workload	operation	iterations/sample	min_us	median_us	max_us
+closure	prepared_run	100	3.26875	3.68458	4.78292
+collections	prepared_run	100	1114.91875	1119.77083	1131.60084
+collections_lazy	prepared_run	100	1122.63083	1130.53166	1137.52292

@@ -1,0 +1,53 @@
+Scenario: branches; map=(if x%2==0 { x*2 } else { x }); filter=x%3==0 and x<15000
+Scalar dispatch experiment; 10 warmups, 8 alternating samples; 100 pipelines/sample
+Predecoded constants and positional parameters in BOTH engines; reused VM stacks
+Tree is lowered scalar AST, not general Rush runtime; no closures/host/collections in either engine
+items	engine	sample	us_per_pipeline	verified_sum
+100	lowered_tree	0	8.068	2499
+100	bytecode	0	6.146	2499
+100	bytecode	1	6.032	2499
+100	lowered_tree	1	8.057	2499
+100	lowered_tree	2	8.146	2499
+100	bytecode	2	6.028	2499
+100	bytecode	3	6.037	2499
+100	lowered_tree	3	7.964	2499
+100	lowered_tree	4	8.016	2499
+100	bytecode	4	6.032	2499
+100	bytecode	5	6.133	2499
+100	lowered_tree	5	8.294	2499
+100	lowered_tree	6	7.980	2499
+100	bytecode	6	5.571	2499
+100	bytecode	7	5.998	2499
+100	lowered_tree	7	7.982	2499
+1000	lowered_tree	0	90.612	249999
+1000	bytecode	0	71.086	249999
+1000	bytecode	1	71.237	249999
+1000	lowered_tree	1	90.159	249999
+1000	lowered_tree	2	89.155	249999
+1000	bytecode	2	69.115	249999
+1000	bytecode	3	68.897	249999
+1000	lowered_tree	3	90.930	249999
+1000	lowered_tree	4	89.688	249999
+1000	bytecode	4	68.863	249999
+1000	bytecode	5	69.610	249999
+1000	lowered_tree	5	90.514	249999
+1000	lowered_tree	6	90.175	249999
+1000	bytecode	6	70.174	249999
+1000	bytecode	7	67.808	249999
+1000	lowered_tree	7	90.336	249999
+10000	lowered_tree	0	968.430	17704167
+10000	bytecode	0	767.620	17704167
+10000	bytecode	1	757.425	17704167
+10000	lowered_tree	1	962.602	17704167
+10000	lowered_tree	2	966.850	17704167
+10000	bytecode	2	762.619	17704167
+10000	bytecode	3	763.196	17704167
+10000	lowered_tree	3	968.846	17704167
+10000	lowered_tree	4	969.634	17704167
+10000	bytecode	4	761.019	17704167
+10000	bytecode	5	758.605	17704167
+10000	lowered_tree	5	968.550	17704167
+10000	lowered_tree	6	967.084	17704167
+10000	bytecode	6	776.705	17704167
+10000	bytecode	7	767.671	17704167
+10000	lowered_tree	7	969.948	17704167

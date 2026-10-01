@@ -1,0 +1,13 @@
+CPython 3.14.7 · macOS-26.7-arm64-arm-64bit-Mach-O
+Collection input items: 1000; verified expected sum: 333666
+7 samples, 10 warmup operations; floating-point elements; no execution budget
+workload	operation	iterations/sample	min_us	median_us	max_us
+closure	compile	100	15.340	15.958	16.932
+closure	prepared_run	100	0.283	0.323	2.094
+closure	compile_and_run	100	16.314	16.819	18.244
+collections	compile	100	32.965	33.930	35.704
+collections	prepared_run	100	93.961	95.120	96.572
+collections	compile_and_run	100	129.903	131.334	132.421
+collections_lazy	compile	100	28.111	29.119	30.045
+collections_lazy	prepared_run	100	82.819	83.578	96.045
+collections_lazy	compile_and_run	100	112.713	114.639	117.239

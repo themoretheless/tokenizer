@@ -1,0 +1,28 @@
+Preparing a sysroot for Miri (target: aarch64-apple-darwin)... done
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling serde_json v1.0.151
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.18
+   Compiling themoretheless-tokenizer-core v0.4.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-core)
+   Compiling themoretheless-tokenizer-rush v0.4.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.66s
+     Running unittests src/lib.rs (/tmp/rush-managed-memory-miri/miri/aarch64-apple-darwin/debug/build/themoretheless-tokenizer-rush/b86de19e11ea954a/out/themoretheless_tokenizer_rush-b86de19e11ea954a)
+
+running 13 tests
+test runtime::memory::aggregate_limit_is_atomic_and_released_capacity_can_be_reused ... ok
+test runtime::memory::arithmetic_overflow_does_not_corrupt_reservations ... ok
+test runtime::memory::byte_copies_reserve_separately_and_empty_storage_needs_no_allocation ... ok
+test runtime::memory::byte_growth_accounts_for_copy_peak_and_preserves_original_on_failure ... ok
+test runtime::memory::geometry_uses_the_same_budget_and_mesh_failure_releases_vertices ... ok
+test runtime::memory::managed_copy_preserves_source_on_failure_and_charges_destination_budget ... ok
+test runtime::memory::managed_data_imports_runtime_results_and_releases_all_nested_storage ... ok
+test runtime::memory::shared_allocation_outlives_budget_handle_until_its_last_owner_drops ... ok
+test runtime::memory::transfer_budget_and_cancellation_release_partial_data ... ok
+test runtime::memory::typed_storage_handles_alignment_zero_size_and_overflow ... ok
+test runtime::memory::typed_storage_moves_values_and_releases_nested_allocations ... ok
+test runtime::memory::typed_storage_releases_reservation_when_element_drop_unwinds ... ok
+test runtime::memory::unsupported_and_deep_data_fail_without_leaving_allocations ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.94s
+

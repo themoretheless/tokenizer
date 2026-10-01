@@ -6,6 +6,45 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-01
+
+### Added
+
+- Rush execution with closures, lazy collections, modules, typed host callbacks,
+  cancellation, and persistent script instances.
+- Vector, matrix, quaternion and angle operations, polygon and mesh generation,
+  and SVG/OBJ export.
+- Editor name resolution, completion and diagnostics using the host function
+  catalog, plus isolated WASM execution in the playground.
+- Fallible allocation for mutable-cell storage and reclamation queues.
+
+### Limitations
+
+- General live-heap limiting remains unfinished. Retained instance data checks
+  do not bound transient allocations, ASTs, native callbacks or process RSS.
+- The managed-value storage and bytecode experiments remain prototypes.
+
+### Added
+
+- Rush `analyze` / `analyze_with` APIs for scoped duplicate declarations and immutable binding assignments, with bounded diagnostics.
+
+
+### Changed
+
+- Rush now has a dedicated lexer, recovering parser and syntax validation.
+  Blocks respect indentation/newlines; functions preserve signatures, loops
+  preserve bindings, and pipelines/match expressions have explicit AST nodes.
+  **API change:** `rush::parse` returns Rush's own `Parse`, `StmtKind` and
+  `ExprKind`, replacing the generic fullkit AST. See the Rush README.
+- Rush diagnostics now cover missing expressions, malformed blocks and invalid
+  control-flow placement, and respect host analysis limits. Both token layers
+  report the same syntax validity. Reserved async syntax is rejected; imports use the host module resolver.
+
+## [0.6.0]
+
+Changes already included in the v0.6.0 Git release; Cargo package versions
+are synchronized with Git releases starting at 0.7.0.
+
 ### Added
 
 - Format family as first-class core data: `core::family` (`Family`,
@@ -369,7 +408,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Initial dependency-free JSON tokenizer with UTF-8 byte spans, diagnostics,
   semantic token categories, and the `JsonTokenizer` compatibility facade.
 
-[Unreleased]: https://github.com/themoretheless/tokenizer/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/themoretheless/tokenizer/compare/v0.7.0...HEAD
+[0.6.0]: https://github.com/themoretheless/tokenizer/compare/v0.4.0...v0.6.0
+[0.7.0]: https://github.com/themoretheless/tokenizer/compare/v0.6.0...v0.7.0
 [0.4.0]: https://github.com/themoretheless/tokenizer/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/themoretheless/tokenizer/compare/v0.2.0...v0.3.1
 [0.2.0]: https://github.com/themoretheless/tokenizer/compare/v0.1.0...v0.2.0

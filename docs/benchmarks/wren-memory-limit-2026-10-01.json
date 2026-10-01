@@ -1,0 +1,20 @@
+{
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "version": "Wren 0.4.0",
+  "executable_sha256": "602d5214fd7665d8e01358ad4e636b6e02601c2d2757b14c3a28661e895cb7cb",
+  "method": "Requested VM allocation bytes; headers, host allocations and RSS excluded. Prepared call with baseline + 256 KiB cap; NULL on rejected allocation. Each scenario uses a separate process with core dumps disabled.",
+  "runs": [
+    {
+      "mode": "unlimited",
+      "returncode": 0,
+      "stdout": "baseline=126933 peak=978213 after_free=0 result=10000\n",
+      "stderr": "call_returned result=0\n"
+    },
+    {
+      "mode": "capped",
+      "returncode": -11,
+      "stdout": "",
+      "stderr": "allocator_denied live=389069 request=32 previous=16 limit=389077\n"
+    }
+  ]
+}

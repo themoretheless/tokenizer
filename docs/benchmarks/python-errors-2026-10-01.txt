@@ -1,0 +1,28 @@
+CPython 3.14.7: syntax/runtime/host diagnostics and interpreter reuse passed
+SYNTAX
+Traceback (most recent call last):
+  File "/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/python-errors.py", line 19, in main
+    compile('value =\n', 'syntax-case.py', 'exec')
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "syntax-case.py", line 1
+    value =
+           ^
+SyntaxError: invalid syntax
+
+runtime-case.py
+Traceback (most recent call last):
+  File "/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/python-errors.py", line 32, in main
+    exec(program, environment)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "runtime-case.py", line 2, in <module>
+AttributeError: 'NoneType' object has no attribute 'missing'
+
+host-case.py
+Traceback (most recent call last):
+  File "/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/python-errors.py", line 32, in main
+    exec(program, environment)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "host-case.py", line 1, in <module>
+  File "/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/python-errors.py", line 9, in host_fail
+    raise HostError('host rejected operation')
+HostError: host rejected operation

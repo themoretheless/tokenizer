@@ -1,0 +1,147 @@
+2026-10-01 macOS allocator/RSS follow-up; inherited MallocNanoZone=0
+Runtime SHA256: a3b1ef0f480534b2be6ac930eeeee84861922f592b91f1960a4b068f3090eb23
+
+RSS
+CASE collections OPERATION verify
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · one verified execution, no warmup
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections	verify	1	359631.792	359631.792	359631.792
+        0.36 real         0.35 user         0.00 sys
+            96911360  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                6092  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 141  involuntary context switches
+          8576992308  instructions retired
+          1419206039  cycles elapsed
+            96043392  peak memory footprint
+CASE collections OPERATION prepared_run
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections	prepared_run	1	355283.583	369396.500	385175.875
+        6.53 real         6.39 user         0.11 sys
+          1686454272  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              103112  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                2686  involuntary context switches
+        153972107479  instructions retired
+         25579432263  cycles elapsed
+          1686488744  peak memory footprint
+CASE collections_lazy OPERATION verify
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · one verified execution, no warmup
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	verify	1	337554.417	337554.417	337554.417
+        0.34 real         0.33 user         0.00 sys
+             2064384  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                 305  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 126  involuntary context switches
+          8105373595  instructions retired
+          1339733266  cycles elapsed
+             1130784  peak memory footprint
+CASE collections_lazy OPERATION prepared_run
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	prepared_run	1	363762.834	373110.708	378414.750
+        6.43 real         6.39 user         0.01 sys
+             2326528  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                 319  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                2694  involuntary context switches
+        145485204066  instructions retired
+         25192437515  cycles elapsed
+             1392928  peak memory footprint
+
+Allocator without relief
+   Compiling themoretheless-tokenizer-rush v0.4.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `bench` profile [optimized] target(s) in 0.32s
+     Running benches/allocator.rs (target/release/build/themoretheless-tokenizer-rush/f1359c2fb622bfdf/out/allocator-f1359c2fb622bfdf)
+lazy=false; relief=false; 1000000 items; 18 verified runs
+run	blocks_in_use	bytes_in_use	bytes_reserved	bytes_released
+0	226	19424	8388608	0
+1	226	19424	16777216	0
+2	226	19424	25165824	0
+3	226	19424	29360128	0
+4	226	19424	29360128	0
+5	226	19424	29360128	0
+6	226	19424	29360128	0
+7	226	19424	29360128	0
+8	226	19424	29360128	0
+9	226	19424	29360128	0
+10	226	19424	29360128	0
+11	226	19424	29360128	0
+12	226	19424	29360128	0
+13	226	19424	29360128	0
+14	226	19424	29360128	0
+15	226	19424	29360128	0
+16	226	19424	29360128	0
+17	226	19424	29360128	0
+18	226	19424	29360128	0
+
+Allocator with relief
+    Finished `bench` profile [optimized] target(s) in 0.01s
+     Running benches/allocator.rs (target/release/build/themoretheless-tokenizer-rush/f1359c2fb622bfdf/out/allocator-f1359c2fb622bfdf)
+lazy=false; relief=true; 1000000 items; 18 verified runs
+run	blocks_in_use	bytes_in_use	bytes_reserved	bytes_released
+0	226	19424	12582912	0
+1	226	19424	29360128	0
+2	226	19424	29360128	0
+3	226	19424	29360128	0
+4	226	19424	29360128	0
+5	226	19424	29360128	0
+6	226	19424	29360128	0
+7	226	19424	29360128	0
+8	226	19424	29360128	0
+9	226	19424	29360128	0
+10	226	19424	29360128	0
+11	226	19424	29360128	0
+12	226	19424	29360128	0
+13	226	19424	29360128	0
+14	226	19424	29360128	0
+15	226	19424	29360128	0
+16	226	19424	29360128	0
+17	226	19424	29360128	0
+18	226	19424	29360128	0

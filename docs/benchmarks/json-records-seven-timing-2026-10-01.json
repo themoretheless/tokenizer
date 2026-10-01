@@ -1,0 +1,1587 @@
+{
+  "date": "2026-10-01T08:48:49.831426+00:00",
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "method": "whole process; warm filesystem cache; 2 warmups, 14 cyclic rounds",
+  "engines": [
+    "Rush",
+    "CPython",
+    "Lua",
+    "Luau",
+    "Rhai",
+    "Koto",
+    "Wren"
+  ],
+  "possible_groups": 10,
+  "rss": false,
+  "runs": [
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 6.727083,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 67.605958,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 5.589667,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 7.844,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 6.45025,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 8.5205,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 6.194375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 66.9125,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 5.526291,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 7.071791,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 6.029833,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 7.815542,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 5.317375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 5.8985,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 6.067708,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 7.076875,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 6.633833,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 7.427375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 5.715209,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 6.442583,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 66.061375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 6.7455,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 6.83875,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 7.748208,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 5.631583,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 5.73575,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 65.412083,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 6.110625,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 6.48575,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 7.710709,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 5.634792,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 6.218583,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 76.769292,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 5.686333,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 7.329875,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 7.760625,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 6.079833,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 5.924458,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 67.0325,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 6.2915,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 6.872792,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 6.774541,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 5.796917,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 6.089875,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 67.660333,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 5.568625,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 6.823333,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 6.433375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 7.834917,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 6.35975,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 67.672292,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 6.124584,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 7.196458,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 6.832541,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 7.782166,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 5.902667,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 65.6,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 5.859708,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 6.816917,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 6.841208,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 7.794917,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 5.771416,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 5.934375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 5.32475,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 6.74225,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 6.17475,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 7.937333,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 5.43175,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 5.774125,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 65.320084,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 7.179125,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 6.645875,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 8.725,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 6.432,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 5.567125,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 65.046667,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 5.574083,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 6.355333,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 7.851458,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 5.737666,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 5.799334,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 63.55075,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 5.305,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 7.157208,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 12,
+      "milliseconds": 7.703833,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 12,
+      "milliseconds": 6.001333,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 12,
+      "milliseconds": 5.624125,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 12,
+      "milliseconds": 62.720041,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 12,
+      "milliseconds": 5.122042,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 12,
+      "milliseconds": 6.680875,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 12,
+      "milliseconds": 6.487291,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 1000,
+      "round": 13,
+      "milliseconds": 5.279375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 13,
+      "milliseconds": 5.359791,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 13,
+      "milliseconds": 62.659583,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 13,
+      "milliseconds": 5.166083,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 13,
+      "milliseconds": 7.783167,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 13,
+      "milliseconds": 6.431334,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 13,
+      "milliseconds": 7.768167,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 19.819833,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 75.643125,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 14.127917,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 16.322667,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 21.859875,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 19.885875,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 12.864875,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 84.485833,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 15.192208,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 16.170042,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 23.443333,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 20.274792,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 13.415,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 20.117792,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 14.134667,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 15.309125,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 22.497167,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 19.639625,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 11.727,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 19.029291,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 75.292417,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 14.883084,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 20.361125,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 18.319458,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 11.951,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 20.039042,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 77.993833,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 13.45825,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 21.280375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 19.3015,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 12.007875,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 19.138,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 75.717,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 12.823666,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 15.975208,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 18.181167,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 11.618625,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 18.837375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 76.002584,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 13.813625,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 14.904042,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 20.801041,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 12.926792,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 19.365625,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 76.74425,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 13.380375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 15.029291,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 21.16025,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 18.38425,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 19.650125,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 75.21325,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 12.850709,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 14.489916,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 21.541042,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 19.108375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 12.04925,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 76.434041,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 13.117834,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 14.776375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 21.295834,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 19.159084,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 12.02375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 19.174209,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 12.636709,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 15.18675,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 20.729709,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 18.890208,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 11.877208,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 19.319209,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 79.208041,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 15.0265,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 21.82875,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 19.827625,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 12.745083,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 20.173125,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 76.374833,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 13.068875,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 21.17675,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 19.530583,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 12.408125,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 19.736667,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 79.596375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 13.544125,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 15.335333,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 12,
+      "milliseconds": 20.307333,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 12,
+      "milliseconds": 13.144667,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 12,
+      "milliseconds": 19.679916,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 12,
+      "milliseconds": 76.438375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 12,
+      "milliseconds": 13.091209,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 12,
+      "milliseconds": 15.070333,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 12,
+      "milliseconds": 20.580375,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Wren",
+      "items": 10000,
+      "round": 13,
+      "milliseconds": 11.283625,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 13,
+      "milliseconds": 19.690666,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 13,
+      "milliseconds": 76.489167,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 13,
+      "milliseconds": 12.878542,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 13,
+      "milliseconds": 15.0825,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 13,
+      "milliseconds": 21.8355,
+      "verified": true,
+      "result_groups": 10
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 13,
+      "milliseconds": 18.268584,
+      "verified": true,
+      "result_groups": 10
+    }
+  ]
+}

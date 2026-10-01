@@ -1,0 +1,170 @@
+{
+  "method": "functional parity; no timings",
+  "cases": [
+    {
+      "case": "empty",
+      "accepted": true,
+      "expected": [],
+      "rush_stderr": "",
+      "nushell_verified": true,
+      "nushell_stderr": ""
+    },
+    {
+      "case": "unicode-order-filter",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "Б\"\n",
+          "total": 1.5
+        },
+        {
+          "group": "next",
+          "total": -4.0
+        }
+      ],
+      "rush_stderr": "",
+      "nushell_verified": true,
+      "nushell_stderr": ""
+    },
+    {
+      "case": "inactive",
+      "accepted": true,
+      "expected": [],
+      "rush_stderr": "",
+      "nushell_verified": true,
+      "nushell_stderr": ""
+    },
+    {
+      "case": "zero",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 0.0
+        }
+      ],
+      "rush_stderr": "",
+      "nushell_verified": true,
+      "nushell_stderr": ""
+    },
+    {
+      "case": "not-array",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Input must be an array\"\n",
+      "nushell_verified": true,
+      "nushell_stderr": "Error: nu::shell::error\n\n  x Input must be an array\n    ,-[/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/nushell-records.nu:11:5]\n 10 |   if not (($rows | describe) =~ '^(list|table)') {\n 11 |     error make {msg: 'Input must be an array'}\n    :     ^^^^^|^^^^\n    :          `-- originates from here\n 12 |   }\n    `----\n\n"
+    },
+    {
+      "case": "missing-field",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: active must be boolean\"\n",
+      "nushell_verified": true,
+      "nushell_stderr": "Error: nu::shell::eval_block_with_input\n\n  x Eval block failed with pipeline input\n    ,-[/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/nushell-records.nu:9:15]\n  8 | def main [input: path] {\n  9 |   let rows = (open --raw $input | from json)\n    :               ^^|^\n    :                 `-- source value\n 10 |   if not (($rows | describe) =~ '^(list|table)') {\n    `----\n\nError: nu::shell::column_not_found\n\n  x Cannot find column 'active'\n    ,-[/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/nushell-records.nu:17:9]\n 16 |     if not (($row.amount | describe) in ['int' 'float']) { error make {msg: 'amount must be numeric'} }\n 17 |     if ($row.active | describe) != 'bool' { error make {msg: 'active must be boolean'} }\n    :         ^^|^ ^^^|^^\n    :           |     `-- cannot find column 'active'\n    :           `-- value originates here\n 18 |     {group: $row.group, amount: (finite ($row.amount | into float)), active: $row.active}\n    `----\n\n"
+    },
+    {
+      "case": "boolean-amount",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: amount must be finite\"\n",
+      "nushell_verified": true,
+      "nushell_stderr": "Error: nu::shell::eval_block_with_input\n\n  x Eval block failed with pipeline input\n    ,-[/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/nushell-records.nu:9:15]\n  8 | def main [input: path] {\n  9 |   let rows = (open --raw $input | from json)\n    :               ^^|^\n    :                 `-- source value\n 10 |   if not (($rows | describe) =~ '^(list|table)') {\n    `----\n\nError: \n  x amount must be numeric\n    ,-[/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/nushell-records.nu:16:60]\n 15 |     if ($row.group | describe) != 'string' { error make {msg: 'group must be string'} }\n 16 |     if not (($row.amount | describe) in ['int' 'float']) { error make {msg: 'amount must be numeric'} }\n    :                                                            ^^^^^|^^^^\n    :                                                                 `-- originates from here\n 17 |     if ($row.active | describe) != 'bool' { error make {msg: 'active must be boolean'} }\n    `----\n\n"
+    },
+    {
+      "case": "string-amount",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: amount must be finite\"\n",
+      "nushell_verified": true,
+      "nushell_stderr": "Error: nu::shell::eval_block_with_input\n\n  x Eval block failed with pipeline input\n    ,-[/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/nushell-records.nu:9:15]\n  8 | def main [input: path] {\n  9 |   let rows = (open --raw $input | from json)\n    :               ^^|^\n    :                 `-- source value\n 10 |   if not (($rows | describe) =~ '^(list|table)') {\n    `----\n\nError: \n  x amount must be numeric\n    ,-[/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/nushell-records.nu:16:60]\n 15 |     if ($row.group | describe) != 'string' { error make {msg: 'group must be string'} }\n 16 |     if not (($row.amount | describe) in ['int' 'float']) { error make {msg: 'amount must be numeric'} }\n    :                                                            ^^^^^|^^^^\n    :                                                                 `-- originates from here\n 17 |     if ($row.active | describe) != 'bool' { error make {msg: 'active must be boolean'} }\n    `----\n\n"
+    },
+    {
+      "case": "inactive-invalid",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: amount must be finite\"\n",
+      "nushell_verified": true,
+      "nushell_stderr": "Error: nu::shell::eval_block_with_input\n\n  x Eval block failed with pipeline input\n    ,-[/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/nushell-records.nu:9:15]\n  8 | def main [input: path] {\n  9 |   let rows = (open --raw $input | from json)\n    :               ^^|^\n    :                 `-- source value\n 10 |   if not (($rows | describe) =~ '^(list|table)') {\n    `----\n\nError: \n  x amount must be numeric\n    ,-[/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/nushell-records.nu:16:60]\n 15 |     if ($row.group | describe) != 'string' { error make {msg: 'group must be string'} }\n 16 |     if not (($row.amount | describe) in ['int' 'float']) { error make {msg: 'amount must be numeric'} }\n    :                                                            ^^^^^|^^^^\n    :                                                                 `-- originates from here\n 17 |     if ($row.active | describe) != 'bool' { error make {msg: 'active must be boolean'} }\n    `----\n\n"
+    },
+    {
+      "case": "overflow",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Non-finite arithmetic result\"\n",
+      "nushell_verified": true,
+      "nushell_stderr": "Error: nu::shell::eval_block_with_input\n\n  x Eval block failed with pipeline input\n    ,-[/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/nushell-records.nu:20:46]\n 19 |   } | collect)\n 20 |   $checked | where active | group-by group | transpose group rows | each {|entry|\n    :                                              ^^^^|^^^^\n    :                                                  `-- source value\n 21 |     let total = ($entry.rows | get amount | reduce --fold 0.0 {|x, total| finite ($total + $x)})\n    `----\n\nError: \n  x number must be finite\n   ,-[/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/nushell-records.nu:4:5]\n 3 |   if ($value != $value) or (($value | math abs) > 1.7976931348623157e308) {\n 4 |     error make {msg: 'number must be finite'}\n   :     ^^^^^|^^^^\n   :          `-- originates from here\n 5 |   }\n   `----\n\n"
+    },
+    {
+      "case": "row-limit",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"At most 1000 rows are allowed\"\n",
+      "nushell_verified": true,
+      "nushell_stderr": "Error: nu::shell::error\n\n  x At most 1000 rows\n    ,-[/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/nushell-records.nu:13:32]\n 12 |   }\n 13 |   if ($rows | length) > 1000 { error make {msg: 'At most 1000 rows'} }\n    :                                ^^^^^|^^^^\n    :                                     `-- originates from here\n 14 |   let checked = ($rows | each {|row|\n    `----\n\n"
+    },
+    {
+      "case": "jsonl-empty",
+      "accepted": true,
+      "expected": [],
+      "rush_stderr": ""
+    },
+    {
+      "case": "jsonl-crlf-final-no-newline",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 2.0
+        }
+      ],
+      "rush_stderr": ""
+    },
+    {
+      "case": "jsonl-large-stream",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 10000.0
+        }
+      ],
+      "rush_stderr": ""
+    },
+    {
+      "case": "jsonl-blank-line",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 2: EOF while parsing a value at line 2 column 0\"\n"
+    },
+    {
+      "case": "jsonl-malformed-second-line",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 2: EOF while parsing an object at line 1 column 1\"\n"
+    },
+    {
+      "case": "jsonl-invalid-utf8",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 1: stream did not contain valid UTF-8\"\n"
+    },
+    {
+      "case": "jsonl-exact-byte-limit",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 1.0
+        }
+      ],
+      "rush_stderr": ""
+    },
+    {
+      "case": "jsonl-over-byte-limit",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 1: exceeds 65536 bytes\"\n"
+    }
+  ]
+}

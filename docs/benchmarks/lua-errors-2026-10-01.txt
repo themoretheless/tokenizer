@@ -1,0 +1,16 @@
+   Compiling rush-lua-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/lua-runtime)
+    Finished `release` profile [optimized] target(s) in 0.24s
+     Running `docs/benchmarks/lua-runtime/target/release/rush-lua-errors`
+rush-lua-comparison: syntax/runtime/host errors and VM reuse verified
+SYNTAX
+syntax error: [string "syntax-case.lua"]:2: unexpected symbol near <eof>
+RUNTIME
+runtime error: [string "runtime-case.lua"]:2: attempt to index a nil value (local 'value')
+stack traceback:
+	[C]: in metamethod 'index'
+	[string "runtime-case.lua"]:2: in main chunk
+HOST
+runtime error: host rejected operation
+stack traceback:
+	[C]: in function 'host_fail'
+	[string "host-case.lua"]:1: in main chunk

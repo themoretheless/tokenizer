@@ -1,0 +1,62 @@
+Requested heap bytes; stack/allocator overhead/RSS excluded; realloc counts as one call
+source	operation	run	peak_extra_bytes	retained_result_bytes	allocation_calls	after_drop_bytes
+x*2	parse_and_tree	0	1096	128	10	0
+x*2	tree_to_instructions	0	320	320	2	0
+x*2	parse_and_instructions	0	1096	320	12	0
+x*2	vm_stack	0	32	32	1	0
+x*2	tree_run	0	0	0	0	0
+x*2	vm_run_reused_stack	0	0	0	0	0
+x*2	parse_and_tree	1	1096	128	10	0
+x*2	tree_to_instructions	1	320	320	2	0
+x*2	parse_and_instructions	1	1096	320	12	0
+x*2	vm_stack	1	32	32	1	0
+x*2	tree_run	1	0	0	0	0
+x*2	vm_run_reused_stack	1	0	0	0	0
+x*2	parse_and_tree	2	1096	128	10	0
+x*2	tree_to_instructions	2	320	320	2	0
+x*2	parse_and_instructions	2	1096	320	12	0
+x*2	vm_stack	2	32	32	1	0
+x*2	tree_run	2	0	0	0	0
+x*2	vm_run_reused_stack	2	0	0	0	0
+(if x%2==0 { x*2 } else { x })	parse_and_tree	0	3336	576	34	0
+(if x%2==0 { x*2 } else { x })	tree_to_instructions	0	1280	1280	4	0
+(if x%2==0 { x*2 } else { x })	parse_and_instructions	0	3336	1280	38	0
+(if x%2==0 { x*2 } else { x })	vm_stack	0	32	32	1	0
+(if x%2==0 { x*2 } else { x })	tree_run	0	0	0	0	0
+(if x%2==0 { x*2 } else { x })	vm_run_reused_stack	0	0	0	0	0
+(if x%2==0 { x*2 } else { x })	parse_and_tree	1	3336	576	34	0
+(if x%2==0 { x*2 } else { x })	tree_to_instructions	1	1280	1280	4	0
+(if x%2==0 { x*2 } else { x })	parse_and_instructions	1	3336	1280	38	0
+(if x%2==0 { x*2 } else { x })	vm_stack	1	32	32	1	0
+(if x%2==0 { x*2 } else { x })	tree_run	1	0	0	0	0
+(if x%2==0 { x*2 } else { x })	vm_run_reused_stack	1	0	0	0	0
+(if x%2==0 { x*2 } else { x })	parse_and_tree	2	3336	576	34	0
+(if x%2==0 { x*2 } else { x })	tree_to_instructions	2	1280	1280	4	0
+(if x%2==0 { x*2 } else { x })	parse_and_instructions	2	3336	1280	38	0
+(if x%2==0 { x*2 } else { x })	vm_stack	2	32	32	1	0
+(if x%2==0 { x*2 } else { x })	tree_run	2	0	0	0	0
+(if x%2==0 { x*2 } else { x })	vm_run_reused_stack	2	0	0	0	0
+x%3==0 and x<15000	parse_and_tree	0	2248	512	29	0
+x%3==0 and x<15000	tree_to_instructions	0	1280	1280	4	0
+x%3==0 and x<15000	parse_and_instructions	0	2248	1280	33	0
+x%3==0 and x<15000	vm_stack	0	32	32	1	0
+x%3==0 and x<15000	tree_run	0	0	0	0	0
+x%3==0 and x<15000	vm_run_reused_stack	0	0	0	0	0
+x%3==0 and x<15000	parse_and_tree	1	2248	512	29	0
+x%3==0 and x<15000	tree_to_instructions	1	1280	1280	4	0
+x%3==0 and x<15000	parse_and_instructions	1	2248	1280	33	0
+x%3==0 and x<15000	vm_stack	1	32	32	1	0
+x%3==0 and x<15000	tree_run	1	0	0	0	0
+x%3==0 and x<15000	vm_run_reused_stack	1	0	0	0	0
+x%3==0 and x<15000	parse_and_tree	2	2248	512	29	0
+x%3==0 and x<15000	tree_to_instructions	2	1280	1280	4	0
+x%3==0 and x<15000	parse_and_instructions	2	2248	1280	33	0
+x%3==0 and x<15000	vm_stack	2	32	32	1	0
+x%3==0 and x<15000	tree_run	2	0	0	0	0
+x%3==0 and x<15000	vm_run_reused_stack	2	0	0	0	0
+double(x)	tree_host_run	0	160	0	1000	0
+double(x)	vm_host_run	0	40	0	1000	0
+double(x)	tree_host_run	1	160	0	1000	0
+double(x)	vm_host_run	1	40	0	1000	0
+double(x)	tree_host_run	2	160	0	1000	0
+double(x)	vm_host_run	2	40	0	1000	0

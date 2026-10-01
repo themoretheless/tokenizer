@@ -1,0 +1,176 @@
+{
+  "date": "2026-10-01T00:10:46.745Z",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+  "source": "while true { let xs = range(0,1000) | map(x => x*x) }",
+  "baseline": [
+    {
+      "startToSettlementMs": 10.699999928474426,
+      "abortToSettlementMs": null,
+      "abortToTerminateMs": null,
+      "terminateCallMs": 0,
+      "error": "Execution limit exceeded"
+    },
+    {
+      "startToSettlementMs": 10.5,
+      "abortToSettlementMs": null,
+      "abortToTerminateMs": null,
+      "terminateCallMs": 0.09999990463256836,
+      "error": "Execution limit exceeded"
+    },
+    {
+      "startToSettlementMs": 10.5,
+      "abortToSettlementMs": null,
+      "abortToTerminateMs": null,
+      "terminateCallMs": 0,
+      "error": "Execution limit exceeded"
+    }
+  ],
+  "cancelled": [
+    {
+      "startToSettlementMs": 1.3000000715255737,
+      "abortToSettlementMs": 0.10000002384185791,
+      "abortToTerminateMs": 0.10000002384185791,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.0999999046325684,
+      "abortToSettlementMs": 0,
+      "abortToTerminateMs": 0,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.8000000715255737,
+      "abortToSettlementMs": 0,
+      "abortToTerminateMs": 0,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.1999999284744263,
+      "abortToSettlementMs": 0,
+      "abortToTerminateMs": 0,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 2,
+      "abortToSettlementMs": 0,
+      "abortToTerminateMs": 0,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.2000000476837158,
+      "abortToSettlementMs": 0,
+      "abortToTerminateMs": 0,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.5,
+      "abortToSettlementMs": 0.09999990463256836,
+      "abortToTerminateMs": 0.09999990463256836,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.100000023841858,
+      "abortToSettlementMs": 0,
+      "abortToTerminateMs": 0,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.2999999523162842,
+      "abortToSettlementMs": 0.10000002384185791,
+      "abortToTerminateMs": 0.10000002384185791,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.1999999284744263,
+      "abortToSettlementMs": 0.09999990463256836,
+      "abortToTerminateMs": 0,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.5,
+      "abortToSettlementMs": 0,
+      "abortToTerminateMs": 0,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.5,
+      "abortToSettlementMs": 0.09999990463256836,
+      "abortToTerminateMs": 0.09999990463256836,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.100000023841858,
+      "abortToSettlementMs": 0,
+      "abortToTerminateMs": 0,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 2,
+      "abortToSettlementMs": 0,
+      "abortToTerminateMs": 0,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.2000000476837158,
+      "abortToSettlementMs": 0.10000002384185791,
+      "abortToTerminateMs": 0.10000002384185791,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.9000000953674316,
+      "abortToSettlementMs": 0,
+      "abortToTerminateMs": 0,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.2000000476837158,
+      "abortToSettlementMs": 0.10000002384185791,
+      "abortToTerminateMs": 0.10000002384185791,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.7000000476837158,
+      "abortToSettlementMs": 0,
+      "abortToTerminateMs": 0,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.100000023841858,
+      "abortToSettlementMs": 0,
+      "abortToTerminateMs": 0,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    },
+    {
+      "startToSettlementMs": 1.5,
+      "abortToSettlementMs": 0.10000002384185791,
+      "abortToTerminateMs": 0.10000002384185791,
+      "terminateCallMs": 0,
+      "error": "Execution cancelled"
+    }
+  ],
+  "recovery": {
+    "ok": true,
+    "kind": "text",
+    "output": "Number(3.0)"
+  },
+  "ok": true
+}

@@ -1,0 +1,7 @@
+workload	items	run	peak_extra_bytes	live_after_drop_bytes	allocation_calls
+eager	1000	1	90392	0	3404
+eager	1000	2	90392	0	3404
+eager	1000	3	90392	0	3404
+lazy	1000	1	9960	0	3378
+lazy	1000	2	9960	0	3378
+lazy	1000	3	9960	0	3378

@@ -57,7 +57,7 @@ test('capability labels separate the three engine tiers', () => {
   assert.equal(depthLabel(byId.url), 'structure validator')
 })
 
-test('only the format family advertises validation', () => {
+test('only native grammars advertise validation', () => {
   // `validate` claims a grammar that rejects input its own spec forbids. The
   // shared fullkit pipeline behind the wave languages can only prove bracket
   // balance and closed literals, so it stays tolerant of constructs it does not
@@ -71,9 +71,9 @@ test('only the format family advertises validation', () => {
     .filter((engine) => engine.family === 'format')
     .map((engine) => engine.id)
     .sort()
-  assert.deepEqual(claimers, formats, 'validate must be claimed by exactly the formats')
-  assert.equal(claimers.length, 20)
-  for (const engine of catalog.engines.filter((item) => item.family === 'language')) {
+  assert.deepEqual(claimers, [...formats, 'rush'].sort(), 'only native grammars claim validate')
+  assert.equal(claimers.length, 21)
+  for (const engine of catalog.engines.filter((item) => item.family === 'language' && item.id !== 'rush')) {
     assert.equal(engine.capabilities.includes('validate'), false, engine.id)
     assert.deepEqual(engine.capabilities, ['lex', 'parse', 'semantic'], engine.id)
   }

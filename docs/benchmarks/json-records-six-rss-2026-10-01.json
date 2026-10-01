@@ -1,0 +1,1458 @@
+{
+  "date": "2026-10-01T08:39:35.957708+00:00",
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "method": "whole process; warm filesystem cache; 2 warmups, 12 cyclic rounds",
+  "engines": [
+    "Rush",
+    "CPython",
+    "Lua",
+    "Luau",
+    "Rhai",
+    "Koto"
+  ],
+  "possible_groups": 10,
+  "rss": true,
+  "runs": [
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 6.651667,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2392064,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2392064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  15  involuntary context switches\n            38050192  instructions retired\n            11604697  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 53.441917,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23527424,
+      "resource_output": "        0.05 real         0.03 user         0.00 sys\n            23527424  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2361  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  60  involuntary context switches\n           429430545  instructions retired\n           185512710  cycles elapsed\n            14287256  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 6.427333,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2326528,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2326528  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  11  involuntary context switches\n            32015656  instructions retired\n            10530073  cycles elapsed\n             1245472  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 7.673875,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3637248,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3637248  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 419  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  11  involuntary context switches\n            45293722  instructions retired\n            15546393  cycles elapsed\n             1720608  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 7.900458,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4046848,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             4046848  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 432  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  16  involuntary context switches\n            42921667  instructions retired\n            14299965  cycles elapsed\n             1802552  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 9.24575,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7454720,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             7454720  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 651  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  22  involuntary context switches\n            50973909  instructions retired\n            18559558  cycles elapsed\n             1884496  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 51.928625,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23691264,
+      "resource_output": "        0.04 real         0.03 user         0.00 sys\n            23691264  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2371  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  61  involuntary context switches\n           428702879  instructions retired\n           178943932  cycles elapsed\n            14467504  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 6.583333,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   8  involuntary context switches\n            31724163  instructions retired\n            11740226  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 7.993,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3620864,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3620864  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 418  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   9  involuntary context switches\n            45189688  instructions retired\n            16313191  cycles elapsed\n             1704224  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 6.645667,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3997696,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3997696  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 429  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            42640817  instructions retired\n            12534888  cycles elapsed\n             1753400  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 8.498792,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7471104,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             7471104  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 652  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  14  involuntary context switches\n            49471514  instructions retired\n            17563362  cycles elapsed\n             1900880  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 6.644916,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   7  involuntary context switches\n            37824224  instructions retired\n            11325101  cycles elapsed\n             1245472  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 6.981958,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2326528,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2326528  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            31685500  instructions retired\n            11566343  cycles elapsed\n             1245472  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 7.019209,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3637248,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3637248  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 419  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   7  involuntary context switches\n            45194269  instructions retired\n            13815580  cycles elapsed\n             1720608  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 7.383791,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4014080,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             4014080  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 430  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  12  involuntary context switches\n            42705598  instructions retired\n            14401206  cycles elapsed\n             1769784  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 8.266042,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7487488,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             7487488  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 653  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   8  involuntary context switches\n            49479821  instructions retired\n            16668888  cycles elapsed\n             1917264  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 6.990166,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2375680,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2375680  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  11  involuntary context switches\n            38330422  instructions retired\n            12954635  cycles elapsed\n             1261856  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 53.519458,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23773184,
+      "resource_output": "        0.05 real         0.03 user         0.00 sys\n            23773184  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2375  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  36  involuntary context switches\n           428360488  instructions retired\n           188175945  cycles elapsed\n            14533016  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 7.999042,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3637248,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3637248  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 419  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   7  involuntary context switches\n            45240573  instructions retired\n            14156835  cycles elapsed\n             1720608  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 7.806041,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4014080,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             4014080  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 430  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   9  involuntary context switches\n            42728957  instructions retired\n            14091539  cycles elapsed\n             1769784  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 8.520958,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7454720,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             7454720  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 651  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  18  involuntary context switches\n            49463890  instructions retired\n            17449076  cycles elapsed\n             1884496  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 6.668291,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2375680,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2375680  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  14  involuntary context switches\n            38053838  instructions retired\n            12733803  cycles elapsed\n             1261856  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 53.481125,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23740416,
+      "resource_output": "        0.05 real         0.03 user         0.00 sys\n            23740416  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2374  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  51  involuntary context switches\n           428892253  instructions retired\n           184078459  cycles elapsed\n            14516656  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 6.493375,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2342912,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2342912  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            31565375  instructions retired\n            11420368  cycles elapsed\n             1261856  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 7.332417,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3997696,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3997696  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 429  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  13  involuntary context switches\n            44193633  instructions retired\n            14363607  cycles elapsed\n             1753400  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 8.558375,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7487488,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             7487488  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 653  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            49559254  instructions retired\n            18415273  cycles elapsed\n             1917264  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 6.7575,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2392064,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2392064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  12  involuntary context switches\n            37976322  instructions retired\n            11884066  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 52.986292,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23805952,
+      "resource_output": "        0.05 real         0.03 user         0.00 sys\n            23805952  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2376  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  56  involuntary context switches\n           428841850  instructions retired\n           184152813  cycles elapsed\n            14582192  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 6.902333,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            31788874  instructions retired\n            11982383  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 7.760917,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3637248,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3637248  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 419  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  13  involuntary context switches\n            45273561  instructions retired\n            15404335  cycles elapsed\n             1720608  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 8.303334,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7471104,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             7471104  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 652  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   8  involuntary context switches\n            49447851  instructions retired\n            18966745  cycles elapsed\n             1900880  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 6.283042,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2408448,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2408448  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 324  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  10  involuntary context switches\n            38079200  instructions retired\n            11440984  cycles elapsed\n             1294624  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 53.167333,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23674880,
+      "resource_output": "        0.05 real         0.03 user         0.00 sys\n            23674880  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2369  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  49  involuntary context switches\n           428939282  instructions retired\n           184943759  cycles elapsed\n            14451120  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 6.697833,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2326528,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2326528  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            31611537  instructions retired\n            10265525  cycles elapsed\n             1245472  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 7.323917,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3637248,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3637248  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 419  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   7  involuntary context switches\n            45218087  instructions retired\n            15052818  cycles elapsed\n             1720608  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 7.247833,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4030464,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             4030464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 431  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  14  involuntary context switches\n            43261563  instructions retired\n            14509556  cycles elapsed\n             1786168  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 6.927792,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2392064,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2392064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  10  involuntary context switches\n            38189650  instructions retired\n            12847168  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 52.136208,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23592960,
+      "resource_output": "        0.04 real         0.03 user         0.00 sys\n            23592960  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2364  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  58  involuntary context switches\n           428838266  instructions retired\n           180652171  cycles elapsed\n            14352792  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 6.932084,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  10  involuntary context switches\n            31812728  instructions retired\n            11367763  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 7.363958,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3620864,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3620864  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 418  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            45108743  instructions retired\n            14924049  cycles elapsed\n             1704224  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 8.895042,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4030464,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             4030464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 431  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  80  involuntary context switches\n            43697212  instructions retired\n            17121216  cycles elapsed\n             1786168  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 8.763958,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7487488,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             7487488  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 653  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   8  involuntary context switches\n            49383387  instructions retired\n            17542879  cycles elapsed\n             1917264  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 51.17575,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23740416,
+      "resource_output": "        0.04 real         0.03 user         0.00 sys\n            23740416  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2374  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  62  involuntary context switches\n           429492553  instructions retired\n           178608945  cycles elapsed\n            14500248  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 6.957625,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2326528,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2326528  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   9  involuntary context switches\n            31669441  instructions retired\n            11108121  cycles elapsed\n             1245472  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 7.435917,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3637248,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3637248  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 419  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  11  involuntary context switches\n            45507234  instructions retired\n            14459675  cycles elapsed\n             1720608  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 7.026916,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4046848,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             4046848  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 432  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  10  involuntary context switches\n            42886699  instructions retired\n            14096528  cycles elapsed\n             1802552  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 8.620459,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7471104,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             7471104  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 652  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  12  involuntary context switches\n            49533966  instructions retired\n            18990475  cycles elapsed\n             1900880  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 6.934709,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2408448,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2408448  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 324  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   8  involuntary context switches\n            38263027  instructions retired\n            11822929  cycles elapsed\n             1294624  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 6.50425,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2326528,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2326528  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   9  involuntary context switches\n            31710463  instructions retired\n            10885770  cycles elapsed\n             1245472  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 7.360291,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3637248,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3637248  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 419  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            45176280  instructions retired\n            14708364  cycles elapsed\n             1720608  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 7.267666,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4030464,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             4030464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 431  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            42882167  instructions retired\n            13935259  cycles elapsed\n             1786168  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 8.404458,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7471104,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             7471104  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 652  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  21  involuntary context switches\n            49537855  instructions retired\n            18265280  cycles elapsed\n             1900880  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 6.769542,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2408448,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2408448  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 324  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  10  involuntary context switches\n            38020535  instructions retired\n            11738765  cycles elapsed\n             1294624  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 52.570083,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23560192,
+      "resource_output": "        0.04 real         0.03 user         0.00 sys\n            23560192  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2362  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  35  involuntary context switches\n           428521939  instructions retired\n           187119915  cycles elapsed\n            14320024  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 8.144125,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3637248,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3637248  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 419  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  15  involuntary context switches\n            45263405  instructions retired\n            16486256  cycles elapsed\n             1720608  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 7.162833,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4046848,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             4046848  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 432  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            42938544  instructions retired\n            13176985  cycles elapsed\n             1802552  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 8.518042,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7503872,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             7503872  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 654  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  12  involuntary context switches\n            49452858  instructions retired\n            17854373  cycles elapsed\n             1933648  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 7.186959,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2392064,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2392064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  10  involuntary context switches\n            38656704  instructions retired\n            12343537  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 50.52025,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23609344,
+      "resource_output": "        0.04 real         0.03 user         0.00 sys\n            23609344  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2366  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  47  involuntary context switches\n           431111213  instructions retired\n           178141665  cycles elapsed\n            14369176  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 6.895625,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2326528,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2326528  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  15  involuntary context switches\n            31806744  instructions retired\n            11684564  cycles elapsed\n             1245472  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 6.871417,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4014080,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             4014080  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 430  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  13  involuntary context switches\n            42803380  instructions retired\n            13594987  cycles elapsed\n             1769784  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 8.214,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7487488,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             7487488  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 653  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  11  involuntary context switches\n            49573310  instructions retired\n            17141014  cycles elapsed\n             1917264  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 6.912166,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  14  involuntary context switches\n            37984338  instructions retired\n            12686992  cycles elapsed\n             1245472  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 51.657375,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23478272,
+      "resource_output": "        0.04 real         0.03 user         0.00 sys\n            23478272  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2358  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  49  involuntary context switches\n           428256091  instructions retired\n           179043090  cycles elapsed\n            14238104  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 6.928208,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2326528,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2326528  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            31611490  instructions retired\n            10482812  cycles elapsed\n             1245472  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 7.326375,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3653632,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3653632  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 420  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   7  involuntary context switches\n            45179514  instructions retired\n            13776379  cycles elapsed\n             1736992  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 8.310959,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7487488,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             7487488  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 653  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  10  involuntary context switches\n            49384449  instructions retired\n            17627885  cycles elapsed\n             1917264  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 6.683,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  18  involuntary context switches\n            39369177  instructions retired\n            13460135  cycles elapsed\n             1245472  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 49.529792,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23592960,
+      "resource_output": "        0.04 real         0.03 user         0.00 sys\n            23592960  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2365  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  52  involuntary context switches\n           428653362  instructions retired\n           173691735  cycles elapsed\n            14369200  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 6.37325,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2342912,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2342912  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   7  involuntary context switches\n            31710135  instructions retired\n            10530041  cycles elapsed\n             1261856  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 7.281125,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3637248,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             3637248  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 419  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  10  involuntary context switches\n            45247965  instructions retired\n            14727318  cycles elapsed\n             1720608  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 7.071916,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4046848,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             4046848  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 432  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   9  involuntary context switches\n            42765701  instructions retired\n            13041008  cycles elapsed\n             1802552  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 17.402,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2408448,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2408448  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 324  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  22  involuntary context switches\n           236923927  instructions retired\n            50978416  cycles elapsed\n             1294624  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 61.690208,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23625728,
+      "resource_output": "        0.05 real         0.04 user         0.00 sys\n            23625728  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2368  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  47  involuntary context switches\n           642167103  instructions retired\n           218324161  cycles elapsed\n            14385560  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 12.376958,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2342912,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2342912  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  13  involuntary context switches\n           148302359  instructions retired\n            33263244  cycles elapsed\n             1261856  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 14.016958,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3735552,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             3735552  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 425  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   7  involuntary context switches\n           156206307  instructions retired\n            38944368  cycles elapsed\n             1818912  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 18.980875,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4030464,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             4030464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 431  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  23  involuntary context switches\n           252455824  instructions retired\n            57764258  cycles elapsed\n             1786168  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 16.747125,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7520256,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             7520256  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 655  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  13  involuntary context switches\n           224157109  instructions retired\n            51132005  cycles elapsed\n             1950032  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 63.257708,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23576576,
+      "resource_output": "        0.06 real         0.04 user         0.00 sys\n            23576576  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2364  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  65  involuntary context switches\n           645667647  instructions retired\n           224052584  cycles elapsed\n            14352816  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 13.233292,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  14  involuntary context switches\n           150702474  instructions retired\n            34483956  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 14.492917,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3735552,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             3735552  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 425  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  12  involuntary context switches\n           156430927  instructions retired\n            39683405  cycles elapsed\n             1818912  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 18.805708,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4030464,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             4030464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 431  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  13  involuntary context switches\n           251716509  instructions retired\n            57704791  cycles elapsed\n             1786168  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 16.736833,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7503872,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             7503872  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 654  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  10  involuntary context switches\n           224147582  instructions retired\n            48750895  cycles elapsed\n             1933648  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 17.1875,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2392064,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2392064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  14  involuntary context switches\n           240222306  instructions retired\n            51267291  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 12.263084,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2342912,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2342912  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   9  involuntary context switches\n           149811188  instructions retired\n            34584979  cycles elapsed\n             1261856  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 13.622667,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3719168,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             3719168  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 424  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  10  involuntary context switches\n           156243056  instructions retired\n            38596411  cycles elapsed\n             1802528  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 18.318541,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4014080,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             4014080  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 430  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  19  involuntary context switches\n           251329164  instructions retired\n            56519188  cycles elapsed\n             1769784  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 16.586375,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7487488,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             7487488  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 653  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   9  involuntary context switches\n           224442606  instructions retired\n            49005268  cycles elapsed\n             1917264  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 17.081583,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2408448,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2408448  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 324  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  13  involuntary context switches\n           239560725  instructions retired\n            51879970  cycles elapsed\n             1294624  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 63.160792,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23478272,
+      "resource_output": "        0.06 real         0.04 user         0.01 sys\n            23478272  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2357  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  60  involuntary context switches\n           655577697  instructions retired\n           225699536  cycles elapsed\n            14238104  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 13.551583,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3719168,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             3719168  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 424  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  12  involuntary context switches\n           156238365  instructions retired\n            38044269  cycles elapsed\n             1802528  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 18.756583,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4046848,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             4046848  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 432  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  13  involuntary context switches\n           252839020  instructions retired\n            56726480  cycles elapsed\n             1802552  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 17.084541,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7520256,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             7520256  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 655  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  10  involuntary context switches\n           224387135  instructions retired\n            50553568  cycles elapsed\n             1950032  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 17.057875,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2392064,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2392064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  17  involuntary context switches\n           240134487  instructions retired\n            50759718  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 61.426959,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23609344,
+      "resource_output": "        0.05 real         0.04 user         0.01 sys\n            23609344  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2366  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  63  involuntary context switches\n           643360134  instructions retired\n           216186804  cycles elapsed\n            14385584  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 12.836792,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2375680,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2375680  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 324  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  26  involuntary context switches\n           149469962  instructions retired\n            33750319  cycles elapsed\n             1294624  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 18.152375,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4046848,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             4046848  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 432  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  13  involuntary context switches\n           251554864  instructions retired\n            56622740  cycles elapsed\n             1786144  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 18.612375,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7553024,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             7553024  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 657  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  36  involuntary context switches\n           225194826  instructions retired\n            52582896  cycles elapsed\n             1982800  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 16.594166,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2441216,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2441216  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 326  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  13  involuntary context switches\n           240070399  instructions retired\n            50353246  cycles elapsed\n             1327392  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 65.007416,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23658496,
+      "resource_output": "        0.06 real         0.04 user         0.01 sys\n            23658496  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2371  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  89  involuntary context switches\n           642942573  instructions retired\n           228013996  cycles elapsed\n            14434736  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 13.460666,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2392064,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             2392064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 325  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  19  involuntary context switches\n           150593815  instructions retired\n            34880175  cycles elapsed\n             1311008  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 13.973667,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3719168,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             3719168  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 424  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  17  involuntary context switches\n           156402729  instructions retired\n            38470958  cycles elapsed\n             1802528  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 17.078791,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7503872,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             7503872  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 654  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  30  involuntary context switches\n           225133404  instructions retired\n            49670166  cycles elapsed\n             1933648  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 17.3395,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2441216,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2441216  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 326  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  25  involuntary context switches\n           240190368  instructions retired\n            51132496  cycles elapsed\n             1327392  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 62.847792,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23609344,
+      "resource_output": "        0.06 real         0.04 user         0.01 sys\n            23609344  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2366  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  67  involuntary context switches\n           643371259  instructions retired\n           222209970  cycles elapsed\n            14369176  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 13.006333,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  16  involuntary context switches\n           148604301  instructions retired\n            32997890  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 14.646833,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3735552,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             3735552  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 425  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  35  involuntary context switches\n           156579318  instructions retired\n            40352637  cycles elapsed\n             1818912  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 19.246041,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4030464,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             4030464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 431  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  41  involuntary context switches\n           254582700  instructions retired\n            58084329  cycles elapsed\n             1786168  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 16.585292,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2424832,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2424832  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 325  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  26  involuntary context switches\n           237084328  instructions retired\n            50201878  cycles elapsed\n             1311008  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 66.813333,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23511040,
+      "resource_output": "        0.06 real         0.05 user         0.01 sys\n            23511040  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2359  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 135  involuntary context switches\n           646113116  instructions retired\n           232653218  cycles elapsed\n            14287280  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 13.276667,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2375680,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             2375680  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 324  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  13  involuntary context switches\n           149143301  instructions retired\n            34757588  cycles elapsed\n             1294624  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 14.432166,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3735552,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             3735552  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 425  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  27  involuntary context switches\n           156467834  instructions retired\n            40355587  cycles elapsed\n             1818912  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 19.0415,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4079616,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             4079616  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 434  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  23  involuntary context switches\n           251044680  instructions retired\n            57224872  cycles elapsed\n             1835320  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 17.337833,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7520256,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             7520256  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 655  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  17  involuntary context switches\n           224913008  instructions retired\n            50463916  cycles elapsed\n             1950032  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 64.37825,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23707648,
+      "resource_output": "        0.06 real         0.04 user         0.01 sys\n            23707648  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2371  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  83  involuntary context switches\n           644281600  instructions retired\n           227131690  cycles elapsed\n            14483888  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 12.921792,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  16  involuntary context switches\n           148231544  instructions retired\n            34151326  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 14.306333,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3719168,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             3719168  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 424  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  30  involuntary context switches\n           157279157  instructions retired\n            40275680  cycles elapsed\n             1802528  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 18.4405,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4030464,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             4030464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 431  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  15  involuntary context switches\n           250051613  instructions retired\n            56165817  cycles elapsed\n             1786168  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 16.870542,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7503872,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             7503872  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 654  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   9  involuntary context switches\n           225181637  instructions retired\n            50827085  cycles elapsed\n             1933648  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 17.482208,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2441216,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2441216  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 326  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  24  involuntary context switches\n           238481250  instructions retired\n            51498599  cycles elapsed\n             1327392  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 12.424625,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  22  involuntary context switches\n           148058250  instructions retired\n            33183796  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 14.006792,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3751936,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             3751936  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 426  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n           156451431  instructions retired\n            37910289  cycles elapsed\n             1835296  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 20.096792,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3997696,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             3997696  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 429  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  18  involuntary context switches\n           251180764  instructions retired\n            57030698  cycles elapsed\n             1753400  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 18.753875,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7569408,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             7569408  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 658  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  28  involuntary context switches\n           224588635  instructions retired\n            53324216  cycles elapsed\n             1999184  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 22.02975,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2424832,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2424832  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 327  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  56  involuntary context switches\n           241028786  instructions retired\n            51035476  cycles elapsed\n             1311008  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 68.238916,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23592960,
+      "resource_output": "        0.06 real         0.04 user         0.01 sys\n            23592960  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2365  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 109  involuntary context switches\n           656795256  instructions retired\n           227341616  cycles elapsed\n            14369200  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 14.796333,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3735552,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             3735552  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 425  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  14  involuntary context switches\n           156629631  instructions retired\n            40551014  cycles elapsed\n             1818912  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 19.089292,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4046848,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             4046848  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 432  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  25  involuntary context switches\n           252960752  instructions retired\n            57357169  cycles elapsed\n             1802552  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 16.599291,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7503872,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             7503872  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 654  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  53  involuntary context switches\n           225137898  instructions retired\n            50029073  cycles elapsed\n             1933648  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 17.55375,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2408448,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2408448  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 324  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  36  involuntary context switches\n           240693516  instructions retired\n            50218997  cycles elapsed\n             1294624  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 72.440166,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23707648,
+      "resource_output": "        0.06 real         0.05 user         0.01 sys\n            23707648  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2373  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 302  involuntary context switches\n           661876920  instructions retired\n           245853476  cycles elapsed\n            14467480  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 14.057208,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2342912,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             2342912  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  27  involuntary context switches\n           148206118  instructions retired\n            34297701  cycles elapsed\n             1261856  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 19.211541,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4014080,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             4014080  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 430  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  34  involuntary context switches\n           251239447  instructions retired\n            56968070  cycles elapsed\n             1769784  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 19.707417,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7503872,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             7503872  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 654  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  59  involuntary context switches\n           224911843  instructions retired\n            52357133  cycles elapsed\n             1933648  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 18.404667,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2424832,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2424832  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 327  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  23  involuntary context switches\n           240510295  instructions retired\n            51643955  cycles elapsed\n             1311008  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 68.76925,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23691264,
+      "resource_output": "        0.06 real         0.04 user         0.01 sys\n            23691264  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2371  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 231  involuntary context switches\n           646167509  instructions retired\n           231904772  cycles elapsed\n            14467504  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 13.251,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2342912,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             2342912  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  29  involuntary context switches\n           148678003  instructions retired\n            34594199  cycles elapsed\n             1261856  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 15.02475,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3768320,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             3768320  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 427  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  39  involuntary context switches\n           156880242  instructions retired\n            41626957  cycles elapsed\n             1851680  peak memory footprint\n"
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 17.838584,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 7569408,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             7569408  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 658  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  31  involuntary context switches\n           224395485  instructions retired\n            52472318  cycles elapsed\n             1999184  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 17.394333,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2392064,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2392064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  23  involuntary context switches\n           240403789  instructions retired\n            51242354  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 66.630375,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 23658496,
+      "resource_output": "        0.06 real         0.04 user         0.01 sys\n            23658496  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2370  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 148  involuntary context switches\n           644891022  instructions retired\n           234421860  cycles elapsed\n            14418328  peak memory footprint\n"
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 13.421542,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  46  involuntary context switches\n           148264996  instructions retired\n            35569134  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 14.394958,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 3735552,
+      "resource_output": "        0.01 real         0.00 user         0.00 sys\n             3735552  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 425  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  22  involuntary context switches\n           156440997  instructions retired\n            40521779  cycles elapsed\n             1818912  peak memory footprint\n"
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 19.114625,
+      "verified": true,
+      "result_groups": 10,
+      "peak_rss_bytes": 4014080,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             4014080  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 430  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  35  involuntary context switches\n           250240827  instructions retired\n            57481399  cycles elapsed\n             1769784  peak memory footprint\n"
+    }
+  ]
+}

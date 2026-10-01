@@ -1,0 +1,22 @@
+   Compiling rush-koto-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/koto-runtime)
+    Finished `release` profile [optimized] target(s) in 0.32s
+     Running `docs/benchmarks/koto-runtime/target/release/errors`
+Koto 0.16.1: compile/runtime/host errors, source names and VM reuse verified
+SYNTAX
+expected expression after assignment operator.
+syntax-case.koto - 1:7
+   |
+ 1 | value =
+   |       ^
+RUNTIME
+expected Value that supports '.' access, found Null
+--- runtime-case.koto - 2:7
+   |
+ 2 | value.missing
+   |       ^^^^^^^
+HOST
+host rejected operation
+--- host-case.koto - 1:1
+   |
+ 1 | host_fail()
+   | ^^^^^^^^^

@@ -1,0 +1,19 @@
+   Compiling themoretheless-tokenizer-core v0.4.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-core)
+   Compiling themoretheless-tokenizer-rush v0.4.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `bench` profile [optimized] target(s) in 2.56s
+     Running benches/runtime.rs (target/release/build/themoretheless-tokenizer-rush/53b8ee41c1490f5b/out/runtime-53b8ee41c1490f5b)
+Collection input items: 1000; verified expected sum: 333666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+closure	compile	100	2.266	2.296	2.555
+closure	prepared_run	100	3.251	3.275	3.435
+closure	compile_and_run	100	5.662	5.686	5.804
+collections	compile	100	3.575	3.596	3.809
+collections	prepared_run	100	368.092	370.283	383.151
+collections	compile_and_run	100	365.724	369.572	373.217
+collections_lazy	compile	100	3.460	3.484	3.678
+collections_lazy	prepared_run	100	355.143	357.424	360.190
+collections_lazy	compile_and_run	100	366.160	369.957	372.582
+surface	compile	100	3.586	3.609	3.630
+surface	prepared_run	100	390.808	392.820	404.019
+surface	compile_and_run	100	397.661	398.875	402.950

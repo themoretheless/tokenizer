@@ -30,6 +30,7 @@ export const KIND_COLORS = {
   null: KEYWORD,
   identifier: IDENT,
   variable: IDENT,
+  parameter: IDENT,
   property: MEMBER,
   attribute: MEMBER,
   tag: MEMBER,

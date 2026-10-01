@@ -1,0 +1,369 @@
+{
+  "date": "2026-10-01T07:09:11.905012+00:00",
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "method": "whole process; warm filesystem cache; 2 warmups, 10 alternating rounds",
+  "rss": true,
+  "runs": [
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 6.0625,
+      "verified": true,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   8  involuntary context switches\n            38033420  instructions retired\n            11827514  cycles elapsed\n             1294624  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 48.46725,
+      "verified": true,
+      "peak_rss_bytes": 23461888,
+      "resource_output": "        0.04 real         0.03 user         0.00 sys\n            23461888  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2356  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  20  involuntary context switches\n           424387271  instructions retired\n           172881986  cycles elapsed\n            14221720  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 49.43825,
+      "verified": true,
+      "peak_rss_bytes": 23412736,
+      "resource_output": "        0.04 real         0.03 user         0.00 sys\n            23412736  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2353  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  29  involuntary context switches\n           424810759  instructions retired\n           174548920  cycles elapsed\n            14172568  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 6.395125,
+      "verified": true,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   9  involuntary context switches\n            37996941  instructions retired\n            11647257  cycles elapsed\n             1294624  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 6.095167,
+      "verified": true,
+      "peak_rss_bytes": 2375680,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2375680  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   4  involuntary context switches\n            37901667  instructions retired\n            11452624  cycles elapsed\n             1311008  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 53.881583,
+      "verified": true,
+      "peak_rss_bytes": 23560192,
+      "resource_output": "        0.05 real         0.03 user         0.01 sys\n            23560192  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2364  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  38  involuntary context switches\n           439723189  instructions retired\n           186116340  cycles elapsed\n            14352840  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 52.74425,
+      "verified": true,
+      "peak_rss_bytes": 23298048,
+      "resource_output": "        0.04 real         0.03 user         0.00 sys\n            23298048  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2345  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  64  involuntary context switches\n           438655906  instructions retired\n           180817336  cycles elapsed\n            14057880  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 6.455875,
+      "verified": true,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   7  involuntary context switches\n            38200282  instructions retired\n            11345091  cycles elapsed\n             1294624  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 9.083333,
+      "verified": true,
+      "peak_rss_bytes": 2392064,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2392064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 325  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  14  involuntary context switches\n            38046665  instructions retired\n            13083027  cycles elapsed\n             1327392  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 61.50125,
+      "verified": true,
+      "peak_rss_bytes": 23445504,
+      "resource_output": "        0.05 real         0.03 user         0.00 sys\n            23445504  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2355  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 111  involuntary context switches\n           428397549  instructions retired\n           186014864  cycles elapsed\n            14238152  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 52.73775,
+      "verified": true,
+      "peak_rss_bytes": 23461888,
+      "resource_output": "        0.04 real         0.03 user         0.01 sys\n            23461888  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2355  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  37  involuntary context switches\n           435757939  instructions retired\n           182473726  cycles elapsed\n            14238128  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 6.724,
+      "verified": true,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  10  involuntary context switches\n            38880105  instructions retired\n            11744103  cycles elapsed\n             1294624  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 6.204709,
+      "verified": true,
+      "peak_rss_bytes": 2375680,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2375680  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   5  involuntary context switches\n            37792018  instructions retired\n            11348571  cycles elapsed\n             1311008  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 51.139417,
+      "verified": true,
+      "peak_rss_bytes": 23347200,
+      "resource_output": "        0.04 real         0.03 user         0.00 sys\n            23347200  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2349  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  33  involuntary context switches\n           438673684  instructions retired\n           181925178  cycles elapsed\n            14123440  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 48.16675,
+      "verified": true,
+      "peak_rss_bytes": 23379968,
+      "resource_output": "        0.04 real         0.03 user         0.00 sys\n            23379968  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2351  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  19  involuntary context switches\n           439382419  instructions retired\n           170554649  cycles elapsed\n            14139800  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 6.406625,
+      "verified": true,
+      "peak_rss_bytes": 2408448,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2408448  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 324  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            38085059  instructions retired\n            11876273  cycles elapsed\n             1343776  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 5.801209,
+      "verified": true,
+      "peak_rss_bytes": 2375680,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2375680  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   8  involuntary context switches\n            37884712  instructions retired\n            10745323  cycles elapsed\n             1311008  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 49.893375,
+      "verified": true,
+      "peak_rss_bytes": 23396352,
+      "resource_output": "        0.04 real         0.03 user         0.00 sys\n            23396352  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2352  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  34  involuntary context switches\n           434263318  instructions retired\n           179789206  cycles elapsed\n            14156184  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 54.764583,
+      "verified": true,
+      "peak_rss_bytes": 23560192,
+      "resource_output": "        0.05 real         0.03 user         0.01 sys\n            23560192  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2361  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  77  involuntary context switches\n           436230132  instructions retired\n           192590502  cycles elapsed\n            14352840  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 6.560375,
+      "verified": true,
+      "peak_rss_bytes": 2375680,
+      "resource_output": "        0.00 real         0.00 user         0.00 sys\n             2375680  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 322  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   8  involuntary context switches\n            38327894  instructions retired\n            11663045  cycles elapsed\n             1311008  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 16.098,
+      "verified": true,
+      "peak_rss_bytes": 2392064,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2392064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  17  involuntary context switches\n           237615210  instructions retired\n            48837849  cycles elapsed\n             1327392  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 60.1505,
+      "verified": true,
+      "peak_rss_bytes": 23330816,
+      "resource_output": "        0.05 real         0.04 user         0.00 sys\n            23330816  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2348  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  46  involuntary context switches\n           651116940  instructions retired\n           216346684  cycles elapsed\n            14090648  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 59.030834,
+      "verified": true,
+      "peak_rss_bytes": 23412736,
+      "resource_output": "        0.05 real         0.04 user         0.00 sys\n            23412736  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2354  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  38  involuntary context switches\n           649686870  instructions retired\n           212442592  cycles elapsed\n            14172568  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 16.024292,
+      "verified": true,
+      "peak_rss_bytes": 2392064,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2392064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  14  involuntary context switches\n           236692321  instructions retired\n            49020664  cycles elapsed\n             1327392  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 15.853583,
+      "verified": true,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   9  involuntary context switches\n           238657393  instructions retired\n            49162874  cycles elapsed\n             1294624  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 60.244208,
+      "verified": true,
+      "peak_rss_bytes": 23478272,
+      "resource_output": "        0.05 real         0.04 user         0.00 sys\n            23478272  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2357  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  46  involuntary context switches\n           644165913  instructions retired\n           216603746  cycles elapsed\n            14238104  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 58.203833,
+      "verified": true,
+      "peak_rss_bytes": 23511040,
+      "resource_output": "        0.05 real         0.04 user         0.00 sys\n            23511040  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2359  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  26  involuntary context switches\n           639114042  instructions retired\n           211909149  cycles elapsed\n            14287280  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 15.762292,
+      "verified": true,
+      "peak_rss_bytes": 2424832,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2424832  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 325  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   4  involuntary context switches\n           236420689  instructions retired\n            48715755  cycles elapsed\n             1360160  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 15.467458,
+      "verified": true,
+      "peak_rss_bytes": 2342912,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2342912  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 320  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   8  involuntary context switches\n           237455273  instructions retired\n            47569983  cycles elapsed\n             1278240  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 59.52825,
+      "verified": true,
+      "peak_rss_bytes": 23445504,
+      "resource_output": "        0.05 real         0.04 user         0.00 sys\n            23445504  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2355  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  38  involuntary context switches\n           638394987  instructions retired\n           211604670  cycles elapsed\n            14238152  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 72.151458,
+      "verified": true,
+      "peak_rss_bytes": 23674880,
+      "resource_output": "        0.06 real         0.05 user         0.01 sys\n            23674880  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2369  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  83  involuntary context switches\n           640436326  instructions retired\n           229343124  cycles elapsed\n            14451120  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 15.95275,
+      "verified": true,
+      "peak_rss_bytes": 2392064,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2392064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  10  involuntary context switches\n           238278125  instructions retired\n            48959392  cycles elapsed\n             1327392  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 15.856458,
+      "verified": true,
+      "peak_rss_bytes": 2408448,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2408448  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 324  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   8  involuntary context switches\n           238210754  instructions retired\n            48205418  cycles elapsed\n             1343776  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 57.720875,
+      "verified": true,
+      "peak_rss_bytes": 23429120,
+      "resource_output": "        0.05 real         0.04 user         0.00 sys\n            23429120  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2354  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  26  involuntary context switches\n           640212114  instructions retired\n           209489609  cycles elapsed\n            14205360  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 60.532667,
+      "verified": true,
+      "peak_rss_bytes": 23445504,
+      "resource_output": "        0.05 real         0.04 user         0.01 sys\n            23445504  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2355  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  25  involuntary context switches\n           649956412  instructions retired\n           218655164  cycles elapsed\n            14205336  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 16.18025,
+      "verified": true,
+      "peak_rss_bytes": 2392064,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2392064  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 323  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   9  involuntary context switches\n           237544723  instructions retired\n            48902435  cycles elapsed\n             1327392  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 15.936417,
+      "verified": true,
+      "peak_rss_bytes": 2424832,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2424832  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 325  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   8  involuntary context switches\n           236464745  instructions retired\n            48746444  cycles elapsed\n             1360160  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 61.681208,
+      "verified": true,
+      "peak_rss_bytes": 23396352,
+      "resource_output": "        0.05 real         0.04 user         0.01 sys\n            23396352  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2353  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  43  involuntary context switches\n           652286794  instructions retired\n           222522313  cycles elapsed\n            14156184  peak memory footprint\n"
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 57.975042,
+      "verified": true,
+      "peak_rss_bytes": 23298048,
+      "resource_output": "        0.05 real         0.04 user         0.00 sys\n            23298048  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                2346  page reclaims\n                  44  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  22  involuntary context switches\n           640586419  instructions retired\n           208089937  cycles elapsed\n            14074288  peak memory footprint\n"
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 16.640375,
+      "verified": true,
+      "peak_rss_bytes": 2359296,
+      "resource_output": "        0.01 real         0.01 user         0.00 sys\n             2359296  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                 321  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   8  involuntary context switches\n           238178449  instructions retired\n            50155463  cycles elapsed\n             1294624  peak memory footprint\n"
+    }
+  ]
+}

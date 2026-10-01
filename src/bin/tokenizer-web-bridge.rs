@@ -5,7 +5,7 @@ use std::{
     io::{self, Read},
 };
 
-use themoretheless_tokenizer::web_bridge::{catalog, tokenization};
+use themoretheless_tokenizer::web_bridge::{catalog, execute_rush, tokenization};
 
 fn main() {
     let arguments: Vec<String> = env::args().skip(1).collect();
@@ -21,7 +21,11 @@ fn main() {
         eprintln!("failed to read source: {error}");
         std::process::exit(2);
     }
-    println!("{}", tokenization(language, &source, mode, layer));
+    if arguments.iter().any(|flag| flag == "--run-rush") {
+        println!("{}", execute_rush(&source));
+    } else {
+        println!("{}", tokenization(language, &source, mode, layer));
+    }
 }
 
 fn argument_value<'a>(arguments: &'a [String], name: &str) -> Option<&'a str> {

@@ -1,0 +1,36 @@
+   Compiling themoretheless-tokenizer-rush v0.4.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `bench` profile [optimized] target(s) in 3.00s
+     Running benches/memory.rs (target/release/build/themoretheless-tokenizer-rush/3bbee10d8fd325c9/out/memory-3bbee10d8fd325c9)
+workload	items	run	peak_extra_bytes	live_after_drop_bytes	allocation_calls
+eager	1000	1	97272	0	6405
+eager	1000	2	97272	0	6405
+eager	1000	3	97272	0	6405
+lazy	1000	1	24064	0	6379
+lazy	1000	2	24064	0	6379
+lazy	1000	3	24064	0	6379
+eager	100000	1	10501112	0	633426
+eager	100000	2	10501112	0	633426
+eager	100000	3	10501112	0	633426
+lazy	100000	1	24064	0	633379
+lazy	100000	2	24064	0	633379
+lazy	100000	3	24064	0	633379
+eager	1000000	1	83901432	0	6333435
+eager	1000000	2	83901432	0	6333435
+eager	1000000	3	83901432	0	6333435
+lazy	1000000	1	24064	0	6333379
+lazy	1000000	2	24064	0	6333379
+lazy	1000000	3	24064	0	6333379
+
+    Finished `bench` profile [optimized] target(s) in 0.04s
+     Running benches/runtime.rs (target/release/build/themoretheless-tokenizer-rush/53b8ee41c1490f5b/out/runtime-53b8ee41c1490f5b)
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections	prepared_run	1	945365.708	965714.375	1135104.959
+
+    Finished `bench` profile [optimized] target(s) in 0.03s
+     Running benches/runtime.rs (target/release/build/themoretheless-tokenizer-rush/53b8ee41c1490f5b/out/runtime-53b8ee41c1490f5b)
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	prepared_run	1	793719.709	864499.084	1614559.792

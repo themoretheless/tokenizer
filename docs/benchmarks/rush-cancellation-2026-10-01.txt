@@ -1,0 +1,8 @@
+   Compiling themoretheless-tokenizer-rush v0.4.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `bench` profile [optimized] target(s) in 0.59s
+     Running benches/cancellation.rs (target/release/build/themoretheless-tokenizer-rush/19c47f42a3510a65/out/cancellation-19c47f42a3510a65)
+workload	samples	min_us	median_us	p95_us	max_us
+while	25	1.250	1.875	2.667	2.750
+eager_range	25	1469.083	2526.375	5270.667	5433.791
+lazy_rejected_filter	25	2.625	4.584	6.584	6.917
+blocking_host_20ms	25	13813.792	17653.666	18744.542	19573.625

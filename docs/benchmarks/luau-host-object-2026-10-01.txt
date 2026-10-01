@@ -1,0 +1,4 @@
+   Compiling rush-luau-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/luau-runtime)
+    Finished `release` profile [optimized] target(s) in 0.31s
+     Running `docs/benchmarks/luau-runtime/target/release/rush-luau-host-object`
+rush-luau-comparison: alias mutation, wrong argument type, nonfinite rejection, deleted owner and VM reuse passed

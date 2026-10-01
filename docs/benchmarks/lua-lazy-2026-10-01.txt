@@ -1,0 +1,10 @@
+   Compiling rush-lua-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/lua-runtime)
+    Finished `release` profile [optimized] target(s) in 0.29s
+     Running `docs/benchmarks/lua-runtime/target/release/rush-lua-comparison`
+rush-lua-comparison · Lua 5.4 · mlua 0.12.1 · macos aarch64 · no execution budget; default GC
+Collection input items: 1000; verified expected sum: 333666
+7 samples, 10 warmups; VM and support-library construction excluded; local script bindings
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	compile	100	3.596	3.685	4.331
+collections_lazy	prepared_run	100	73.896	74.918	75.708
+collections_lazy	compile_and_run	100	79.418	79.745	80.465

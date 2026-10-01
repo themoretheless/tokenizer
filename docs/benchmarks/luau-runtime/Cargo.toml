@@ -1,0 +1,41 @@
+[package]
+name = "rush-luau-comparison"
+version = "0.1.0"
+edition = "2024"
+publish = false
+default-run = "rush-luau-comparison"
+
+[workspace]
+
+[[bin]]
+name = "rush-luau-comparison"
+path = "../lua-runtime-shared.rs"
+
+[dependencies]
+mlua = { version = "=0.12.1", features = ["luau"] }
+serde_json = "1"
+
+[[bin]]
+name = "rush-luau-cancellation"
+path = "cancellation.rs"
+
+
+[[bin]]
+name = "rush-luau-host-object"
+path = "../lua-host-object-shared.rs"
+
+[[bin]]
+name = "rush-luau-memory-limit"
+path = "../lua-memory-limit-shared.rs"
+
+[[bin]]
+name = "rush-luau-errors"
+path = "../lua-errors-shared.rs"
+
+[[bin]]
+name = "rush-luau-records"
+path = "../lua-records-shared.rs"
+
+[[bin]]
+name = "rush-luau-startup"
+path = "../lua-startup-shared.rs"
