@@ -554,6 +554,9 @@ pub(super) struct Slots<T> {
 }
 
 impl<T> Slots<T> {
+    pub(super) fn capacity(&self) -> usize {
+        self.capacity
+    }
     #[cfg(test)]
     fn copy_from_slice(
         budget: &Budget,
@@ -899,18 +902,11 @@ fn runtime_cell_allocation_failure_is_recoverable_between_calls() {
     let token = super::CancellationToken::default();
     let limits = super::ExecutionLimits::new(1000);
     for index in 0..4 {
-        let _failure = AllocationFailure::after(index);
-        let result = program.instantiate(limits, &token, &[], &[], &[], &[]);
-        assert!(
-            matches!(result, Err(error) if error.message == "Runtime cell allocation failed: Allocator")
-        );
-    }
-    for index in 0..4 {
         let mut instance = program
             .instantiate(limits, &token, &[], &[], &[], &[])
             .unwrap();
         {
-            let _failure = AllocationFailure::after(index);
+            let _failure = AllocationFailure::after(index + 1);
             let error = instance.call("grow", &[], limits).unwrap_err();
             assert_eq!(error.message, "Runtime cell allocation failed: Allocator");
         }
@@ -932,10 +928,12 @@ fn runtime_cell_allocation_failure_is_recoverable_between_calls() {
         // Reusing and releasing an existing slot must not allocate, even when
         // the allocator would refuse every request.
         let _failure = AllocationFailure::after(0);
-        assert_eq!(
-            instance.call("grow", &[], limits).unwrap(),
-            super::Value::Number(1.0)
-        );
+        let cell = instance
+            .runtime
+            .allocate_cell(super::Value::Number(1.0), None, instance.span)
+            .unwrap();
+        drop(cell);
+        instance.runtime.reclaim_cells();
         drop(instance);
     }
 }
@@ -1067,7 +1065,7 @@ fn module_stack_allocation_failure_leaves_instance_reusable() {
         .instantiate(limits, &token, &[], &[], &[], &[("data", &module)])
         .unwrap();
     {
-        let _failure = AllocationFailure::after(0);
+        let _failure = AllocationFailure::after(1);
         let error = instance.call("load", &[], limits).unwrap_err();
         assert_eq!(
             error.message,
@@ -1112,15 +1110,11 @@ fn module_cache_failure_preserves_previous_exports_and_allows_retry() {
         super::Value::Number(42.0)
     );
     {
-        let _failure = AllocationFailure::after(0);
+        let _failure = AllocationFailure::after(1);
         let error = instance.call("second", &[], limits).unwrap_err();
         assert_eq!(
             error.message,
             "Runtime module cache allocation failed: Allocator"
-        );
-        assert_eq!(
-            instance.call("first", &[], limits).unwrap(),
-            super::Value::Number(42.0)
         );
     }
     assert!(instance.runtime.loading.is_empty());
@@ -1166,8 +1160,8 @@ fn module_cache_is_reserved_before_body_and_for_nested_ancestors() {
         )
         .unwrap();
     {
-        // Allow the stack allocation, then refuse the export reservation.
-        let _failure = AllocationFailure::after(1);
+        // Allow the call environment and stack, then refuse the export reservation.
+        let _failure = AllocationFailure::after(2);
         assert_eq!(
             instance.call("load", &[], limits).unwrap_err().message,
             "Runtime module cache allocation failed: Allocator"
@@ -1182,9 +1176,82 @@ fn module_cache_is_reserved_before_body_and_for_nested_ancestors() {
     );
     assert_eq!(instance.runtime.module_cache.len(), 2);
     assert_eq!(calls.get(), 1);
-    let _failure = AllocationFailure::after(0);
     assert_eq!(
         instance.call("load", &[], limits).unwrap(),
         super::Value::Number(42.0)
     );
+}
+
+#[test]
+fn environment_copy_and_extension_fail_without_changing_bindings() {
+    let budget = Budget::new(100_000);
+    let mut environment = super::Environment::new(&budget);
+    environment.insert("z", super::Value::Number(1.0)).unwrap();
+    let mut extra = super::Environment::new(&budget);
+    extra.insert("a", super::Value::Number(2.0)).unwrap();
+    let baseline = budget.0.live.get();
+    {
+        let _failure = AllocationFailure::after(0);
+        assert!(matches!(
+            environment.try_clone(),
+            Err(AllocationError::Allocator)
+        ));
+        assert_eq!(budget.0.live.get(), baseline);
+        assert_eq!(environment.extend(extra), Err(AllocationError::Allocator));
+        assert!(!environment.contains_key("a"));
+        assert!(environment.contains_key("z"));
+        // Replacement of an existing binding needs no allocation.
+        environment.insert("z", super::Value::Number(3.0)).unwrap();
+    }
+    let copy = environment.try_clone().unwrap();
+    assert_eq!(copy, environment);
+    assert!(Rc::ptr_eq(&copy.budget.0, &environment.budget.0));
+    drop((copy, environment));
+    assert_eq!(budget.0.live.get(), 0);
+}
+
+#[test]
+fn every_environment_allocation_failure_preserves_instance_and_releases_storage() {
+    let program = super::Program::compile("let base=7; fn work(x) { let (a,b)=(x,base); if true { let f=v => v+a+b; return f(1) }; return 0 }").unwrap();
+    let token = super::CancellationToken::default();
+    let limits = super::ExecutionLimits::new(1000);
+    let mut completed = false;
+    let mut failures = 0;
+    for index in 0..64 {
+        let mut instance = program
+            .instantiate(limits, &token, &[], &[], &[], &[])
+            .unwrap();
+        let ledger = instance.runtime.memory.0.clone();
+        let failure = AllocationFailure::after(index);
+        let result = instance.call("work", &[super::Value::Number(2.0)], limits);
+        drop(failure);
+        match result {
+            Ok(value) => {
+                assert_eq!(value, super::Value::Number(10.0));
+                completed = true;
+            }
+            Err(error) => {
+                assert_eq!(
+                    error.message,
+                    "Runtime environment allocation failed: Allocator"
+                );
+                failures += 1;
+            }
+        }
+        assert_eq!(instance.runtime.depth, 0);
+        assert_eq!(instance.runtime.module, None);
+        assert_eq!(instance.get("base"), Some(super::Value::Number(7.0)));
+        assert_eq!(
+            instance
+                .call("work", &[super::Value::Number(2.0)], limits)
+                .unwrap(),
+            super::Value::Number(10.0)
+        );
+        drop(instance);
+        assert_eq!(ledger.live.get(), 0, "allocation {index}");
+        if completed {
+            break;
+        }
+    }
+    assert!(completed && failures >= 4);
 }

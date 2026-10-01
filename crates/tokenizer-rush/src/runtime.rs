@@ -43,29 +43,49 @@ impl Drop for CellId {
         }
     }
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 struct Environment<'s> {
-    bindings: HashMap<&'s str, Binding<'s>>,
+    bindings: memory::Slots<(&'s str, Binding<'s>)>,
+    budget: memory::Budget,
     parent: Option<Rc<Environment<'s>>>,
 }
+impl PartialEq for Environment<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        *self.bindings == *other.bindings && self.parent == other.parent
+    }
+}
 impl<'s> Environment<'s> {
-    fn new() -> Self {
+    fn new(budget: &memory::Budget) -> Self {
         Self {
-            bindings: HashMap::new(),
+            bindings: memory::Slots::new(budget, 0).expect("empty bindings require no allocation"),
+            budget: budget.clone(),
             parent: None,
         }
     }
     fn child(parent: Rc<Self>) -> Self {
-        Self {
-            bindings: HashMap::new(),
-            parent: Some(parent),
+        let mut child = Self::new(&parent.budget);
+        child.parent = Some(parent);
+        child
+    }
+    fn try_clone(&self) -> std::result::Result<Self, memory::AllocationError> {
+        let mut copy = Self::new(&self.budget);
+        copy.bindings.reserve(self.bindings.len())?;
+        for (name, binding) in self.bindings.iter() {
+            copy.bindings
+                .push((*name, binding.clone()))
+                .expect("copy capacity reserved");
         }
+        copy.parent = self.parent.clone();
+        Ok(copy)
     }
     fn get(&self, name: &str) -> Option<&Binding<'s>> {
         let mut current = self;
         loop {
-            if let Some(binding) = current.bindings.get(name) {
-                return Some(binding);
+            if let Ok(index) = current
+                .bindings
+                .binary_search_by_key(&name, |(key, _)| *key)
+            {
+                return Some(&current.bindings[index].1);
             }
             current = current.parent.as_deref()?;
         }
@@ -73,15 +93,35 @@ impl<'s> Environment<'s> {
     fn contains_key(&self, name: &str) -> bool {
         self.get(name).is_some()
     }
-    fn insert_binding(&mut self, name: &'s str, binding: Binding<'s>) {
-        self.bindings.insert(name, binding);
+    fn insert_binding(
+        &mut self,
+        name: &'s str,
+        binding: Binding<'s>,
+    ) -> std::result::Result<(), memory::AllocationError> {
+        match self.bindings.binary_search_by_key(&name, |(key, _)| *key) {
+            Ok(index) => self.bindings[index].1 = binding,
+            Err(index) => {
+                self.bindings.push((name, binding))?;
+                self.bindings[index..].rotate_right(1);
+            }
+        }
+        Ok(())
     }
-    fn insert(&mut self, name: &'s str, value: Value<'s>) {
-        self.insert_binding(name, Binding::Value(value));
+    fn insert(
+        &mut self,
+        name: &'s str,
+        value: Value<'s>,
+    ) -> std::result::Result<(), memory::AllocationError> {
+        self.insert_binding(name, Binding::Value(value))
     }
-    fn extend(&mut self, other: Self) {
+    fn extend(&mut self, mut other: Self) -> std::result::Result<(), memory::AllocationError> {
         debug_assert!(other.parent.is_none());
-        self.bindings.extend(other.bindings);
+        self.bindings.reserve(other.bindings.len())?;
+        while let Some((name, binding)) = other.bindings.pop() {
+            self.insert_binding(name, binding)
+                .expect("extension capacity reserved");
+        }
+        Ok(())
     }
 }
 
@@ -856,7 +896,8 @@ impl<'s> Program<'s> {
                 .expect("empty module cache requires no allocation"),
             loading: memory::Slots::new(&memory, 0)
                 .expect("empty module stack requires no allocation"),
-            module_globals: Environment::new(),
+            module_globals: Environment::new(&memory),
+            memory: memory.clone(),
             references: HashMap::from([(None, self.references.clone())]),
             current_references: self.references.clone(),
             cells: memory::Slots::new(&memory, 0)
@@ -886,9 +927,11 @@ impl<'s> Program<'s> {
                 .collect(),
         };
         runtime.check(self.parsed.module.span)?;
-        let mut environment = Environment::new();
+        let mut environment = Environment::new(&memory);
         for &(name, builtin) in builtin_catalog() {
-            environment.insert(name, Value::Builtin(builtin));
+            environment
+                .insert(name, Value::Builtin(builtin))
+                .map_err(|e| runtime.environment_error(self.parsed.module.span, e))?;
         }
         for function in functions
             .iter()
@@ -897,7 +940,9 @@ impl<'s> Program<'s> {
             if environment.contains_key(function.name) {
                 return runtime.error(self.parsed.module.span, "Duplicate host function name");
             }
-            environment.insert(function.name, Value::Host(function.clone()));
+            environment
+                .insert(function.name, Value::Host(function.clone()))
+                .map_err(|e| runtime.environment_error(self.parsed.module.span, e))?;
         }
         for (name, value) in inputs {
             runtime.host_value_size(value, self.parsed.module.span, 0)?;
@@ -907,9 +952,13 @@ impl<'s> Program<'s> {
                     "Invalid or duplicate input parameter",
                 );
             }
-            environment.insert(name, value.clone());
+            environment
+                .insert(name, value.clone())
+                .map_err(|e| runtime.environment_error(self.parsed.module.span, e))?;
         }
-        runtime.module_globals = environment.clone();
+        runtime.module_globals = environment
+            .try_clone()
+            .map_err(|e| runtime.environment_error(self.parsed.module.span, e))?;
         for (name, program) in modules {
             runtime.sources.insert(Some(*name), program.parsed.source);
             if runtime
@@ -924,7 +973,11 @@ impl<'s> Program<'s> {
                 .insert(Some(*name), program.references.clone());
         }
         let (initial_value, _) = runtime.statements(&self.parsed.module.items, &mut environment)?;
-        runtime.instance_roots = Some(environment.clone());
+        runtime.instance_roots = Some(
+            environment
+                .try_clone()
+                .map_err(|e| runtime.environment_error(self.parsed.module.span, e))?,
+        );
         let mut instance = ScriptInstance {
             runtime,
             environment,
@@ -955,6 +1008,7 @@ struct Runtime<'a, 's> {
     module_cache: memory::Slots<(&'s str, Value<'s>)>,
     loading: memory::Slots<&'s str>,
     module_globals: Environment<'s>,
+    memory: memory::Budget,
     references: HashMap<Option<&'s str>, Rc<Vec<CaptureReference<'s>>>>,
     current_references: Rc<Vec<CaptureReference<'s>>>,
     cells: memory::Slots<(Value<'s>, Option<ValueType>)>,
@@ -989,10 +1043,10 @@ impl<'s> Runtime<'_, 's> {
         }
         Ok(cell.index)
     }
-    fn capture(&self, span: Span, environment: &Environment<'s>) -> Rc<Environment<'s>> {
+    fn capture(&self, span: Span, environment: &Environment<'s>) -> Result<Rc<Environment<'s>>> {
         let references = &self.current_references;
         let start = references.partition_point(|reference| reference.usage.start < span.start);
-        let mut captured = Environment::new();
+        let mut captured = Environment::new(&self.memory);
         for reference in &references[start..] {
             if reference.usage.start >= span.end {
                 break;
@@ -1002,13 +1056,15 @@ impl<'s> Runtime<'_, 's> {
             }) {
                 continue;
             }
-            if !captured.bindings.contains_key(reference.name)
+            if !captured.contains_key(reference.name)
                 && let Some(binding) = environment.get(reference.name)
             {
-                captured.insert_binding(reference.name, binding.clone());
+                captured
+                    .insert_binding(reference.name, binding.clone())
+                    .map_err(|e| self.environment_error(span, e))?;
             }
         }
-        Rc::new(captured)
+        Ok(Rc::new(captured))
     }
     fn reclaim_cells(&mut self) {
         // Dropping a value can release captured bindings. Drain again without
@@ -1369,7 +1425,9 @@ impl<'s> Runtime<'_, 's> {
         match &pattern.kind {
             ExprKind::Name(name) => {
                 if name.text != "_" {
-                    local.insert(name.text, value.clone());
+                    local
+                        .insert(name.text, value.clone())
+                        .map_err(|e| self.environment_error(pattern.span, e))?;
                 }
                 Ok(true)
             }
@@ -1437,7 +1495,9 @@ impl<'s> Runtime<'_, 's> {
         match (&pattern.kind, value) {
             (ExprKind::Name(name), _) => {
                 if name.text != "_" {
-                    bindings.insert(name.text, value.clone());
+                    bindings
+                        .insert(name.text, value.clone())
+                        .map_err(|e| self.environment_error(pattern.span, e))?;
                 }
                 Ok(())
             }
@@ -1491,7 +1551,9 @@ impl<'s> Runtime<'_, 's> {
                         .module_cache
                         .binary_search_by_key(&name.text, |(key, _)| *key)
                     {
-                        environment.insert(name.text, self.module_cache[index].1.clone());
+                        environment
+                            .insert(name.text, self.module_cache[index].1.clone())
+                            .map_err(|e| self.environment_error(name.span, e))?;
                         continue;
                     }
                     if self.loading.contains(&name.text) {
@@ -1526,6 +1588,10 @@ impl<'s> Runtime<'_, 's> {
                             &format!("Runtime module cache allocation failed: {error:?}"),
                         );
                     }
+                    let module_environment = self
+                        .module_globals
+                        .try_clone()
+                        .map_err(|e| self.environment_error(name.span, e))?;
                     self.loading
                         .push(name.text)
                         .expect("module stack reserved before execution");
@@ -1535,7 +1601,7 @@ impl<'s> Runtime<'_, 's> {
                         &mut self.current_references,
                         self.references[&Some(name.text)].clone(),
                     );
-                    let result = self.scoped_statements(&module.items, self.module_globals.clone());
+                    let result = self.scoped_statements(&module.items, module_environment);
                     self.module = previous_module;
                     self.current_references = previous_references;
                     self.depth -= 1;
@@ -1553,7 +1619,9 @@ impl<'s> Runtime<'_, 's> {
                         .push((name.text, exports.clone()))
                         .expect("module export slot reserved before execution");
                     self.module_cache[index..].rotate_right(1);
-                    environment.insert(name.text, exports);
+                    environment
+                        .insert(name.text, exports)
+                        .map_err(|e| self.environment_error(name.span, e))?;
                 }
 
                 StmtKind::Destructure {
@@ -1561,9 +1629,11 @@ impl<'s> Runtime<'_, 's> {
                     value: expression,
                 } => {
                     value = self.expr(expression, environment)?;
-                    let mut bindings = Environment::new();
+                    let mut bindings = Environment::new(&self.memory);
                     self.bind_pattern(pattern, &value, &mut bindings)?;
-                    environment.extend(bindings);
+                    environment
+                        .extend(bindings)
+                        .map_err(|e| self.environment_error(statement.span, e))?;
                 }
                 StmtKind::Declaration {
                     name,
@@ -1578,10 +1648,14 @@ impl<'s> Runtime<'_, 's> {
                             .error(expression.span, "Value does not match its type annotation");
                     }
                     if *constant {
-                        environment.insert(name.text, value.clone());
+                        environment
+                            .insert(name.text, value.clone())
+                            .map_err(|e| self.environment_error(name.span, e))?;
                     } else {
                         let cell = self.allocate_cell(value.clone(), contract, expression.span)?;
-                        environment.insert_binding(name.text, Binding::Cell(cell));
+                        environment
+                            .insert_binding(name.text, Binding::Cell(cell))
+                            .map_err(|e| self.environment_error(name.span, e))?;
                     }
                 }
                 StmtKind::Function {
@@ -1600,10 +1674,12 @@ impl<'s> Runtime<'_, 's> {
                         name: Some(name.text),
                         module: self.module,
                         body: FunctionBody::Block(body.clone()),
-                        environment: self.capture(statement.span, environment),
+                        environment: self.capture(statement.span, environment)?,
                         references: self.current_references.clone(),
                     }));
-                    environment.insert(name.text, value.clone());
+                    environment
+                        .insert(name.text, value.clone())
+                        .map_err(|e| self.environment_error(name.span, e))?;
                 }
                 StmtKind::Return(expression) => {
                     return Ok((
@@ -1624,7 +1700,12 @@ impl<'s> Runtime<'_, 's> {
                         if !keep_going {
                             break;
                         }
-                        let result = self.scoped_statements(&body.stmts, environment.clone())?;
+                        let result = self.scoped_statements(
+                            &body.stmts,
+                            environment
+                                .try_clone()
+                                .map_err(|e| self.environment_error(statement.span, e))?,
+                        )?;
                         match result.1 {
                             Flow::Return => return Ok(result),
                             Flow::Break => break,
@@ -1641,8 +1722,12 @@ impl<'s> Runtime<'_, 's> {
                     let source = self.expr(iterable, environment)?;
                     let mut cursor = self.sequence_cursor(source, iterable.span)?;
                     while let Some(item) = self.sequence_next(&mut cursor, iterable.span)? {
-                        let mut local = environment.clone();
-                        local.insert(binding.text, item);
+                        let mut local = environment
+                            .try_clone()
+                            .map_err(|e| self.environment_error(statement.span, e))?;
+                        local
+                            .insert(binding.text, item)
+                            .map_err(|e| self.environment_error(binding.span, e))?;
                         let result = self.scoped_statements(&body.stmts, local)?;
                         match result.1 {
                             Flow::Return => return Ok(result),
@@ -1667,7 +1752,12 @@ impl<'s> Runtime<'_, 's> {
                         else_block.as_ref()
                     };
                     if let Some(block) = block {
-                        let result = self.scoped_statements(&block.stmts, environment.clone())?;
+                        let result = self.scoped_statements(
+                            &block.stmts,
+                            environment
+                                .try_clone()
+                                .map_err(|e| self.environment_error(statement.span, e))?,
+                        )?;
                         if result.1 != Flow::Next {
                             return Ok(result);
                         }
@@ -1680,6 +1770,15 @@ impl<'s> Runtime<'_, 's> {
             }
         }
         Ok((value, Flow::Next))
+    }
+    fn environment_error(&self, span: Span, error: memory::AllocationError) -> RuntimeError {
+        RuntimeError {
+            stack: Vec::new(),
+            location: None,
+            module: self.module.map(str::to_owned),
+            span,
+            message: format!("Runtime environment allocation failed: {error:?}"),
+        }
     }
     fn error<T>(&self, span: Span, message: &str) -> Result<T> {
         Err(RuntimeError {
@@ -1820,7 +1919,7 @@ impl<'s> Runtime<'_, 's> {
                 body: FunctionBody::Expression(*body.clone()),
                 name: None,
                 module: self.module,
-                environment: self.capture(expression.span, environment),
+                environment: self.capture(expression.span, environment)?,
                 references: self.current_references.clone(),
             }))),
             ExprKind::Tuple(items) | ExprKind::List(items) => {
@@ -1952,7 +2051,9 @@ impl<'s> Runtime<'_, 's> {
             ExprKind::Match { value, arms } => {
                 let value = self.expr(value, environment)?;
                 for arm in arms {
-                    let mut local = environment.clone();
+                    let mut local = environment
+                        .try_clone()
+                        .map_err(|e| self.environment_error(span, e))?;
                     let matched = self.match_value(&arm.pattern, &value, &mut local)?;
                     if matched {
                         if let Some(guard) = &arm.guard {
@@ -3011,7 +3112,9 @@ impl<'s> Runtime<'_, 's> {
         }
         let mut environment = Environment::child(function.environment.clone());
         if let Some(name) = function.name {
-            environment.insert(name, Value::Function(function.clone()));
+            environment
+                .insert(name, Value::Function(function.clone()))
+                .map_err(|e| self.environment_error(span, e))?;
         }
         let previous_module = self.module;
         let previous_references =

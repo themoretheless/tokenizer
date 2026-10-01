@@ -271,7 +271,7 @@ impl Usage {
                 .capacity()
                 .saturating_mul(std::mem::size_of::<(&str, Binding<'_>)>()),
         );
-        for binding in environment.bindings.values() {
+        for (_, binding) in environment.bindings.iter() {
             if let Binding::Value(value) = binding {
                 self.value(value);
             }

@@ -111,7 +111,7 @@ impl<'a, 's> Graph<'a, 's> {
                     if let Some(parent) = &environment.parent {
                         self.environment(from, parent);
                     }
-                    for binding in environment.bindings.values() {
+                    for (_, binding) in environment.bindings.iter() {
                         self.charge(1)?;
                         match binding {
                             Binding::Value(value) => self.work.push((from, Work::Value(value))),
