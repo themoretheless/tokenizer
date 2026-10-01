@@ -26,4 +26,3 @@ Traceback (most recent call last):
   File "/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/python-errors.py", line 9, in host_fail
     raise HostError('host rejected operation')
 HostError: host rejected operation
-

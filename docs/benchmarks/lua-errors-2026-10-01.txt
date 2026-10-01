@@ -14,4 +14,3 @@ runtime error: host rejected operation
 stack traceback:
 	[C]: in function 'host_fail'
 	[string "host-case.lua"]:1: in main chunk
-
