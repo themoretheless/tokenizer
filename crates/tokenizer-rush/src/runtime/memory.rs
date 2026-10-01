@@ -1476,3 +1476,63 @@ fn shared_node_releases_storage_when_payload_drop_panics() {
     assert!(result.is_err());
     assert_eq!(budget.0.live.get(), 0);
 }
+
+#[test]
+fn nested_import_allocation_failures_restore_context_and_release_captures() {
+    let program =
+        super::Program::compile("fn load() { import outer; return outer.answer() }").unwrap();
+    let inner = super::Program::compile("let n=42; {answer: () => n}").unwrap();
+    let outer = super::Program::compile("import inner; {answer: () => inner.answer()}").unwrap();
+    let token = super::CancellationToken::default();
+    let limits = super::ExecutionLimits::new(10_000);
+    let mut completed = false;
+    let mut failures = 0;
+    for index in 0..128 {
+        let mut instance = program
+            .instantiate(
+                limits,
+                &token,
+                &[],
+                &[],
+                &[],
+                &[("outer", &outer), ("inner", &inner)],
+            )
+            .unwrap();
+        let ledger = instance.runtime.memory.0.clone();
+        let references = instance.runtime.current_references.clone();
+        let failure = AllocationFailure::after(index);
+        let result = instance.call("load", &[], limits);
+        drop(failure);
+        match result {
+            Ok(value) => {
+                assert_eq!(value, super::Value::Number(42.0));
+                completed = true;
+            }
+            Err(error) => {
+                assert!(
+                    error.message.ends_with("allocation failed: Allocator"),
+                    "{index}: {error:?}"
+                );
+                failures += 1;
+            }
+        }
+        assert_eq!(instance.runtime.module, None, "allocation {index}");
+        assert_eq!(instance.runtime.depth, 0, "allocation {index}");
+        assert!(instance.runtime.loading.is_empty(), "allocation {index}");
+        assert!(
+            Rc::ptr_eq(&references, &instance.runtime.current_references),
+            "allocation {index}"
+        );
+        assert_eq!(
+            instance.call("load", &[], limits).unwrap(),
+            super::Value::Number(42.0),
+            "allocation {index}"
+        );
+        drop(instance);
+        assert_eq!(ledger.live.get(), 0, "allocation {index}");
+        if completed {
+            break;
+        }
+    }
+    assert!(completed && failures >= 8);
+}

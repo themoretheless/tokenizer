@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running unittests src/lib.rs (/tmp/rush-managed-memory-miri/miri/aarch64-apple-darwin/debug/build/themoretheless-tokenizer-rush/bc295cd2c466c3e9/out/themoretheless_tokenizer_rush-bc295cd2c466c3e9)
+
+running 1 test
+test runtime::memory::nested_import_allocation_failures_restore_context_and_release_captures ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 17.92s
+
