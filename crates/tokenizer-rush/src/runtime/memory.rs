@@ -1134,3 +1134,57 @@ fn module_cache_failure_preserves_previous_exports_and_allows_retry() {
     assert_eq!(instance.runtime.module_cache[0].0, "a");
     assert_eq!(instance.runtime.module_cache[1].0, "z");
 }
+
+#[test]
+fn module_cache_is_reserved_before_body_and_for_nested_ancestors() {
+    let program =
+        super::Program::compile("fn load() { import outer; return outer.answer }").unwrap();
+    let calls = Rc::new(Cell::new(0));
+    let counter = calls.clone();
+    let host = super::HostRegistration::new(
+        "initialized",
+        vec![],
+        super::ValueType::Number,
+        move |_, _| {
+            counter.set(counter.get() + 1);
+            Ok(super::Value::Number(0.0))
+        },
+    );
+    let outer =
+        super::Program::compile("initialized(); import inner; {answer: inner.answer}").unwrap();
+    let inner = super::Program::compile("{answer: 42}").unwrap();
+    let token = super::CancellationToken::default();
+    let limits = super::ExecutionLimits::new(1000);
+    let mut instance = program
+        .instantiate(
+            limits,
+            &token,
+            &[],
+            &[],
+            std::slice::from_ref(&host),
+            &[("outer", &outer), ("inner", &inner)],
+        )
+        .unwrap();
+    {
+        // Allow the stack allocation, then refuse the export reservation.
+        let _failure = AllocationFailure::after(1);
+        assert_eq!(
+            instance.call("load", &[], limits).unwrap_err().message,
+            "Runtime module cache allocation failed: Allocator"
+        );
+    }
+    assert_eq!(calls.get(), 0);
+    assert!(instance.runtime.loading.is_empty());
+    assert!(instance.runtime.module_cache.is_empty());
+    assert_eq!(
+        instance.call("load", &[], limits).unwrap(),
+        super::Value::Number(42.0)
+    );
+    assert_eq!(instance.runtime.module_cache.len(), 2);
+    assert_eq!(calls.get(), 1);
+    let _failure = AllocationFailure::after(0);
+    assert_eq!(
+        instance.call("load", &[], limits).unwrap(),
+        super::Value::Number(42.0)
+    );
+}

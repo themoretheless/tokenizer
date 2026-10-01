@@ -1511,12 +1511,24 @@ impl<'s> Runtime<'_, 's> {
                     if self.depth >= self.max_depth {
                         return self.error(name.span, "Execution limit exceeded");
                     }
-                    if let Err(error) = self.loading.push(name.text) {
+                    if let Err(error) = self.loading.reserve(1) {
                         return self.error(
                             name.span,
                             &format!("Runtime module stack allocation failed: {error:?}"),
                         );
                     }
+                    // Reserve an export slot for this module and every active
+                    // ancestor before executing any module body. Nested imports
+                    // must not consume their callers' reserved capacity.
+                    if let Err(error) = self.module_cache.reserve(self.loading.len() + 1) {
+                        return self.error(
+                            name.span,
+                            &format!("Runtime module cache allocation failed: {error:?}"),
+                        );
+                    }
+                    self.loading
+                        .push(name.text)
+                        .expect("module stack reserved before execution");
                     self.depth += 1;
                     let previous_module = self.module.replace(name.text);
                     let previous_references = std::mem::replace(
@@ -1537,12 +1549,9 @@ impl<'s> Runtime<'_, 's> {
                         .module_cache
                         .binary_search_by_key(&name.text, |(key, _)| *key)
                         .expect_err("an active module cannot already be cached");
-                    if let Err(error) = self.module_cache.push((name.text, exports.clone())) {
-                        return self.error(
-                            name.span,
-                            &format!("Runtime module cache allocation failed: {error:?}"),
-                        );
-                    }
+                    self.module_cache
+                        .push((name.text, exports.clone()))
+                        .expect("module export slot reserved before execution");
                     self.module_cache[index..].rotate_right(1);
                     environment.insert(name.text, exports);
                 }
