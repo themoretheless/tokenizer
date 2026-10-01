@@ -17,7 +17,7 @@ test('pre-aborted request does not start a command', async () => {
   await assert.rejects(runProcess('nonexistent-command', [], {signal:controller.signal}), /cancelled/)
 })
 
-test('POSIX cancellation stops both launcher and descendant', {skip:process.platform === 'win32', timeout:5000}, async () => {
+test('cancellation stops both launcher and descendant', {timeout:5000}, async () => {
   const { mkdtemp, readFile, rm } = await import('node:fs/promises')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')

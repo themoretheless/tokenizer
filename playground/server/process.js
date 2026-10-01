@@ -12,7 +12,10 @@ export function runProcess(command, args, { cwd, source = '', signal } = {}) {
       try {
         // Only target the fresh process group created by this spawn.
         if (grouped) process.kill(-child.pid, 'SIGKILL')
-        else child.kill('SIGKILL')
+        else {
+          const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true })
+          killer.on('error', reject)
+        }
       } catch (error) { if (error.code !== 'ESRCH') reject(error) }
     }
     signal?.addEventListener('abort', abort, {once:true})
