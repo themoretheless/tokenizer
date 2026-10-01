@@ -129,7 +129,7 @@ fn selected_state_roundtrips_json_and_restores_after_reload_atomically() {
     assert_eq!(new.export_state(&["health", "state"]).unwrap(), save);
 }
 #[test]
-fn aggregate_retained_budget_stops_growth_and_restore_and_preserves_previous_data() {
+fn aggregate_memory_budget_stops_growth_and_restore_and_preserves_previous_data() {
     let mut script = OwnedScriptInstance::new(
         "mut a=\"\"; mut b=\"\"; fn update() { a+=\"0123456789\"; b+=\"abcdefghij\" }",
         limits(),
@@ -140,7 +140,7 @@ fn aggregate_retained_budget_stops_growth_and_restore_and_preserves_previous_dat
     let mut failed = false;
     for _ in 0..30 {
         if let Err(error) = script.call("update", &[], limits()) {
-            assert!(error.message.contains("retained-data limit"));
+            assert!(error.message.contains("memory limit"));
             failed = true;
             break;
         }

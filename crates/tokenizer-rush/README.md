@@ -1231,18 +1231,51 @@ Functions, geometry, lazy sequences and host objects are rejected. Store engine
 object IDs as data; Voxy resolves them and supplies fresh host handles.
 `restore_state` validates every target and value before applying anything:
 targets must be existing mutable variables and respect their type annotations,
-data limits and retained-data budget. Invalid saves leave state unchanged.
+data limits and the instance allocation budget. Invalid saves leave state unchanged.
 
-`set_memory_limit(bytes)` sets an aggregate **retained-data budget** for an
-instance across calls. `memory_usage()` reports the same logical accounting.
-The accounting includes all cell values, captured environments, instance
-bindings, cached module exports and the initialization result; shared Rc
-payloads are visited once within a traversal. Strings and lists use capacity,
-records include logical entry overhead. Exceeding assignments and state
-restores are rejected; already completed earlier mutations are preserved.
+`set_memory_limit(bytes)` sets an aggregate allocation budget shared by every
+call on the instance. Each runtime allocation reserves its bytes **before**
+allocating; failure returns a runtime error. This covers strings, lists, records,
+vectors, geometry, mutable cells, captures, copied function/module syntax, type
+contracts, lazy stages, binding/module tables and collector scratch storage.
+Shared payloads share one reservation. Growing or copying storage admits both
+the old and replacement allocations while both exist. Dropping storage releases
+its reservation; a failed assignment keeps its previous value. Earlier completed
+mutations in the same call remain committed.
 
-This is not a strict limit on total heap allocations: AST/source storage,
-allocator overhead, temporary evaluation values and opaque allocations inside
-host contexts are excluded. The managed-allocation migration is still required
-for a hard ceiling over all runtime-owned allocations. Existing per-string,
-per-collection and execution limits remain independent.
+`memory_usage()` reports live reservations and `peak_memory_usage()` reports the
+highest admitted total since construction, including temporary evaluation
+storage. Lowering the limit below current usage fails without changing it.
+Historical peak usage can exceed a subsequently lowered limit. Reservations
+measure requested allocation sizes, including capacities and managed headers;
+standard Rc headers and stored public BTreeMap snapshots use conservative
+allocation bounds. They do not measure allocator overhead or process RSS.
+
+Use `Program::instantiate_with_memory_limit(..., bytes)` to enforce the limit
+before top-level initialization. `OwnedScriptInstance::new_with_memory_limit`
+and `with_host_and_memory_limit` also admit owned source/module text, input
+storage and their ownership wrapper. Existing constructors default to an
+unlimited budget. For example:
+
+```rust
+use themoretheless_tokenizer_rush::{ExecutionLimits, OwnedScriptInstance};
+let limits = ExecutionLimits::new(100_000);
+let mut script = OwnedScriptInstance::new_with_memory_limit(
+    "mut health=100; fn update(delta) { health-=delta }", limits, 256 * 1024,
+)?;
+script.call("update", &[themoretheless_tokenizer_rush::StateValue::Number(0.5)], limits)?;
+assert!(script.memory_usage() <= 256 * 1024);
+# Ok::<(), themoretheless_tokenizer_rush::RuntimeError>(())
+```
+
+The budget is for the instance's private runtime heap. Compiling the borrowed
+`Program`, compiler workspace used by owned constructors, the fixed budget
+controller, caller-owned `Value`/save/error outputs and opaque host resources
+(callback contexts, object payloads and host iterators) are outside it.
+Arguments copied for a host call are admitted before export; allocations made
+inside the host itself remain its responsibility. Returned host data is imported
+into managed storage before entering script state. Foreign immutable functions
+and sequences copy their syntax/captures under the receiving budget; foreign
+mutable captures remain unusable. Data nesting is capped at 64, including values
+built over multiple frames. Existing per-string, per-collection and execution
+limits remain independent.

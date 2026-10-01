@@ -61,11 +61,11 @@ impl ScriptInstance<'_, '_> {
         let mut state = ScriptState::new();
         for name in names {
             let value = self
-                .get(name)
+                .get_engine(name)
                 .ok_or_else(|| self.state_error(format!("Unknown state variable: {name}")))?;
             state.insert(
                 (*name).into(),
-                StateValue::from_value(&value).map_err(|e| self.state_error(e))?,
+                value.to_state().map_err(|e| self.state_error(e))?,
             );
         }
         Ok(state)
@@ -81,7 +81,8 @@ impl ScriptInstance<'_, '_> {
     }
     /// Validate the entire save before updating any mutable binding.
     pub fn restore_state(&mut self, state: &ScriptState) -> Result<()> {
-        let mut pending = Vec::new();
+        let mut pending = memory::Slots::new(&self.runtime.memory, state.len())
+            .map_err(|e| self.runtime.environment_error(self.span, e))?;
         for (name, value) in state {
             let Some(Binding::Cell(cell)) = self.environment.get(name) else {
                 return Err(self.state_error(format!(
@@ -89,11 +90,12 @@ impl ScriptInstance<'_, '_> {
                 )));
             };
             let index = self.runtime.cell_index(cell, self.span)?;
-            let value = value.to_value().map_err(|e| self.state_error(e))?;
+            let value = EngineValue::import_state(value, &self.runtime.memory, 0)
+                .map_err(|e| self.runtime.environment_error(self.span, e))?;
             if self.runtime.cells[index]
                 .1
                 .as_ref()
-                .is_some_and(|ty| !ty.accepts(&value))
+                .is_some_and(|ty| !ty.accepts_engine(&value))
             {
                 return Err(self.state_error(format!("State violates variable type: {name}")));
             }
@@ -102,22 +104,13 @@ impl ScriptInstance<'_, '_> {
             let checked = self.runtime.host_value_size(&value, self.span, 0);
             self.runtime.remaining = remaining;
             checked?;
-            pending.push((index, value));
+            pending
+                .push((index, value))
+                .map_err(|e| self.runtime.environment_error(self.span, e))?;
         }
-        let previous: Vec<_> = pending
-            .into_iter()
-            .map(|(index, value)| {
-                (
-                    index,
-                    std::mem::replace(&mut self.runtime.cells[index].0, value),
-                )
-            })
-            .collect();
-        if let Err(error) = self.enforce_memory_limit() {
-            for (index, value) in previous {
-                self.runtime.cells[index].0 = value;
-            }
-            return Err(error);
+        // Every replacement has already been allocated and validated. Commit cannot allocate.
+        for (index, value) in pending.iter_mut() {
+            self.runtime.cells[*index].0 = std::mem::replace(value, EngineValue::Null);
         }
         Ok(())
     }
@@ -130,6 +123,8 @@ struct OwnedSource {
     functions: Vec<Rc<HostFunction>>,
     contextual: Vec<HostRegistration>,
     modules: Vec<(String, String)>,
+    memory: memory::Budget,
+    _storage: memory::Reservation,
 }
 type OwnedDependent<'a> = ScriptInstance<'a, 'a>;
 self_cell::self_cell! {
@@ -154,7 +149,14 @@ pub struct OwnedScriptInstance {
 }
 impl OwnedScriptInstance {
     pub fn new(source: impl Into<String>, limits: ExecutionLimits) -> Result<Self> {
-        Self::with_host(
+        Self::new_with_memory_limit(source, limits, usize::MAX)
+    }
+    pub fn new_with_memory_limit(
+        source: impl Into<String>,
+        limits: ExecutionLimits,
+        bytes: usize,
+    ) -> Result<Self> {
+        Self::with_host_and_memory_limit(
             source,
             limits,
             CancellationToken::default(),
@@ -162,6 +164,7 @@ impl OwnedScriptInstance {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            bytes,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -174,13 +177,77 @@ impl OwnedScriptInstance {
         contextual: Vec<HostRegistration>,
         modules: Vec<(String, String)>,
     ) -> Result<Self> {
-        let owner = OwnedSource {
-            source: source.into(),
+        Self::with_host_and_memory_limit(
+            source,
+            limits,
             cancellation,
             inputs,
             functions,
             contextual,
             modules,
+            usize::MAX,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_host_and_memory_limit(
+        source: impl Into<String>,
+        limits: ExecutionLimits,
+        cancellation: CancellationToken,
+        inputs: Vec<(String, Value<'static>)>,
+        functions: Vec<Rc<HostFunction>>,
+        contextual: Vec<HostRegistration>,
+        modules: Vec<(String, String)>,
+        bytes: usize,
+    ) -> Result<Self> {
+        let source = source.into();
+        let memory = memory::Budget::new(bytes);
+        let storage_bytes = (std::mem::size_of::<OwnedSource>()
+            + std::mem::size_of::<OwnedDependent<'_>>()
+            + 64)
+            .checked_add(source.capacity())
+            .and_then(|n| {
+                n.checked_add(inputs.capacity() * std::mem::size_of::<(String, Value<'static>)>())
+            })
+            .and_then(|n| {
+                n.checked_add(functions.capacity() * std::mem::size_of::<Rc<HostFunction>>())
+            })
+            .and_then(|n| {
+                n.checked_add(contextual.capacity() * std::mem::size_of::<HostRegistration>())
+            })
+            .and_then(|n| {
+                n.checked_add(modules.capacity() * std::mem::size_of::<(String, String)>())
+            })
+            .and_then(|mut n| {
+                for (k, v) in &inputs {
+                    n = n
+                        .checked_add(k.capacity())?
+                        .checked_add(public_storage(v, 0)?)?;
+                }
+                for (name, source) in &modules {
+                    n = n
+                        .checked_add(name.capacity())?
+                        .checked_add(source.capacity())?;
+                }
+                Some(n)
+            })
+            .ok_or_else(|| {
+                memory_error(
+                    Span::new(0, source.len()),
+                    memory::AllocationError::Capacity,
+                )
+            })?;
+        let storage = memory
+            .reservation(storage_bytes)
+            .map_err(|e| memory_error(Span::new(0, source.len()), e))?;
+        let owner = OwnedSource {
+            source,
+            cancellation,
+            inputs,
+            functions,
+            contextual,
+            modules,
+            memory,
+            _storage: storage,
         };
         let cell = ScriptCell::try_new(owner, |owner| {
             let program = Program::compile(&owner.source)?;
@@ -190,18 +257,21 @@ impl OwnedScriptInstance {
                 .map(|(name, source)| Ok((name.as_str(), Program::compile(source)?)))
                 .collect::<Result<_>>()?;
             let modules: Vec<_> = modules.iter().map(|(name, p)| (*name, p)).collect();
-            let inputs: Vec<_> = owner
-                .inputs
-                .iter()
-                .map(|(name, value)| (name.as_str(), value.clone()))
-                .collect();
-            program.instantiate(
+            let mut inputs = memory::Slots::new(&owner.memory, owner.inputs.len())
+                .map_err(|e| memory_error(program.parsed.module.span, e))?;
+            for (name, value) in &owner.inputs {
+                inputs
+                    .push((name.as_str(), value))
+                    .map_err(|e| memory_error(program.parsed.module.span, e))?;
+            }
+            program.instantiate_on_budget(
                 limits,
                 &owner.cancellation,
                 &inputs,
                 &owner.functions,
                 &owner.contextual,
                 &modules,
+                owner.memory.clone(),
             )
         })?;
         Ok(Self { cell })
@@ -230,15 +300,24 @@ impl OwnedScriptInstance {
         limits: ExecutionLimits,
     ) -> Result<StateValue> {
         self.with_instance(|instance| {
-            let arguments = arguments
-                .iter()
-                .map(StateValue::to_value)
-                .collect::<std::result::Result<Vec<_>, _>>()
-                .map_err(|e| instance.state_error(e))?;
-            let value = instance.call(name, &arguments, limits)?;
-            StateValue::from_value(&value).map_err(|e| instance.state_error(e))
+            let function = instance.prepare_call(name, limits)?;
+            let mut imported = memory::Slots::new(&instance.runtime.memory, arguments.len())
+                .map_err(|e| instance.runtime.environment_error(instance.span, e))?;
+            for value in arguments {
+                imported
+                    .push(
+                        EngineValue::import_state(value, &instance.runtime.memory, 0)
+                            .map_err(|e| instance.runtime.environment_error(instance.span, e))?,
+                    )
+                    .map_err(|e| instance.runtime.environment_error(instance.span, e))?;
+            }
+            let value = instance
+                .runtime
+                .call(function, Cow::Borrowed(&imported), instance.span)?;
+            value.to_state().map_err(|e| instance.state_error(e))
         })
     }
+
     pub fn export_state(&mut self, names: &[&str]) -> Result<ScriptState> {
         self.with_instance(|i| i.export_state(names))
     }
@@ -248,176 +327,27 @@ impl OwnedScriptInstance {
     pub fn set_memory_limit(&mut self, bytes: usize) -> Result<()> {
         self.with_instance(|i| i.set_memory_limit(bytes))
     }
+    pub fn peak_memory_usage(&mut self) -> usize {
+        self.with_instance(|i| i.peak_memory_usage())
+    }
     pub fn memory_usage(&mut self) -> usize {
         self.with_instance(|i| i.memory_usage())
     }
 }
 
-/// Logical retained-data accounting. Rc payloads are counted once, cycles terminate.
-/// This is not allocator/RSS accounting; host-owned allocations are opaque.
-#[derive(Default)]
-struct Usage {
-    bytes: usize,
-    seen: std::collections::HashSet<(u8, usize)>,
-}
-impl Usage {
-    fn add(&mut self, bytes: usize) {
-        self.bytes = self.bytes.saturating_add(bytes);
-    }
-    fn environment(&mut self, environment: &Environment<'_>) {
-        self.add(
-            environment
-                .bindings
-                .capacity()
-                .saturating_mul(std::mem::size_of::<(&str, Binding<'_>)>()),
-        );
-        for (_, binding) in environment.bindings.iter() {
-            if let Binding::Value(value) = binding {
-                self.value(value);
-            }
-        }
-        if let Some(parent) = &environment.parent
-            && self
-                .seen
-                .insert((1, memory::Shared::as_ptr(parent) as usize))
-        {
-            self.environment(parent);
-        }
-    }
-    fn value(&mut self, value: &Value<'_>) {
-        match value {
-            Value::String(text) => self.add(text.capacity()),
-            Value::Vector(v) => self.add(v.capacity().saturating_mul(8)),
-            Value::List(v) | Value::Tuple(v) | Value::Variant(_, v) => {
-                self.add(
-                    v.capacity()
-                        .saturating_mul(std::mem::size_of::<Value<'_>>()),
-                );
-                for item in v {
-                    self.value(item);
-                }
-            }
-            Value::Record(v) => {
-                self.add(v.len().saturating_mul(
-                    std::mem::size_of::<(String, Value<'_>)>() + 3 * std::mem::size_of::<usize>(),
-                ));
-                for (key, value) in v {
-                    self.add(key.capacity());
-                    self.value(value);
-                }
-            }
-            Value::Function(f) if self.seen.insert((2, Rc::as_ptr(f) as usize)) => {
-                self.add(std::mem::size_of::<Closure<'_>>());
-                if self
-                    .seen
-                    .insert((1, memory::Shared::as_ptr(&f.environment) as usize))
-                {
-                    self.environment(&f.environment);
-                }
-            }
-            Value::Sequence(sequence) if self.seen.insert((3, Rc::as_ptr(sequence) as usize)) => {
-                self.add(std::mem::size_of::<Sequence<'_>>());
-                if let SequenceSource::List(list) = &sequence.source
-                    && self.seen.insert((4, memory::Buffer::as_ptr(list) as usize))
-                {
-                    self.add(list.capacity() * std::mem::size_of::<Value<'_>>());
-                    for v in list.iter() {
-                        self.value(v);
-                    }
-                }
-                if let Some(stages) = &sequence.stages.0
-                    && self
-                        .seen
-                        .insert((6, memory::Shared::as_ptr(stages) as usize))
-                {
-                    self.add(sequence.stages.capacity() * std::mem::size_of::<SequenceStage<'_>>());
-                    for stage in stages.iter() {
-                        self.value(&stage.callback);
-                    }
-                }
-            }
-            Value::Mesh(mesh) if self.seen.insert((5, Rc::as_ptr(mesh) as usize)) => {
-                self.add(
-                    std::mem::size_of_val(mesh.vertices())
-                        + std::mem::size_of_val(mesh.triangles()),
-                );
-            }
-            Value::Polygon(p) => self.add(std::mem::size_of_val(p.points())),
-            Value::Matrix(_) => self.add(std::mem::size_of::<crate::Matrix4>()),
-            Value::Quaternion(_) => self.add(std::mem::size_of::<crate::Quaternion>()),
-            _ => {}
-        }
-    }
-}
-impl Runtime<'_, '_> {
-    fn retained_usage(&self) -> Usage {
-        let mut usage = Usage::default();
-        usage.add(
-            self.cells
-                .len()
-                .saturating_mul(std::mem::size_of::<(Value<'_>, Option<ValueType>)>()),
-        );
-        for (value, _) in self.cells.iter() {
-            usage.value(value);
-        }
-        usage.environment(&self.module_globals);
-        if let Some(environment) = &self.instance_roots {
-            usage.environment(environment);
-        }
-        for (_, value) in self.module_cache.iter() {
-            usage.value(value);
-        }
-        usage
-    }
-    pub(super) fn enforce_retained_limit(
-        &self,
-        span: Span,
-        additional: Option<&Value<'_>>,
-    ) -> Result<()> {
-        if self.memory_limit == usize::MAX {
-            return Ok(());
-        }
-        let mut usage = self.retained_usage();
-        if let Some(value) = additional {
-            usage.value(value);
-        }
-        if usage.bytes > self.memory_limit {
-            self.error(span, "Instance retained-data limit exceeded")
-        } else {
-            Ok(())
-        }
-    }
-}
 impl ScriptInstance<'_, '_> {
-    /// Budget for retained script data across calls. Not a hard heap/RSS ceiling:
-    /// allocations in host contexts, ASTs and transient evaluation are excluded.
     pub fn set_memory_limit(&mut self, bytes: usize) -> Result<()> {
-        let previous = self.runtime.memory_limit;
-        self.runtime.memory_limit = bytes;
-        if let Err(error) = self.enforce_memory_limit() {
-            self.runtime.memory_limit = previous;
-            return Err(error);
-        }
+        self.runtime
+            .memory
+            .set_limit(bytes)
+            .map_err(|e| self.runtime.environment_error(self.span, e))?;
         Ok(())
     }
     pub fn memory_usage(&self) -> usize {
-        self.runtime.retained_usage().bytes
+        self.runtime.memory.live_bytes()
     }
-    pub(super) fn enforce_memory_limit(&self) -> Result<()> {
-        if self.memory_usage() > self.runtime.memory_limit {
-            self.runtime
-                .error(self.span, "Instance retained-data limit exceeded")
-        } else {
-            Ok(())
-        }
-    }
-}
-
-impl ScriptInstance<'_, '_> {
-    pub(super) fn initialize_usage(&mut self) {
-        let mut usage = Usage::default();
-        usage.value(&self.initial_value);
-        self.runtime.initial_data_bytes = usage.bytes;
+    pub fn peak_memory_usage(&self) -> usize {
+        self.runtime.memory.peak_bytes()
     }
 }
 
@@ -478,20 +408,35 @@ impl OwnedScriptInstance {
     }
 }
 
-impl Runtime<'_, '_> {
-    pub(super) fn enforce_cell_limit(&self, value: &Value<'_>, span: Span) -> Result<()> {
-        if self.memory_limit == usize::MAX {
-            return Ok(());
-        }
-        let mut usage = self.retained_usage();
-        usage.value(value);
-        if self.free_cells.is_empty() {
-            usage.add(std::mem::size_of::<(Value<'_>, Option<ValueType>)>());
-        }
-        if usage.bytes > self.memory_limit {
-            self.error(span, "Instance retained-data limit exceeded")
-        } else {
-            Ok(())
-        }
+fn public_storage(value: &Value<'_>, depth: usize) -> Option<usize> {
+    if depth > 64 {
+        return None;
     }
+    let mut n = 0usize;
+    match value {
+        Value::String(v) => n = v.capacity(),
+        Value::Vector(v) => n = v.capacity().checked_mul(std::mem::size_of::<f64>())?,
+        Value::List(v) | Value::Tuple(v) | Value::Variant(_, v) => {
+            n = v.capacity().checked_mul(std::mem::size_of::<Value<'_>>())?;
+            for v in v {
+                n = n.checked_add(public_storage(v, depth + 1)?)?;
+            }
+        }
+        Value::Record(v) => {
+            n = v
+                .len()
+                .checked_mul(12 * std::mem::size_of::<(String, Value<'_>)>() + 256)?;
+            for (k, v) in v {
+                n = n
+                    .checked_add(k.capacity())?
+                    .checked_add(public_storage(v, depth + 1)?)?;
+            }
+        }
+        Value::Matrix(_) => n = std::mem::size_of::<crate::Matrix4>(),
+        Value::Quaternion(_) => n = std::mem::size_of::<crate::Quaternion>(),
+        Value::Polygon(v) => n = v.storage_bytes(),
+        // Rc host resources and externally created executable values remain host-owned.
+        _ => {}
+    }
+    Some(n)
 }

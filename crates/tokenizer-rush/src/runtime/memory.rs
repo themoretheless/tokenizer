@@ -1,4 +1,4 @@
-//! Reservation primitive for the pending managed-value storage migration.
+//! Managed instance storage: admission before allocation and release on drop.
 //! Counts requested bytes, not allocator overhead or resident memory.
 use std::alloc::{Layout, alloc, alloc_zeroed, dealloc};
 use std::ptr::NonNull;
@@ -80,15 +80,18 @@ impl Budget {
         }))
     }
 
-    #[cfg(test)]
+    pub(super) fn owns(&self, r: &Reservation) -> bool {
+        Rc::ptr_eq(&self.0, &r.ledger)
+    }
     pub(super) fn live_bytes(&self) -> usize {
         self.0.live.get()
     }
-    #[cfg(test)]
+    pub(super) fn available_bytes(&self) -> usize {
+        self.0.limit.get().saturating_sub(self.live_bytes())
+    }
     pub(super) fn peak_bytes(&self) -> usize {
         self.0.peak.get()
     }
-    #[cfg(test)]
     pub(super) fn set_limit(&self, bytes: usize) -> Result<(), AllocationError> {
         if self.live_bytes() > bytes {
             return Err(AllocationError::Limit);
@@ -96,7 +99,6 @@ impl Budget {
         self.0.limit.set(bytes);
         Ok(())
     }
-    #[cfg(test)]
     pub(super) fn reservation(&self, bytes: usize) -> Result<Reservation, AllocationError> {
         self.reserve(bytes).map_err(|_| AllocationError::Limit)
     }
@@ -137,9 +139,7 @@ pub(super) enum AllocationError {
     Limit,
     Capacity,
     Allocator,
-    #[cfg(test)]
     Depth,
-    #[cfg(test)]
     Unsupported,
     #[cfg(test)]
     Steps,
@@ -669,9 +669,6 @@ pub(super) struct Slots<T> {
 }
 
 impl<T> Slots<T> {
-    pub(super) fn capacity(&self) -> usize {
-        self.capacity
-    }
     #[cfg(test)]
     fn copy_from_slice(
         budget: &Budget,
@@ -1035,7 +1032,7 @@ fn runtime_cell_allocation_failure_is_recoverable_between_calls() {
         {
             let _failure = AllocationFailure::after(index + 1);
             let error = instance.call("grow", &[], limits).unwrap_err();
-            assert_eq!(error.message, "Runtime cell allocation failed: Allocator");
+            assert!(error.message.ends_with("allocation failed: Allocator"));
         }
         assert_eq!(instance.runtime.cells.len(), 1);
         assert_eq!(instance.runtime.cell_ids.len(), 1);
@@ -1052,13 +1049,13 @@ fn runtime_cell_allocation_failure_is_recoverable_between_calls() {
             instance.call("grow", &[], limits).unwrap(),
             super::Value::Number(1.0)
         );
-        // Reusing and releasing an existing slot must not allocate, even when
-        // the allocator would refuse every request.
-        let _failure = AllocationFailure::after(0);
+        // Releasing a published ID uses the preallocated queue. Headers still
+        // need admission even when a cell-table slot can be reused.
         let cell = instance
             .runtime
-            .allocate_cell(super::Value::Number(1.0), None, instance.span)
+            .allocate_cell(super::EngineValue::Number(1.0), None, instance.span)
             .unwrap();
+        let _failure = AllocationFailure::after(0);
         drop(cell);
         instance.runtime.reclaim_cells();
         drop(instance);
@@ -1313,9 +1310,11 @@ fn module_cache_is_reserved_before_body_and_for_nested_ancestors() {
 fn environment_copy_and_extension_fail_without_changing_bindings() {
     let budget = Budget::new(100_000);
     let mut environment = super::Environment::new(&budget);
-    environment.insert("z", super::Value::Number(1.0)).unwrap();
+    environment
+        .insert("z", super::EngineValue::Number(1.0))
+        .unwrap();
     let mut extra = super::Environment::new(&budget);
-    extra.insert("a", super::Value::Number(2.0)).unwrap();
+    extra.insert("a", super::EngineValue::Number(2.0)).unwrap();
     let baseline = budget.0.live.get();
     {
         let _failure = AllocationFailure::after(0);
@@ -1328,7 +1327,9 @@ fn environment_copy_and_extension_fail_without_changing_bindings() {
         assert!(!environment.contains_key("a"));
         assert!(environment.contains_key("z"));
         // Replacement of an existing binding needs no allocation.
-        environment.insert("z", super::Value::Number(3.0)).unwrap();
+        environment
+            .insert("z", super::EngineValue::Number(3.0))
+            .unwrap();
     }
     let copy = environment.try_clone().unwrap();
     assert_eq!(copy, environment);
@@ -1389,7 +1390,7 @@ fn environment_budget_counts_shared_parents_and_snapshot_copy_separately() {
     let node = std::mem::size_of::<SharedNode<super::Environment<'_>>>();
     let budget = Budget::new(slot * 2 + node);
     let mut parent = super::Environment::new(&budget);
-    parent.insert("x", super::Value::Number(1.0)).unwrap();
+    parent.insert("x", super::EngineValue::Number(1.0)).unwrap();
     let parent = Shared::new(&budget, parent).unwrap();
     let child = super::Environment::child(parent.clone());
     assert_eq!(budget.0.live.get(), slot + node);
@@ -1410,23 +1411,27 @@ fn environment_extension_only_reserves_new_names_and_is_atomic_at_limit() {
     let slot = std::mem::size_of::<(&str, super::Binding<'_>)>();
     let budget = Budget::new(slot * 2);
     let mut original = super::Environment::new(&budget);
-    original.insert("x", super::Value::Number(1.0)).unwrap();
+    original
+        .insert("x", super::EngineValue::Number(1.0))
+        .unwrap();
     let mut replacement = super::Environment::new(&budget);
-    replacement.insert("x", super::Value::Number(2.0)).unwrap();
+    replacement
+        .insert("x", super::EngineValue::Number(2.0))
+        .unwrap();
     // All capacity is occupied. Replacing an existing name still succeeds.
     original.extend(replacement).unwrap();
     assert_eq!(
         original.get("x"),
-        Some(&super::Binding::Value(super::Value::Number(2.0)))
+        Some(&super::Binding::Value(super::EngineValue::Number(2.0)))
     );
     assert_eq!(budget.0.live.get(), slot);
     let mut extra = super::Environment::new(&budget);
-    extra.insert("y", super::Value::Number(3.0)).unwrap();
+    extra.insert("y", super::EngineValue::Number(3.0)).unwrap();
     assert_eq!(original.extend(extra), Err(AllocationError::Limit));
     assert!(!original.contains_key("y"));
     assert_eq!(
         original.get("x"),
-        Some(&super::Binding::Value(super::Value::Number(2.0)))
+        Some(&super::Binding::Value(super::EngineValue::Number(2.0)))
     );
     assert_eq!(budget.0.live.get(), slot);
     drop(original);
@@ -1444,14 +1449,14 @@ fn returned_closure_keeps_capture_reservation_until_last_owner_drops() {
     let ledger = instance.runtime.memory.0.clone();
     let exported = instance.initial_value.clone();
     drop(instance);
-    assert_eq!(
-        ledger.live.get(),
-        std::mem::size_of::<(&str, super::Binding<'_>)>()
-            + std::mem::size_of::<SharedNode<super::Environment<'_>>>()
+    let captured = ledger.live.get();
+    assert!(
+        captured > std::mem::size_of::<SharedNode<super::Environment<'_>>>(),
+        "code, references and captures must remain reserved"
     );
     let shared = exported.clone();
     drop(exported);
-    assert!(ledger.live.get() > 0);
+    assert_eq!(ledger.live.get(), captured);
     drop(shared);
     assert_eq!(ledger.live.get(), 0);
 }
@@ -1552,7 +1557,7 @@ fn nested_import_allocation_failures_restore_context_and_release_captures() {
         assert_eq!(instance.runtime.depth, 0, "allocation {index}");
         assert!(instance.runtime.loading.is_empty(), "allocation {index}");
         assert!(
-            Rc::ptr_eq(&references, &instance.runtime.current_references),
+            references.as_ptr() == instance.runtime.current_references.as_ptr(),
             "allocation {index}"
         );
         assert_eq!(
@@ -1561,6 +1566,7 @@ fn nested_import_allocation_failures_restore_context_and_release_captures() {
             "allocation {index}"
         );
         drop(instance);
+        drop(references);
         assert_eq!(ledger.live.get(), 0, "allocation {index}");
         if completed {
             break;
@@ -1621,7 +1627,7 @@ fn collection_allocation_failure_preserves_live_cells_and_releases_temporary_gra
 fn sequence_stage_copy_failure_preserves_shared_original() {
     let budget = Budget::new(100_000);
     let stage = super::SequenceStage {
-        callback: super::Value::Builtin(super::Builtin::Some),
+        callback: super::EngineValue::Builtin(super::Builtin::Some),
         filter: false,
         span: themoretheless_tokenizer_core::Span { start: 0, end: 0 },
         module: None,
@@ -1652,13 +1658,13 @@ fn sequence_stage_copy_failure_preserves_shared_original() {
     assert_eq!(budget.0.live.get(), 0);
 }
 
-/// Shared immutable buffer. Clone shares the allocation and its reservation.
+/// Immutable buffer. Clone shares the allocation and its reservation.
 /// Construction and growth use Slots, so no infallible Vec growth bypasses the ledger.
 #[derive(Debug)]
-pub(super) struct Buffer<T>(Shared<Slots<T>>);
+pub(super) struct Buffer<T>(Shared<Slots<T>>, usize);
 impl<T> Clone for Buffer<T> {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self(self.0.clone(), self.1)
     }
 }
 impl<T: PartialEq> PartialEq for Buffer<T> {
@@ -1673,29 +1679,32 @@ impl<T> std::ops::Deref for Buffer<T> {
     }
 }
 impl<T> Buffer<T> {
-    pub(super) fn as_ptr(this: &Self) -> *const Slots<T> {
-        Shared::as_ptr(&this.0)
+    pub(super) fn from_slots(budget: &Budget, values: Slots<T>) -> Result<Self, AllocationError>
+    where
+        T: ItemDepth,
+    {
+        let depth = values.iter().map(ItemDepth::depth).max().unwrap_or(0);
+        if depth >= 64 {
+            return Err(AllocationError::Depth);
+        }
+        Shared::new(budget, values).map(|v| Self(v, depth))
     }
-    pub(super) fn strong_count(this: &Self) -> usize {
-        Shared::strong_count(&this.0)
-    }
-
-    pub(super) fn from_slots(budget: &Budget, values: Slots<T>) -> Result<Self, AllocationError> {
-        Shared::new(budget, values).map(Self)
+    pub(super) fn item_depth(&self) -> usize {
+        self.1
     }
     pub(super) fn from_iter(
         budget: &Budget,
         values: impl IntoIterator<Item = T>,
-    ) -> Result<Self, AllocationError> {
+    ) -> Result<Self, AllocationError>
+    where
+        T: ItemDepth,
+    {
         let values = values.into_iter();
         let mut storage = Slots::new(budget, values.size_hint().0)?;
         for value in values {
             storage.push(value)?;
         }
         Self::from_slots(budget, storage)
-    }
-    pub(super) fn capacity(&self) -> usize {
-        self.0.capacity()
     }
 }
 impl<'a, T> IntoIterator for &'a Buffer<T> {
@@ -1732,10 +1741,8 @@ impl<T: Clone> IntoIterator for Buffer<T> {
     }
 }
 
-#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Text(Buffer<u8>);
-#[cfg(test)]
 impl Text {
     pub(super) fn from_str(budget: &Budget, value: &str) -> Result<Self, AllocationError> {
         Buffer::from_iter(budget, value.bytes()).map(Self)
@@ -1760,37 +1767,34 @@ impl Text {
         Buffer::from_iter(budget, self.0.iter().chain(other.0.iter()).copied()).map(Self)
     }
 }
-#[cfg(test)]
 impl std::ops::Deref for Text {
     type Target = str;
     fn deref(&self) -> &str {
         self.as_str()
     }
 }
-#[cfg(test)]
 impl PartialOrd for Text {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
-#[cfg(test)]
 impl Ord for Text {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.as_str().cmp(other.as_str())
     }
 }
-#[cfg(test)]
 impl Eq for Text {}
 
-#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Record<T>(Buffer<(Text, T)>);
-#[cfg(test)]
 impl<T> Record<T> {
     pub(super) fn from_slots(
         budget: &Budget,
         mut values: Slots<(Text, T)>,
-    ) -> Result<Self, AllocationError> {
+    ) -> Result<Self, AllocationError>
+    where
+        T: ItemDepth,
+    {
         values.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         Buffer::from_slots(budget, values).map(Self)
     }
@@ -1800,9 +1804,6 @@ impl<T> Record<T> {
             .ok()
             .map(|i| &self.0[i].1)
     }
-    pub(super) fn contains_key(&self, key: &str) -> bool {
-        self.get(key).is_some()
-    }
     pub(super) fn len(&self) -> usize {
         self.0.len()
     }
@@ -1810,7 +1811,6 @@ impl<T> Record<T> {
         self.0.iter()
     }
 }
-#[cfg(test)]
 impl<'a, T> IntoIterator for &'a Record<T> {
     type Item = &'a (Text, T);
     type IntoIter = std::slice::Iter<'a, (Text, T)>;
@@ -1818,7 +1818,6 @@ impl<'a, T> IntoIterator for &'a Record<T> {
         self.iter()
     }
 }
-#[cfg(test)]
 impl<T: Clone> IntoIterator for Record<T> {
     type Item = (Text, T);
     type IntoIter = BufferIterator<(Text, T)>;
@@ -1826,58 +1825,183 @@ impl<T: Clone> IntoIterator for Record<T> {
         self.0.into_iter()
     }
 }
+impl<T> Buffer<T> {
+    pub(super) fn as_ptr(&self) -> *const Slots<T> {
+        Shared::as_ptr(&self.0)
+    }
+    pub(super) fn strong_count(&self) -> usize {
+        Shared::strong_count(&self.0)
+    }
+}
+impl<T: Clone + ItemDepth> Buffer<T> {
+    pub(super) fn push(&mut self, value: T) -> Result<(), AllocationError> {
+        let budget = Budget(self.0.storage.reservation.ledger.clone());
+        let mut values = Slots::new(
+            &budget,
+            self.len().checked_add(1).ok_or(AllocationError::Capacity)?,
+        )?;
+        values.extend(self.iter().cloned())?;
+        values.push(value)?;
+        *self = Self::from_slots(&budget, values)?;
+        Ok(())
+    }
+}
+impl<T> Record<T> {
+    pub(super) fn values(&self) -> impl Iterator<Item = &T> {
+        self.0.iter().map(|(_, v)| v)
+    }
+    pub(super) fn as_ptr(&self) -> *const Slots<(Text, T)> {
+        self.0.as_ptr()
+    }
+    pub(super) fn strong_count(&self) -> usize {
+        self.0.strong_count()
+    }
+}
+impl std::fmt::Display for Text {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Text {
+    pub(super) fn from_bytes(budget: &Budget, bytes: Slots<u8>) -> Result<Self, AllocationError> {
+        Buffer::from_slots(budget, bytes).map(Self)
+    }
+}
+
+// Reservation identity is deliberately absent from value equality.
+impl PartialEq for Reservation {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+/// Upper bound including alignment for std Rc's two counter words.
+pub(super) fn rc_bytes<T>() -> usize {
+    std::mem::size_of::<T>() + 2 * std::mem::size_of::<usize>() + std::mem::align_of::<T>()
+}
+#[derive(Debug)]
+pub(super) struct Table<K, V>(Slots<(K, V)>);
+impl<K: PartialEq, V> Table<K, V> {
+    pub(super) fn new(b: &Budget) -> Self {
+        Self(Slots::new(b, 0).expect("empty table"))
+    }
+    pub(super) fn insert(&mut self, key: K, value: V) -> Result<Option<V>, AllocationError> {
+        if let Some((_, v)) = self.0.iter_mut().find(|(k, _)| *k == key) {
+            return Ok(Some(std::mem::replace(v, value)));
+        }
+        self.0.push((key, value))?;
+        Ok(None)
+    }
+    pub(super) fn get<Q: ?Sized + PartialEq>(&self, key: &Q) -> Option<&V>
+    where
+        K: std::borrow::Borrow<Q>,
+    {
+        self.0
+            .iter()
+            .find(|(k, _)| std::borrow::Borrow::borrow(k) == key)
+            .map(|(_, v)| v)
+    }
+    pub(super) fn iter(&self) -> impl Iterator<Item = &(K, V)> {
+        self.0.iter()
+    }
+}
+impl<K: PartialEq, V> std::ops::Index<&K> for Table<K, V> {
+    type Output = V;
+    fn index(&self, k: &K) -> &V {
+        self.get(k).expect("registered key")
+    }
+}
+
+pub(super) trait ItemDepth {
+    fn depth(&self) -> usize {
+        0
+    }
+}
+impl ItemDepth for u8 {}
+impl ItemDepth for f64 {}
+impl ItemDepth for [f64; 2] {}
+impl ItemDepth for [f64; 3] {}
+impl ItemDepth for [usize; 3] {}
+impl ItemDepth for super::CaptureReference<'_> {}
+impl ItemDepth for Option<Shared<super::ast_memory::RuntimeType>> {}
+impl<T: ItemDepth> ItemDepth for (Text, T) {
+    fn depth(&self) -> usize {
+        self.1.depth()
+    }
+}
+impl<T> Record<T> {
+    pub(super) fn item_depth(&self) -> usize {
+        self.0.item_depth()
+    }
+}
 
 #[test]
-fn sequence_source_allocation_failure_releases_partial_buffer_and_allows_retry() {
-    let program = super::Program::compile("0").unwrap();
+fn shared_managed_values_release_every_failed_import_and_do_not_double_charge_aliases() {
+    let value = super::evaluate(
+        "{name:'scene',values:[Some('text'),vec3(1,2,3),identity()],pair:(true,null)}",
+        1000,
+    )
+    .unwrap();
+    let budget = Budget::new(100_000);
+    let mut completed = false;
+    let mut failures = 0;
+    for index in 0..64 {
+        let failure = AllocationFailure::after(index);
+        let result = super::EngineValue::import(&value, &budget);
+        drop(failure);
+        match result {
+            Err(AllocationError::Allocator) => failures += 1,
+            Ok(imported) => {
+                assert_eq!(imported.export(), value);
+                let before = budget.live_bytes();
+                budget.set_limit(before).unwrap();
+                let alias = imported.clone();
+                assert_eq!(budget.live_bytes(), before);
+                drop(imported);
+                assert_eq!(budget.live_bytes(), before);
+                drop(alias);
+                completed = true;
+            }
+            other => panic!("import {index}: {other:?}"),
+        }
+        assert_eq!(budget.live_bytes(), 0, "allocation {index}");
+        if completed {
+            break;
+        }
+    }
+    assert!(completed && failures > 10);
+}
+
+#[test]
+fn cell_headers_remain_admitted_until_the_last_weak_owner_is_released() {
     let token = super::CancellationToken::default();
-    let limits = super::ExecutionLimits::new(1000);
+    let program = super::Program::compile("fn make(){mut n=1;return ()=>n}").unwrap();
     let mut instance = program
-        .instantiate(limits, &token, &[], &[], &[], &[])
+        .instantiate(
+            super::ExecutionLimits::new(1000),
+            &token,
+            &[],
+            &[],
+            &[],
+            &[],
+        )
         .unwrap();
     let ledger = instance.runtime.memory.0.clone();
-    let baseline = ledger.live.get();
-    let items = vec![super::Value::Number(1.0), super::Value::Number(2.0)];
-    for index in 0..2 {
-        let failure = AllocationFailure::after(index);
-        let result = instance
-            .runtime
-            .sequence_cursor(super::Value::List(items.clone()), instance.span);
-        drop(failure);
-        assert!(
-            matches!(result, Err(error) if error.message == "Runtime sequence source allocation failed: Allocator")
-        );
-        assert_eq!(ledger.live.get(), baseline);
-    }
-    let mut cursor = instance
-        .runtime
-        .sequence_cursor(super::Value::List(items), instance.span)
+    let closure = instance
+        .call("make", &[], super::ExecutionLimits::new(1000))
         .unwrap();
-    assert_eq!(
-        instance
-            .runtime
-            .sequence_next(&mut cursor, instance.span)
-            .unwrap(),
-        Some(super::Value::Number(1.0))
-    );
-    assert_eq!(
-        instance
-            .runtime
-            .sequence_next(&mut cursor, instance.span)
-            .unwrap(),
-        Some(super::Value::Number(2.0))
-    );
-    assert_eq!(
-        instance
-            .runtime
-            .sequence_next(&mut cursor, instance.span)
-            .unwrap(),
-        None
-    );
-    assert!(ledger.live.get() > baseline);
-    drop(cursor);
-    assert_eq!(ledger.live.get(), baseline);
+    let index = 0;
+    let header = instance.runtime.cell_id_storage[index]
+        .as_ref()
+        .unwrap()
+        .clone();
+    drop(closure);
+    instance.runtime.reclaim_cells();
+    assert_eq!(instance.runtime.cell_ids[index].strong_count(), 0);
+    assert!(instance.runtime.memory.owns(&header));
     drop(instance);
+    assert!(ledger.live.get() > 0);
+    drop(header);
     assert_eq!(ledger.live.get(), 0);
 }
 
@@ -1902,11 +2026,63 @@ fn prototype_text_records_and_dynamic_reservations_release_their_budget() {
     entries.push((left.clone(), 1)).unwrap();
     let record = Record::from_slots(&budget, entries).unwrap();
     assert_eq!(record.len(), 2);
-    assert!(record.contains_key("α"));
+    assert!(record.get("α").is_some());
     assert_eq!(record.get("β🙂"), Some(&2));
     assert_eq!(record.iter().next().unwrap().0.as_str(), "α");
     let values: Vec<_> = record.into_iter().map(|(_, value)| value).collect();
     assert_eq!(values, [1, 2]);
     drop((left, right, joined));
     assert_eq!(budget.live_bytes(), 0);
+}
+
+impl ItemDepth for i32 {}
+
+#[test]
+fn sequence_source_allocation_failure_releases_partial_buffer_and_allows_retry() {
+    let program = super::Program::compile("0").unwrap();
+    let token = super::CancellationToken::default();
+    let limits = super::ExecutionLimits::new(1000);
+    let mut instance = program
+        .instantiate(limits, &token, &[], &[], &[], &[])
+        .unwrap();
+    let ledger = instance.runtime.memory.0.clone();
+    let baseline = ledger.live.get();
+    let items = super::Value::List(vec![super::Value::Number(1.0), super::Value::Number(2.0)]);
+    for index in 0..3 {
+        let failure = AllocationFailure::after(index);
+        let result = super::EngineValue::import(&items, &instance.runtime.memory)
+            .map_err(|e| instance.runtime.environment_error(instance.span, e))
+            .and_then(|v| instance.runtime.sequence_cursor(v, instance.span));
+        drop(failure);
+        assert!(
+            matches!(result,Err(error) if error.message.ends_with("allocation failed: Allocator"))
+        );
+        assert_eq!(ledger.live.get(), baseline);
+    }
+    let value = super::EngineValue::import(&items, &instance.runtime.memory).unwrap();
+    let mut cursor = instance
+        .runtime
+        .sequence_cursor(value, instance.span)
+        .unwrap();
+    for n in [1.0, 2.0] {
+        assert_eq!(
+            instance
+                .runtime
+                .sequence_next(&mut cursor, instance.span)
+                .unwrap(),
+            Some(super::EngineValue::Number(n))
+        );
+    }
+    assert_eq!(
+        instance
+            .runtime
+            .sequence_next(&mut cursor, instance.span)
+            .unwrap(),
+        None
+    );
+    assert!(ledger.live.get() > baseline);
+    drop(cursor);
+    assert_eq!(ledger.live.get(), baseline);
+    drop(instance);
+    assert_eq!(ledger.live.get(), 0);
 }

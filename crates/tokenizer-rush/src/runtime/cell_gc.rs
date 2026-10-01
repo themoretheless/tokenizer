@@ -1,5 +1,6 @@
 //! Trial reference counting for runtime-owned cells. References from outside the
 //! inspected graph (including active stack frames and host values) are roots.
+use super::engine_value::EngineValue as Value;
 use super::*;
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
@@ -9,6 +10,7 @@ enum Key {
     Environment(usize),
     Sequence(usize),
     List(usize),
+    Record(usize),
     Stages(usize),
 }
 struct Node {
@@ -23,6 +25,7 @@ enum Work<'a, 's> {
     Environment(&'a Environment<'s>),
     Sequence(&'a Sequence<'s>),
     List(&'a [Value<'s>]),
+    Record(&'a memory::Record<Value<'s>>),
     Stages(&'a [SequenceStage<'s>]),
 }
 struct Graph<'a, 's> {
@@ -164,18 +167,19 @@ impl<'a, 's> Graph<'a, 's> {
                         Rc::strong_count(sequence),
                         Work::Sequence(sequence),
                     )?,
-                    Value::List(values) | Value::Tuple(values) | Value::Variant(_, values) => {
-                        self.charge(values.len())?;
-                        self.work
-                            .extend(values.iter().map(|value| (from, Work::Value(value))))
-                            .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
-                    }
-                    Value::Record(fields) => {
-                        self.charge(fields.len())?;
-                        self.work
-                            .extend(fields.values().map(|value| (from, Work::Value(value))))
-                            .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
-                    }
+                    Value::List(values) | Value::Tuple(values) | Value::Variant(_, values) => self
+                        .edge(
+                            from,
+                            Key::List(values.as_ptr() as usize),
+                            values.strong_count(),
+                            Work::List(values),
+                        )?,
+                    Value::Record(fields) => self.edge(
+                        from,
+                        Key::Record(fields.as_ptr() as usize),
+                        fields.strong_count(),
+                        Work::Record(fields),
+                    )?,
                     _ => {}
                 },
                 Work::Function(function) => self.environment(from, &function.environment)?,
@@ -210,8 +214,8 @@ impl<'a, 's> Graph<'a, 's> {
                     if let SequenceSource::List(values) = &sequence.source {
                         self.edge(
                             from,
-                            Key::List(memory::Buffer::as_ptr(values) as usize),
-                            memory::Buffer::strong_count(values),
+                            Key::List(values.as_ptr() as usize),
+                            values.strong_count(),
                             Work::List(values),
                         )?;
                     }
@@ -232,6 +236,12 @@ impl<'a, 's> Graph<'a, 's> {
                                 .iter()
                                 .map(|stage| (from, Work::Value(&stage.callback))),
                         )
+                        .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
+                }
+                Work::Record(fields) => {
+                    self.charge(fields.len())?;
+                    self.work
+                        .extend(fields.values().map(|value| (from, Work::Value(value))))
                         .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
                 }
                 Work::List(values) => {

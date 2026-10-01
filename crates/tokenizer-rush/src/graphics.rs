@@ -12,6 +12,9 @@ impl Polygon {
         }
         Ok(Self { points })
     }
+    pub(crate) fn storage_bytes(&self) -> usize {
+        self.points.capacity() * std::mem::size_of::<[f64; 2]>()
+    }
     pub fn points(&self) -> &[[f64; 2]] {
         &self.points
     }

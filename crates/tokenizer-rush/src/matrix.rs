@@ -26,7 +26,7 @@ impl Matrix4 {
             None
         }
     }
-    pub(crate) fn apply(&self, vector: &[f64], point: bool) -> Option<Vec<f64>> {
+    pub(crate) fn apply_array(&self, vector: &[f64], point: bool) -> Option<[f64; 3]> {
         if vector.len() != 3 {
             return None;
         }
@@ -39,7 +39,11 @@ impl Matrix4 {
             return None;
         }
         let divisor = if point { output[3] } else { 1. };
-        let result: Vec<_> = output[..3].iter().map(|x| x / divisor).collect();
+        let result = [
+            output[0] / divisor,
+            output[1] / divisor,
+            output[2] / divisor,
+        ];
         result.iter().all(|n| n.is_finite()).then_some(result)
     }
 }
