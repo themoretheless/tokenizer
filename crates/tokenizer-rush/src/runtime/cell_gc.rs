@@ -18,11 +18,11 @@ struct Node {
 }
 enum Work<'a, 's> {
     Cell(usize),
-    Value(&'a Value<'s>),
+    RuntimeValue(&'a RuntimeValue<'s>),
     Function(&'a Closure<'s>),
     Environment(&'a Environment<'s>),
     Sequence(&'a Sequence<'s>),
-    List(&'a [Value<'s>]),
+    List(&'a [RuntimeValue<'s>]),
     Stages(&'a [SequenceStage<'s>]),
 }
 struct Graph<'a, 's> {
@@ -149,31 +149,37 @@ impl<'a, 's> Graph<'a, 's> {
             match work {
                 Work::Cell(index) => self
                     .work
-                    .push((from, Work::Value(&self.runtime.cells[index].0)))
+                    .push((from, Work::RuntimeValue(&self.runtime.cells[index].0)))
                     .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?,
-                Work::Value(value) => match value {
-                    Value::Function(function) => self.edge(
+                Work::RuntimeValue(value) => match value {
+                    RuntimeValue::Function(function) => self.edge(
                         from,
                         Key::Function(Rc::as_ptr(function) as usize),
                         Rc::strong_count(function),
                         Work::Function(function),
                     )?,
-                    Value::Sequence(sequence) => self.edge(
+                    RuntimeValue::Sequence(sequence) => self.edge(
                         from,
                         Key::Sequence(Rc::as_ptr(sequence) as usize),
                         Rc::strong_count(sequence),
                         Work::Sequence(sequence),
                     )?,
-                    Value::List(values) | Value::Tuple(values) | Value::Variant(_, values) => {
+                    RuntimeValue::List(values)
+                    | RuntimeValue::Tuple(values)
+                    | RuntimeValue::Variant(_, values) => {
                         self.charge(values.len())?;
                         self.work
-                            .extend(values.iter().map(|value| (from, Work::Value(value))))
+                            .extend(values.iter().map(|value| (from, Work::RuntimeValue(value))))
                             .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
                     }
-                    Value::Record(fields) => {
+                    RuntimeValue::Record(fields) => {
                         self.charge(fields.len())?;
                         self.work
-                            .extend(fields.values().map(|value| (from, Work::Value(value))))
+                            .extend(
+                                fields
+                                    .values()
+                                    .map(|value| (from, Work::RuntimeValue(value))),
+                            )
                             .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
                     }
                     _ => {}
@@ -186,9 +192,9 @@ impl<'a, 's> Graph<'a, 's> {
                     for (_, binding) in environment.bindings.iter() {
                         self.charge(1)?;
                         match binding {
-                            Binding::Value(value) => self
+                            Binding::RuntimeValue(value) => self
                                 .work
-                                .push((from, Work::Value(value)))
+                                .push((from, Work::RuntimeValue(value)))
                                 .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?,
                             Binding::Cell(id) => {
                                 // An opaque host can retain a value from another run. It
@@ -230,14 +236,14 @@ impl<'a, 's> Graph<'a, 's> {
                         .extend(
                             stages
                                 .iter()
-                                .map(|stage| (from, Work::Value(&stage.callback))),
+                                .map(|stage| (from, Work::RuntimeValue(&stage.callback))),
                         )
                         .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
                 }
                 Work::List(values) => {
                     self.charge(values.len())?;
                     self.work
-                        .extend(values.iter().map(|value| (from, Work::Value(value))))
+                        .extend(values.iter().map(|value| (from, Work::RuntimeValue(value))))
                         .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
                 }
             }
@@ -318,7 +324,7 @@ impl Runtime<'_, '_> {
         self.remaining = remaining;
         // No graph references remain while values and their captured IDs drop.
         for &index in unreachable?.iter() {
-            self.cells[index] = (Value::Null, None);
+            self.cells[index] = (RuntimeValue::Null, None);
         }
         self.reclaim_cells();
         Ok(())

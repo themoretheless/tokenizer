@@ -99,7 +99,9 @@ impl ScriptInstance<'_, '_> {
             }
             let remaining = self.runtime.remaining;
             self.runtime.remaining = usize::MAX;
-            let checked = self.runtime.host_value_size(&value, self.span, 0);
+            let checked = self
+                .runtime
+                .host_value_size(&value.clone().into(), self.span, 0);
             self.runtime.remaining = remaining;
             checked?;
             pending.push((index, value));
@@ -109,7 +111,7 @@ impl ScriptInstance<'_, '_> {
             .map(|(index, value)| {
                 (
                     index,
-                    std::mem::replace(&mut self.runtime.cells[index].0, value),
+                    std::mem::replace(&mut self.runtime.cells[index].0, value.into()),
                 )
             })
             .collect();
@@ -272,7 +274,7 @@ impl Usage {
                 .saturating_mul(std::mem::size_of::<(&str, Binding<'_>)>()),
         );
         for (_, binding) in environment.bindings.iter() {
-            if let Binding::Value(value) = binding {
+            if let Binding::RuntimeValue(value) = binding {
                 self.value(value);
             }
         }
@@ -284,29 +286,30 @@ impl Usage {
             self.environment(parent);
         }
     }
-    fn value(&mut self, value: &Value<'_>) {
+    fn value(&mut self, value: &RuntimeValue<'_>) {
         match value {
-            Value::String(text) => self.add(text.capacity()),
-            Value::Vector(v) => self.add(v.capacity().saturating_mul(8)),
-            Value::List(v) | Value::Tuple(v) | Value::Variant(_, v) => {
+            RuntimeValue::String(text) => self.add(text.capacity()),
+            RuntimeValue::Vector(v) => self.add(v.capacity().saturating_mul(8)),
+            RuntimeValue::List(v) | RuntimeValue::Tuple(v) | RuntimeValue::Variant(_, v) => {
                 self.add(
                     v.capacity()
-                        .saturating_mul(std::mem::size_of::<Value<'_>>()),
+                        .saturating_mul(std::mem::size_of::<RuntimeValue<'_>>()),
                 );
                 for item in v {
                     self.value(item);
                 }
             }
-            Value::Record(v) => {
+            RuntimeValue::Record(v) => {
                 self.add(v.len().saturating_mul(
-                    std::mem::size_of::<(String, Value<'_>)>() + 3 * std::mem::size_of::<usize>(),
+                    std::mem::size_of::<(String, RuntimeValue<'_>)>()
+                        + 3 * std::mem::size_of::<usize>(),
                 ));
                 for (key, value) in v {
                     self.add(key.capacity());
                     self.value(value);
                 }
             }
-            Value::Function(f) if self.seen.insert((2, Rc::as_ptr(f) as usize)) => {
+            RuntimeValue::Function(f) if self.seen.insert((2, Rc::as_ptr(f) as usize)) => {
                 self.add(std::mem::size_of::<Closure<'_>>());
                 if self
                     .seen
@@ -315,12 +318,14 @@ impl Usage {
                     self.environment(&f.environment);
                 }
             }
-            Value::Sequence(sequence) if self.seen.insert((3, Rc::as_ptr(sequence) as usize)) => {
+            RuntimeValue::Sequence(sequence)
+                if self.seen.insert((3, Rc::as_ptr(sequence) as usize)) =>
+            {
                 self.add(std::mem::size_of::<Sequence<'_>>());
                 if let SequenceSource::List(list) = &sequence.source
                     && self.seen.insert((4, memory::Buffer::as_ptr(list) as usize))
                 {
-                    self.add(list.capacity() * std::mem::size_of::<Value<'_>>());
+                    self.add(list.capacity() * std::mem::size_of::<RuntimeValue<'_>>());
                     for v in list.iter() {
                         self.value(v);
                     }
@@ -336,15 +341,15 @@ impl Usage {
                     }
                 }
             }
-            Value::Mesh(mesh) if self.seen.insert((5, Rc::as_ptr(mesh) as usize)) => {
+            RuntimeValue::Mesh(mesh) if self.seen.insert((5, Rc::as_ptr(mesh) as usize)) => {
                 self.add(
                     std::mem::size_of_val(mesh.vertices())
                         + std::mem::size_of_val(mesh.triangles()),
                 );
             }
-            Value::Polygon(p) => self.add(std::mem::size_of_val(p.points())),
-            Value::Matrix(_) => self.add(std::mem::size_of::<crate::Matrix4>()),
-            Value::Quaternion(_) => self.add(std::mem::size_of::<crate::Quaternion>()),
+            RuntimeValue::Polygon(p) => self.add(std::mem::size_of_val(p.points())),
+            RuntimeValue::Matrix(_) => self.add(std::mem::size_of::<crate::Matrix4>()),
+            RuntimeValue::Quaternion(_) => self.add(std::mem::size_of::<crate::Quaternion>()),
             _ => {}
         }
     }
@@ -355,7 +360,7 @@ impl Runtime<'_, '_> {
         usage.add(
             self.cells
                 .len()
-                .saturating_mul(std::mem::size_of::<(Value<'_>, Option<ValueType>)>()),
+                .saturating_mul(std::mem::size_of::<(RuntimeValue<'_>, Option<ValueType>)>()),
         );
         for (value, _) in self.cells.iter() {
             usage.value(value);
@@ -372,7 +377,7 @@ impl Runtime<'_, '_> {
     pub(super) fn enforce_retained_limit(
         &self,
         span: Span,
-        additional: Option<&Value<'_>>,
+        additional: Option<&RuntimeValue<'_>>,
     ) -> Result<()> {
         if self.memory_limit == usize::MAX {
             return Ok(());
@@ -416,7 +421,7 @@ impl ScriptInstance<'_, '_> {
 impl ScriptInstance<'_, '_> {
     pub(super) fn initialize_usage(&mut self) {
         let mut usage = Usage::default();
-        usage.value(&self.initial_value);
+        usage.value(&self.initial_value.clone().into());
         self.runtime.initial_data_bytes = usage.bytes;
     }
 }
@@ -479,14 +484,14 @@ impl OwnedScriptInstance {
 }
 
 impl Runtime<'_, '_> {
-    pub(super) fn enforce_cell_limit(&self, value: &Value<'_>, span: Span) -> Result<()> {
+    pub(super) fn enforce_cell_limit(&self, value: &RuntimeValue<'_>, span: Span) -> Result<()> {
         if self.memory_limit == usize::MAX {
             return Ok(());
         }
         let mut usage = self.retained_usage();
         usage.value(value);
         if self.free_cells.is_empty() {
-            usage.add(std::mem::size_of::<(Value<'_>, Option<ValueType>)>());
+            usage.add(std::mem::size_of::<(RuntimeValue<'_>, Option<ValueType>)>());
         }
         if usage.bytes > self.memory_limit {
             self.error(span, "Instance retained-data limit exceeded")

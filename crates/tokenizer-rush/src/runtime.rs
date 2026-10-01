@@ -12,11 +12,13 @@ use themoretheless_tokenizer_core::Span;
 mod cell_gc;
 mod instance;
 pub use instance::{OwnedScriptInstance, ScriptState, StateValue};
+mod host_value;
 mod memory;
+pub use host_value::Value;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Binding<'s> {
-    Value(Value<'s>),
+    RuntimeValue(RuntimeValue<'s>),
     Cell(Rc<CellId>),
 }
 /// Bindings and captured environments keep a slot alive. The runtime owns its
@@ -110,9 +112,9 @@ impl<'s> Environment<'s> {
     fn insert(
         &mut self,
         name: &'s str,
-        value: Value<'s>,
+        value: RuntimeValue<'s>,
     ) -> std::result::Result<(), memory::AllocationError> {
-        self.insert_binding(name, Binding::Value(value))
+        self.insert_binding(name, Binding::RuntimeValue(value))
     }
     fn extend(&mut self, mut other: Self) -> std::result::Result<(), memory::AllocationError> {
         debug_assert!(other.parent.is_none());
@@ -135,15 +137,15 @@ impl<'s> Environment<'s> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Value<'s> {
+enum RuntimeValue<'s> {
     HostObject(crate::HostObject),
     /// Angle stored in radians, distinct from an ordinary number.
     Angle(f64),
-    Variant(&'static str, Vec<Value<'s>>),
+    Variant(&'static str, Vec<RuntimeValue<'s>>),
     Mesh(Rc<crate::Mesh>),
     Quaternion(Box<crate::Quaternion>),
     String(String),
-    Record(BTreeMap<String, Value<'s>>),
+    Record(BTreeMap<String, RuntimeValue<'s>>),
     Matrix(Box<crate::Matrix4>),
     Polygon(crate::Polygon),
     Number(f64),
@@ -157,8 +159,8 @@ pub enum Value<'s> {
         step: f64,
     },
     Sequence(Rc<Sequence<'s>>),
-    List(Vec<Value<'s>>),
-    Tuple(Vec<Value<'s>>),
+    List(Vec<RuntimeValue<'s>>),
+    Tuple(Vec<RuntimeValue<'s>>),
     Function(Rc<Closure<'s>>),
     Builtin(Builtin),
     Host(Rc<HostFunction>),
@@ -212,13 +214,13 @@ pub struct Sequence<'s> {
 #[derive(Clone, Debug, PartialEq)]
 enum SequenceSource<'s> {
     Range { start: f64, end: f64, step: f64 },
-    List(memory::Buffer<Value<'s>>),
+    List(memory::Buffer<RuntimeValue<'s>>),
     Host(HostSource),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct SequenceStage<'s> {
-    callback: Value<'s>,
+    callback: RuntimeValue<'s>,
     filter: bool,
     span: Span,
     module: Option<&'s str>,
@@ -608,6 +610,47 @@ impl ValueType {
             _ => false,
         }
     }
+    fn accepts_runtime(&self, value: &RuntimeValue<'_>) -> bool {
+        match (self, value) {
+            (Self::HostObject(name), RuntimeValue::HostObject(object)) => {
+                *name == object.type_name() && object.is_alive()
+            }
+            (Self::Sequence, RuntimeValue::Sequence(_) | RuntimeValue::Range { .. }) => true,
+            (Self::Angle, RuntimeValue::Angle(angle)) => angle.is_finite(),
+            (Self::Option(_), RuntimeValue::Variant("None", values)) => values.is_empty(),
+            (Self::Option(ty), RuntimeValue::Variant("Some", values)) => {
+                values.len() == 1 && ty.accepts_runtime(&values[0])
+            }
+            (Self::Result(ty, _), RuntimeValue::Variant("Ok", values))
+            | (Self::Result(_, ty), RuntimeValue::Variant("Err", values)) => {
+                values.len() == 1 && ty.accepts_runtime(&values[0])
+            }
+            (Self::Tuple(types), RuntimeValue::Tuple(values)) => {
+                types.len() == values.len()
+                    && types
+                        .iter()
+                        .zip(values)
+                        .all(|(ty, value)| ty.accepts_runtime(value))
+            }
+            (Self::Mesh, RuntimeValue::Mesh(_)) => true,
+            (Self::Quaternion, RuntimeValue::Quaternion(_)) => true,
+            (Self::Matrix4, RuntimeValue::Matrix(matrix)) => {
+                matrix.rows().iter().flatten().all(|n| n.is_finite())
+            }
+            (Self::String, RuntimeValue::String(_)) => true,
+            (Self::Number, RuntimeValue::Number(n)) => n.is_finite(),
+            (Self::Bool, RuntimeValue::Bool(_))
+            | (Self::Null, RuntimeValue::Null)
+            | (Self::Polygon, RuntimeValue::Polygon(_)) => true,
+            (Self::Vector(size), RuntimeValue::Vector(values)) => {
+                values.len() == *size && values.iter().all(|n| n.is_finite())
+            }
+            (Self::List(element), RuntimeValue::List(values)) => {
+                values.iter().all(|v| element.accepts_runtime(v))
+            }
+            _ => false,
+        }
+    }
 }
 
 pub type HostCallback =
@@ -677,8 +720,8 @@ impl<'a, 's> ScriptInstance<'a, 's> {
     }
     pub fn get(&self, name: &str) -> Option<Value<'s>> {
         match self.environment.get(name)? {
-            Binding::Value(value) => Some(value.clone()),
-            Binding::Cell(cell) => Some(self.runtime.cells[cell.index].0.clone()),
+            Binding::RuntimeValue(value) => Some(value.clone().into()),
+            Binding::Cell(cell) => Some(self.runtime.cells[cell.index].0.clone().into()),
         }
     }
     /// Invoke a named callable with a fresh execution budget and the instance's token.
@@ -707,14 +750,17 @@ impl<'a, 's> ScriptInstance<'a, 's> {
             message: format!("Unknown function: {name}"),
         })?;
         for value in arguments {
-            self.runtime.host_value_size(value, self.span, 0)?;
+            self.runtime
+                .host_value_size(&value.clone().into(), self.span, 0)?;
         }
         self.enforce_memory_limit()?;
-        let value = self
-            .runtime
-            .call(function, Cow::Borrowed(arguments), self.span)?;
+        let value = self.runtime.call(
+            function.into(),
+            Cow::Owned(arguments.iter().cloned().map(Into::into).collect()),
+            self.span,
+        )?;
         self.enforce_memory_limit()?;
-        Ok(value)
+        Ok(value.into())
     }
 }
 
@@ -978,7 +1024,7 @@ impl<'s> Program<'s> {
         let mut environment = Environment::new(&memory);
         for &(name, builtin) in builtin_catalog() {
             environment
-                .insert(name, Value::Builtin(builtin))
+                .insert(name, RuntimeValue::Builtin(builtin))
                 .map_err(|e| runtime.environment_error(self.parsed.module.span, e))?;
         }
         for function in functions
@@ -989,11 +1035,11 @@ impl<'s> Program<'s> {
                 return runtime.error(self.parsed.module.span, "Duplicate host function name");
             }
             environment
-                .insert(function.name, Value::Host(function.clone()))
+                .insert(function.name, RuntimeValue::Host(function.clone()))
                 .map_err(|e| runtime.environment_error(self.parsed.module.span, e))?;
         }
         for (name, value) in inputs {
-            runtime.host_value_size(value, self.parsed.module.span, 0)?;
+            runtime.host_value_size(&value.clone().into(), self.parsed.module.span, 0)?;
             if environment.contains_key(name) {
                 return runtime.error(
                     self.parsed.module.span,
@@ -1001,7 +1047,7 @@ impl<'s> Program<'s> {
                 );
             }
             environment
-                .insert(name, value.clone())
+                .insert(name, value.clone().into())
                 .map_err(|e| runtime.environment_error(self.parsed.module.span, e))?;
         }
         runtime.module_globals = environment
@@ -1030,7 +1076,7 @@ impl<'s> Program<'s> {
             runtime,
             environment,
             span: self.parsed.module.span,
-            initial_value,
+            initial_value: initial_value.into(),
         };
         instance.initialize_usage();
         Ok(instance)
@@ -1053,13 +1099,13 @@ enum Flow {
 struct Runtime<'a, 's> {
     module: Option<&'s str>,
     modules: HashMap<&'s str, crate::Module<'s>>,
-    module_cache: memory::Slots<(&'s str, Value<'s>)>,
+    module_cache: memory::Slots<(&'s str, RuntimeValue<'s>)>,
     loading: memory::Slots<&'s str>,
     module_globals: Environment<'s>,
     memory: memory::Budget,
     references: HashMap<Option<&'s str>, Rc<Vec<CaptureReference<'s>>>>,
     current_references: Rc<Vec<CaptureReference<'s>>>,
-    cells: memory::Slots<(Value<'s>, Option<ValueType>)>,
+    cells: memory::Slots<(RuntimeValue<'s>, Option<ValueType>)>,
     released_cells: Rc<RefCell<memory::Slots<usize>>>,
     free_cells: memory::Slots<usize>,
     cell_ids: memory::Slots<Weak<CellId>>,
@@ -1126,7 +1172,7 @@ impl<'s> Runtime<'_, 's> {
             let Some(index) = released else {
                 break;
             };
-            self.cells[index] = (Value::Null, None);
+            self.cells[index] = (RuntimeValue::Null, None);
             self.free_cells
                 .push(index)
                 .expect("free list reserved with cell");
@@ -1134,7 +1180,7 @@ impl<'s> Runtime<'_, 's> {
     }
     fn allocate_cell(
         &mut self,
-        value: Value<'s>,
+        value: RuntimeValue<'s>,
         contract: Option<ValueType>,
         span: Span,
     ) -> Result<Rc<CellId>> {
@@ -1184,7 +1230,12 @@ impl<'s> Runtime<'_, 's> {
         self.cell_ids[index] = Rc::downgrade(&id);
         Ok(id)
     }
-    fn host_value_size(&mut self, value: &Value<'s>, span: Span, depth: usize) -> Result<()> {
+    fn host_value_size(
+        &mut self,
+        value: &RuntimeValue<'s>,
+        span: Span,
+        depth: usize,
+    ) -> Result<()> {
         if self.max_collection_items == usize::MAX && self.max_string_bytes == usize::MAX {
             return Ok(());
         }
@@ -1193,8 +1244,8 @@ impl<'s> Runtime<'_, 's> {
             return self.error(span, "Host value nesting limit exceeded");
         }
         match value {
-            Value::String(text) => self.string_growth(0, text.len(), span)?,
-            Value::List(items) | Value::Tuple(items) => {
+            RuntimeValue::String(text) => self.string_growth(0, text.len(), span)?,
+            RuntimeValue::List(items) | RuntimeValue::Tuple(items) => {
                 self.collection_growth(0, items.len(), span)?;
                 for item in items {
                     self.host_value_size(item, span, depth + 1)?;
@@ -1202,20 +1253,22 @@ impl<'s> Runtime<'_, 's> {
             }
             // Option/Result payloads have fixed arity, not collection length.
             // Their nested data still needs validation.
-            Value::Variant(_, items) => {
+            RuntimeValue::Variant(_, items) => {
                 for item in items {
                     self.host_value_size(item, span, depth + 1)?;
                 }
             }
-            Value::Record(fields) => {
+            RuntimeValue::Record(fields) => {
                 self.collection_growth(0, fields.len(), span)?;
                 for (key, value) in fields {
                     self.string_growth(0, key.len(), span)?;
                     self.host_value_size(value, span, depth + 1)?;
                 }
             }
-            Value::Polygon(polygon) => self.collection_growth(0, polygon.points().len(), span)?,
-            Value::Mesh(mesh) => {
+            RuntimeValue::Polygon(polygon) => {
+                self.collection_growth(0, polygon.points().len(), span)?
+            }
+            RuntimeValue::Mesh(mesh) => {
                 self.collection_growth(0, mesh.vertices().len(), span)?;
                 self.collection_growth(0, mesh.triangles().len(), span)?;
             }
@@ -1268,14 +1321,18 @@ impl<'s> Runtime<'_, 's> {
             })?;
         Ok(())
     }
-    fn sequence_cursor(&mut self, value: Value<'s>, span: Span) -> Result<SequenceCursor<'s>> {
+    fn sequence_cursor(
+        &mut self,
+        value: RuntimeValue<'s>,
+        span: Span,
+    ) -> Result<SequenceCursor<'s>> {
         let sequence = match value {
-            Value::Sequence(sequence) => sequence,
-            Value::Range { start, end, step } => Rc::new(Sequence {
+            RuntimeValue::Sequence(sequence) => sequence,
+            RuntimeValue::Range { start, end, step } => Rc::new(Sequence {
                 source: SequenceSource::Range { start, end, step },
                 stages: SequenceStages::default(),
             }),
-            Value::List(items) => Rc::new(Sequence {
+            RuntimeValue::List(items) => Rc::new(Sequence {
                 source: SequenceSource::List(
                     memory::Buffer::from_iter(&self.memory, items).map_err(|e| RuntimeError {
                         stack: Vec::new(),
@@ -1302,7 +1359,7 @@ impl<'s> Runtime<'_, 's> {
         &mut self,
         cursor: &mut SequenceCursor<'s>,
         span: Span,
-    ) -> Result<Option<Value<'s>>> {
+    ) -> Result<Option<RuntimeValue<'s>>> {
         if cursor.finished {
             return Ok(None);
         }
@@ -1341,8 +1398,9 @@ impl<'s> Runtime<'_, 's> {
                         cursor.host = None;
                         return Ok(None);
                     };
+                    let item: RuntimeValue = item.into();
                     self.host_value_size(&item, span, 0)?;
-                    if !source.item_type.accepts(&item) {
+                    if !source.item_type.accepts_runtime(&item) {
                         return self
                             .error(span, "Host sequence item does not match its declared type");
                     }
@@ -1365,7 +1423,7 @@ impl<'s> Runtime<'_, 's> {
                         return Ok(None);
                     }
                     cursor.previous = Some(current);
-                    Value::Number(current)
+                    RuntimeValue::Number(current)
                 }
             };
             cursor.index = cursor.index.checked_add(1).ok_or_else(|| RuntimeError {
@@ -1385,7 +1443,7 @@ impl<'s> Runtime<'_, 's> {
                         stage.span,
                     )
                     .and_then(|value| {
-                        if stage.filter && !matches!(value, Value::Bool(_)) {
+                        if stage.filter && !matches!(value, RuntimeValue::Bool(_)) {
                             self.error(stage.span, "Filter callback must return a boolean")
                         } else {
                             Ok(value)
@@ -1394,7 +1452,7 @@ impl<'s> Runtime<'_, 's> {
                 self.module = previous_module;
                 let result = result?;
                 if stage.filter {
-                    if result == Value::Bool(false) {
+                    if result == RuntimeValue::Bool(false) {
                         continue 'candidate;
                     }
                 } else {
@@ -1405,36 +1463,48 @@ impl<'s> Runtime<'_, 's> {
         }
     }
 
-    fn equal(&mut self, left: &Value<'_>, right: &Value<'_>, span: Span) -> Result<bool> {
+    fn equal(
+        &mut self,
+        left: &RuntimeValue<'_>,
+        right: &RuntimeValue<'_>,
+        span: Span,
+    ) -> Result<bool> {
         let mut pending = vec![(left, right)];
         while let Some((left, right)) = pending.pop() {
             self.charge(1, span)?;
             match (left, right) {
                 (
-                    Value::Sequence(_) | Value::Function(_) | Value::Host(_) | Value::Builtin(_),
+                    RuntimeValue::Sequence(_)
+                    | RuntimeValue::Function(_)
+                    | RuntimeValue::Host(_)
+                    | RuntimeValue::Builtin(_),
                     _,
                 )
                 | (
                     _,
-                    Value::Sequence(_) | Value::Function(_) | Value::Host(_) | Value::Builtin(_),
+                    RuntimeValue::Sequence(_)
+                    | RuntimeValue::Function(_)
+                    | RuntimeValue::Host(_)
+                    | RuntimeValue::Builtin(_),
                 ) => {
                     return self.error(span, "Functions and lazy sequences cannot be compared");
                 }
-                (Value::Variant(a, left), Value::Variant(b, right)) => {
+                (RuntimeValue::Variant(a, left), RuntimeValue::Variant(b, right)) => {
                     if a != b || left.len() != right.len() {
                         return Ok(false);
                     }
                     self.charge(left.len(), span)?;
                     pending.extend(left.iter().zip(right));
                 }
-                (Value::List(a), Value::List(b)) | (Value::Tuple(a), Value::Tuple(b)) => {
+                (RuntimeValue::List(a), RuntimeValue::List(b))
+                | (RuntimeValue::Tuple(a), RuntimeValue::Tuple(b)) => {
                     if a.len() != b.len() {
                         return Ok(false);
                     }
                     self.charge(a.len(), span)?;
                     pending.extend(a.iter().zip(b));
                 }
-                (Value::Record(a), Value::Record(b)) => {
+                (RuntimeValue::Record(a), RuntimeValue::Record(b)) => {
                     if a.len() != b.len() {
                         return Ok(false);
                     }
@@ -1447,20 +1517,20 @@ impl<'s> Runtime<'_, 's> {
                         pending.push((va, vb));
                     }
                 }
-                (Value::String(a), Value::String(b)) => {
+                (RuntimeValue::String(a), RuntimeValue::String(b)) => {
                     self.charge(a.len().max(b.len()), span)?;
                     if a != b {
                         return Ok(false);
                     }
                 }
-                (Value::Mesh(a), Value::Mesh(b)) => {
+                (RuntimeValue::Mesh(a), RuntimeValue::Mesh(b)) => {
                     self.charge(a.vertices().len().max(b.vertices().len()), span)?;
                     self.charge(a.triangles().len().max(b.triangles().len()), span)?;
                     if a != b {
                         return Ok(false);
                     }
                 }
-                (Value::Polygon(a), Value::Polygon(b)) => {
+                (RuntimeValue::Polygon(a), RuntimeValue::Polygon(b)) => {
                     self.charge(a.points().len().max(b.points().len()), span)?;
                     if a != b {
                         return Ok(false);
@@ -1478,7 +1548,7 @@ impl<'s> Runtime<'_, 's> {
     fn match_value(
         &mut self,
         pattern: &Expr<'s>,
-        value: &Value<'s>,
+        value: &RuntimeValue<'s>,
         local: &mut Environment<'s>,
     ) -> Result<bool> {
         self.charge(1, pattern.span)?;
@@ -1492,7 +1562,7 @@ impl<'s> Runtime<'_, 's> {
                 Ok(true)
             }
             ExprKind::Tuple(patterns) => {
-                let Value::Tuple(values) = value else {
+                let RuntimeValue::Tuple(values) = value else {
                     return Ok(false);
                 };
                 if patterns.len() != values.len() {
@@ -1506,7 +1576,7 @@ impl<'s> Runtime<'_, 's> {
                 Ok(true)
             }
             ExprKind::Map(patterns) => {
-                let Value::Record(fields) = value else {
+                let RuntimeValue::Record(fields) = value else {
                     return Ok(false);
                 };
                 for (key, pattern) in patterns {
@@ -1526,7 +1596,7 @@ impl<'s> Runtime<'_, 's> {
                 let ExprKind::Name(name) = &callee.kind else {
                     return Ok(false);
                 };
-                let Value::Variant(tag, values) = value else {
+                let RuntimeValue::Variant(tag, values) = value else {
                     return Ok(false);
                 };
                 if name.text != *tag || arguments.len() != values.len() {
@@ -1548,7 +1618,7 @@ impl<'s> Runtime<'_, 's> {
     fn bind_pattern(
         &self,
         pattern: &Expr<'s>,
-        value: &Value<'s>,
+        value: &RuntimeValue<'s>,
         bindings: &mut Environment<'s>,
     ) -> Result<()> {
         self.check(pattern.span)?;
@@ -1561,7 +1631,7 @@ impl<'s> Runtime<'_, 's> {
                 }
                 Ok(())
             }
-            (ExprKind::Map(entries), Value::Record(fields)) => {
+            (ExprKind::Map(entries), RuntimeValue::Record(fields)) => {
                 for (key, pattern) in entries {
                     let ExprKind::Name(name) = &key.kind else {
                         return self.error(key.span, "Record pattern keys must be names");
@@ -1573,20 +1643,22 @@ impl<'s> Runtime<'_, 's> {
                 }
                 Ok(())
             }
-            (ExprKind::Tuple(patterns), Value::Tuple(values)) if patterns.len() == values.len() => {
+            (ExprKind::Tuple(patterns), RuntimeValue::Tuple(values))
+                if patterns.len() == values.len() =>
+            {
                 for (pattern, value) in patterns.iter().zip(values) {
                     self.bind_pattern(pattern, value, bindings)?;
                 }
                 Ok(())
             }
-            _ => self.error(pattern.span, "Value does not match binding pattern"),
+            _ => self.error(pattern.span, "RuntimeValue does not match binding pattern"),
         }
     }
     fn scoped_statements(
         &mut self,
         statements: &[Stmt<'s>],
         mut environment: Environment<'s>,
-    ) -> Result<(Value<'s>, Flow)> {
+    ) -> Result<(RuntimeValue<'s>, Flow)> {
         let result = self.statements(statements, &mut environment);
         drop(environment);
         self.reclaim_cells();
@@ -1596,8 +1668,8 @@ impl<'s> Runtime<'_, 's> {
         &mut self,
         statements: &[Stmt<'s>],
         environment: &mut Environment<'s>,
-    ) -> Result<(Value<'s>, Flow)> {
-        let mut value = Value::Null;
+    ) -> Result<(RuntimeValue<'s>, Flow)> {
+        let mut value = RuntimeValue::Null;
         for statement in statements {
             self.check(statement.span)?;
             if self.remaining == 0 {
@@ -1606,7 +1678,7 @@ impl<'s> Runtime<'_, 's> {
             self.remaining -= 1;
             match &statement.kind {
                 StmtKind::Import(name) => {
-                    value = Value::Null;
+                    value = RuntimeValue::Null;
                     if let Ok(index) = self
                         .module_cache
                         .binary_search_by_key(&name.text, |(key, _)| *key)
@@ -1667,7 +1739,7 @@ impl<'s> Runtime<'_, 's> {
                     self.depth -= 1;
                     self.loading.pop();
                     let (exports, _) = result?;
-                    if !matches!(exports, Value::Record(_)) {
+                    if !matches!(exports, RuntimeValue::Record(_)) {
                         return self.error(name.span, "Module must evaluate to an export record");
                     }
                     self.enforce_retained_limit(name.span, Some(&exports))?;
@@ -1703,9 +1775,14 @@ impl<'s> Runtime<'_, 's> {
                 } => {
                     let contract = ty.as_ref().map(|ty| self.annotation(ty)).transpose()?;
                     value = self.expr(expression, environment)?;
-                    if contract.as_ref().is_some_and(|ty| !ty.accepts(&value)) {
-                        return self
-                            .error(expression.span, "Value does not match its type annotation");
+                    if contract
+                        .as_ref()
+                        .is_some_and(|ty| !ty.accepts_runtime(&value))
+                    {
+                        return self.error(
+                            expression.span,
+                            "RuntimeValue does not match its type annotation",
+                        );
                     }
                     if *constant {
                         environment
@@ -1724,7 +1801,7 @@ impl<'s> Runtime<'_, 's> {
                     body,
                     result,
                 } => {
-                    value = Value::Function(Rc::new(Closure {
+                    value = RuntimeValue::Function(Rc::new(Closure {
                         parameters: parameters.iter().map(|p| p.pattern.clone()).collect(),
                         parameter_types: parameters
                             .iter()
@@ -1745,16 +1822,17 @@ impl<'s> Runtime<'_, 's> {
                     return Ok((
                         match expression {
                             Some(expression) => self.expr(expression, environment)?,
-                            None => Value::Null,
+                            None => RuntimeValue::Null,
                         },
                         Flow::Return,
                     ));
                 }
-                StmtKind::Break => return Ok((Value::Null, Flow::Break)),
-                StmtKind::Continue => return Ok((Value::Null, Flow::Continue)),
+                StmtKind::Break => return Ok((RuntimeValue::Null, Flow::Break)),
+                StmtKind::Continue => return Ok((RuntimeValue::Null, Flow::Continue)),
                 StmtKind::While { condition, body } => {
                     loop {
-                        let Value::Bool(keep_going) = self.expr(condition, environment)? else {
+                        let RuntimeValue::Bool(keep_going) = self.expr(condition, environment)?
+                        else {
                             return self.error(condition.span, "Condition must be boolean");
                         };
                         if !keep_going {
@@ -1772,7 +1850,7 @@ impl<'s> Runtime<'_, 's> {
                             _ => {}
                         }
                     }
-                    value = Value::Null;
+                    value = RuntimeValue::Null;
                 }
                 StmtKind::For {
                     binding,
@@ -1795,7 +1873,7 @@ impl<'s> Runtime<'_, 's> {
                             _ => {}
                         }
                     }
-                    value = Value::Null;
+                    value = RuntimeValue::Null;
                 }
                 StmtKind::Expr(expression) => value = self.expr(expression, environment)?,
                 StmtKind::If {
@@ -1803,7 +1881,7 @@ impl<'s> Runtime<'_, 's> {
                     then_block,
                     else_block,
                 } => {
-                    let Value::Bool(condition) = self.expr(condition, environment)? else {
+                    let RuntimeValue::Bool(condition) = self.expr(condition, environment)? else {
                         return self.error(statement.span, "Condition must be boolean");
                     };
                     let block = if condition {
@@ -1823,7 +1901,7 @@ impl<'s> Runtime<'_, 's> {
                         }
                         value = result.0;
                     } else {
-                        value = Value::Null;
+                        value = RuntimeValue::Null;
                     }
                 }
                 _ => return self.error(statement.span, "Statement is not executable yet"),
@@ -1849,7 +1927,11 @@ impl<'s> Runtime<'_, 's> {
             message: message.into(),
         })
     }
-    fn expr(&mut self, expression: &Expr<'s>, environment: &Environment<'s>) -> Result<Value<'s>> {
+    fn expr(
+        &mut self,
+        expression: &Expr<'s>,
+        environment: &Environment<'s>,
+    ) -> Result<RuntimeValue<'s>> {
         self.check(expression.span)?;
         if self.remaining == 0 || self.depth >= self.max_depth {
             return self.error(expression.span, "Execution limit exceeded");
@@ -1860,7 +1942,11 @@ impl<'s> Runtime<'_, 's> {
         self.depth -= 1;
         result
     }
-    fn inner(&mut self, expression: &Expr<'s>, environment: &Environment<'s>) -> Result<Value<'s>> {
+    fn inner(
+        &mut self,
+        expression: &Expr<'s>,
+        environment: &Environment<'s>,
+    ) -> Result<RuntimeValue<'s>> {
         let span = expression.span;
         match &expression.kind {
             ExprKind::String(text) => {
@@ -1874,7 +1960,7 @@ impl<'s> Runtime<'_, 's> {
                     self.string_growth(decoded.len(), character.len_utf8(), span)?;
                     decoded.push(character);
                 }
-                Ok(Value::String(decoded))
+                Ok(RuntimeValue::String(decoded))
             }
             ExprKind::Map(entries) => {
                 self.collection_growth(0, entries.len(), span)?;
@@ -1886,7 +1972,7 @@ impl<'s> Runtime<'_, 's> {
                             name.text.to_owned()
                         }
                         _ => match self.expr(key, environment)? {
-                            Value::String(key) => key,
+                            RuntimeValue::String(key) => key,
                             _ => {
                                 return self.error(key.span, "Record key must be a name or string");
                             }
@@ -1898,7 +1984,7 @@ impl<'s> Runtime<'_, 's> {
                     }
                     fields.insert(key, self.expr(expression, environment)?);
                 }
-                Ok(Value::Record(fields))
+                Ok(RuntimeValue::Record(fields))
             }
             ExprKind::Number(text) => (if text.contains('_') {
                 Cow::Owned(text.replace('_', ""))
@@ -1908,7 +1994,7 @@ impl<'s> Runtime<'_, 's> {
             .parse::<f64>()
             .ok()
             .filter(|n| n.is_finite())
-            .map(Value::Number)
+            .map(RuntimeValue::Number)
             .ok_or_else(|| RuntimeError {
                 stack: Vec::new(),
                 location: None,
@@ -1916,10 +2002,10 @@ impl<'s> Runtime<'_, 's> {
                 span,
                 message: "Unsupported or non-finite number".into(),
             }),
-            ExprKind::Bool(value) => Ok(Value::Bool(*value)),
-            ExprKind::Null => Ok(Value::Null),
+            ExprKind::Bool(value) => Ok(RuntimeValue::Bool(*value)),
+            ExprKind::Null => Ok(RuntimeValue::Null),
             ExprKind::Name(name) => match environment.get(name.text) {
-                Some(Binding::Value(value)) => Ok(value.clone()),
+                Some(Binding::RuntimeValue(value)) => Ok(value.clone()),
                 Some(Binding::Cell(cell)) => Ok(self.cells[self.cell_index(cell, span)?].0.clone()),
                 None => self.error(span, &format!("Unknown name: {}", name.text)),
             },
@@ -1961,7 +2047,7 @@ impl<'s> Runtime<'_, 's> {
                 if self.cells[index]
                     .1
                     .as_ref()
-                    .is_some_and(|ty| !ty.accepts(&assigned))
+                    .is_some_and(|ty| !ty.accepts_runtime(&assigned))
                 {
                     return self.error(span, "Assignment violates variable type");
                 }
@@ -1972,7 +2058,7 @@ impl<'s> Runtime<'_, 's> {
                 }
                 Ok(assigned)
             }
-            ExprKind::Lambda { parameters, body } => Ok(Value::Function(Rc::new(Closure {
+            ExprKind::Lambda { parameters, body } => Ok(RuntimeValue::Function(Rc::new(Closure {
                 parameters: parameters.clone(),
                 parameter_types: vec![None; parameters.len()],
                 result_type: None,
@@ -1989,9 +2075,9 @@ impl<'s> Runtime<'_, 's> {
                     .map(|item| self.expr(item, environment))
                     .collect::<Result<Vec<_>>>()?;
                 Ok(if matches!(expression.kind, ExprKind::Tuple(_)) {
-                    Value::Tuple(values)
+                    RuntimeValue::Tuple(values)
                 } else {
-                    Value::List(values)
+                    RuntimeValue::List(values)
                 })
             }
             ExprKind::If {
@@ -1999,22 +2085,22 @@ impl<'s> Runtime<'_, 's> {
                 then_value,
                 else_value,
             } => {
-                let Value::Bool(condition) = self.expr(condition, environment)? else {
+                let RuntimeValue::Bool(condition) = self.expr(condition, environment)? else {
                     return self.error(span, "Condition must be boolean");
                 };
                 self.expr(if condition { then_value } else { else_value }, environment)
             }
             ExprKind::Member { object, field } => {
                 let object = self.expr(object, environment)?;
-                if let Value::Mesh(mesh) = &object {
+                if let RuntimeValue::Mesh(mesh) = &object {
                     return match field.text {
                         "vertices" => {
                             self.collection_growth(0, mesh.vertices().len(), span)?;
                             self.charge(mesh.vertices().len(), span)?;
-                            Ok(Value::List(
+                            Ok(RuntimeValue::List(
                                 mesh.vertices()
                                     .iter()
-                                    .map(|v| Value::Vector(v.to_vec()))
+                                    .map(|v| RuntimeValue::Vector(v.to_vec()))
                                     .collect(),
                             ))
                         }
@@ -2024,12 +2110,14 @@ impl<'s> Runtime<'_, 's> {
                                 self.collection_growth(0, 3, span)?;
                             }
                             self.charge(mesh.triangles().len(), span)?;
-                            Ok(Value::List(
+                            Ok(RuntimeValue::List(
                                 mesh.triangles()
                                     .iter()
                                     .map(|t| {
-                                        Value::List(
-                                            t.iter().map(|i| Value::Number(*i as f64)).collect(),
+                                        RuntimeValue::List(
+                                            t.iter()
+                                                .map(|i| RuntimeValue::Number(*i as f64))
+                                                .collect(),
                                         )
                                     })
                                     .collect(),
@@ -2038,7 +2126,7 @@ impl<'s> Runtime<'_, 's> {
                         _ => self.error(field.span, "Unknown mesh field"),
                     };
                 }
-                if let Value::Record(fields) = object {
+                if let RuntimeValue::Record(fields) = object {
                     return fields.get(field.text).cloned().ok_or_else(|| RuntimeError {
                         stack: Vec::new(),
                         location: None,
@@ -2047,8 +2135,8 @@ impl<'s> Runtime<'_, 's> {
                         message: format!("Unknown field: {}", field.text),
                     });
                 }
-                if !matches!(object, Value::Vector(_)) {
-                    return self.error(field.span, "Value does not support member access");
+                if !matches!(object, RuntimeValue::Vector(_)) {
+                    return self.error(field.span, "RuntimeValue does not support member access");
                 }
                 let axis = match field.text {
                     "x" => 0,
@@ -2058,10 +2146,10 @@ impl<'s> Runtime<'_, 's> {
                     _ => return self.error(field.span, "Unknown vector component"),
                 };
                 match object {
-                    Value::Vector(values) => values
+                    RuntimeValue::Vector(values) => values
                         .get(axis)
                         .copied()
-                        .map(Value::Number)
+                        .map(RuntimeValue::Number)
                         .ok_or_else(|| RuntimeError {
                             stack: Vec::new(),
                             location: None,
@@ -2075,8 +2163,8 @@ impl<'s> Runtime<'_, 's> {
             ExprKind::Index { object, index } => {
                 let object = self.expr(object, environment)?;
                 let index = self.expr(index, environment)?;
-                if let Value::Record(fields) = &object {
-                    let Value::String(key) = index else {
+                if let RuntimeValue::Record(fields) = &object {
+                    let RuntimeValue::String(key) = index else {
                         return self.error(span, "Record index must be a string");
                     };
                     return fields.get(&key).cloned().ok_or_else(|| RuntimeError {
@@ -2087,17 +2175,20 @@ impl<'s> Runtime<'_, 's> {
                         message: format!("Unknown field: {key}"),
                     });
                 }
-                let Value::Number(index) = index else {
+                let RuntimeValue::Number(index) = index else {
                     return self.error(span, "Index must be an integer");
                 };
                 if index < 0.0 || index.fract() != 0.0 || index >= usize::MAX as f64 {
                     return self.error(span, "Invalid collection index");
                 }
                 let result = match object {
-                    Value::List(values) | Value::Tuple(values) => {
+                    RuntimeValue::List(values) | RuntimeValue::Tuple(values) => {
                         values.get(index as usize).cloned()
                     }
-                    Value::Vector(values) => values.get(index as usize).copied().map(Value::Number),
+                    RuntimeValue::Vector(values) => values
+                        .get(index as usize)
+                        .copied()
+                        .map(RuntimeValue::Number),
                     _ => return self.error(span, "Indexing requires a list or vector"),
                 };
                 result.ok_or_else(|| RuntimeError {
@@ -2118,8 +2209,8 @@ impl<'s> Runtime<'_, 's> {
                     if matched {
                         if let Some(guard) = &arm.guard {
                             match self.expr(guard, &local)? {
-                                Value::Bool(true) => {}
-                                Value::Bool(false) => continue,
+                                RuntimeValue::Bool(true) => {}
+                                RuntimeValue::Bool(false) => continue,
                                 _ => return self.error(guard.span, "Match guard must be boolean"),
                             }
                         }
@@ -2156,16 +2247,16 @@ impl<'s> Runtime<'_, 's> {
             }
             ExprKind::Unary { operator, value } => {
                 match (*operator, self.expr(value, environment)?) {
-                    ("-", Value::Number(n)) => Ok(Value::Number(-n)),
-                    ("+", Value::Number(n)) => Ok(Value::Number(n)),
-                    ("-", Value::Vector(mut values)) => {
+                    ("-", RuntimeValue::Number(n)) => Ok(RuntimeValue::Number(-n)),
+                    ("+", RuntimeValue::Number(n)) => Ok(RuntimeValue::Number(n)),
+                    ("-", RuntimeValue::Vector(mut values)) => {
                         for value in &mut values {
                             *value = -*value;
                         }
                         self.vector(values, span)
                     }
-                    ("+", Value::Vector(values)) => self.vector(values, span),
-                    ("!" | "not", Value::Bool(b)) => Ok(Value::Bool(!b)),
+                    ("+", RuntimeValue::Vector(values)) => self.vector(values, span),
+                    ("!" | "not", RuntimeValue::Bool(b)) => Ok(RuntimeValue::Bool(!b)),
                     _ => self.error(span, "Invalid unary operand"),
                 }
             }
@@ -2176,14 +2267,14 @@ impl<'s> Runtime<'_, 's> {
             } => {
                 let left = self.expr(left, environment)?;
                 if matches!(*operator, "and" | "&&" | "or" | "||") {
-                    let Value::Bool(left) = left else {
+                    let RuntimeValue::Bool(left) = left else {
                         return self.error(span, "Boolean operand required");
                     };
                     if left == matches!(*operator, "or" | "||") {
-                        return Ok(Value::Bool(left));
+                        return Ok(RuntimeValue::Bool(left));
                     }
                     let right = self.expr(right, environment)?;
-                    return if matches!(right, Value::Bool(_)) {
+                    return if matches!(right, RuntimeValue::Bool(_)) {
                         Ok(right)
                     } else {
                         self.error(span, "Boolean operand required")
@@ -2192,37 +2283,46 @@ impl<'s> Runtime<'_, 's> {
                 let right = self.expr(right, environment)?;
                 if matches!(*operator, "==" | "!=") {
                     let equal = self.equal(&left, &right, span)?;
-                    return Ok(Value::Bool(if *operator == "==" { equal } else { !equal }));
+                    return Ok(RuntimeValue::Bool(if *operator == "==" {
+                        equal
+                    } else {
+                        !equal
+                    }));
                 }
-                if let (Value::String(a), Value::String(b), "+") = (&left, &right, *operator) {
+                if let (RuntimeValue::String(a), RuntimeValue::String(b), "+") =
+                    (&left, &right, *operator)
+                {
                     self.string_growth(a.len(), b.len(), span)?;
                     self.charge(a.len(), span)?;
                     self.charge(b.len(), span)?;
-                    return Ok(Value::String(format!("{a}{b}")));
+                    return Ok(RuntimeValue::String(format!("{a}{b}")));
                 }
-                if matches!(left, Value::Angle(_)) || matches!(right, Value::Angle(_)) {
+                if matches!(left, RuntimeValue::Angle(_)) || matches!(right, RuntimeValue::Angle(_))
+                {
                     let radians = match (&left, &right, *operator) {
-                        (Value::Angle(a), Value::Angle(b), "+") => a + b,
-                        (Value::Angle(a), Value::Angle(b), "-") => a - b,
-                        (Value::Angle(a), Value::Number(b), "*")
-                        | (Value::Number(b), Value::Angle(a), "*") => a * b,
-                        (Value::Angle(a), Value::Number(b), "/") => a / b,
+                        (RuntimeValue::Angle(a), RuntimeValue::Angle(b), "+") => a + b,
+                        (RuntimeValue::Angle(a), RuntimeValue::Angle(b), "-") => a - b,
+                        (RuntimeValue::Angle(a), RuntimeValue::Number(b), "*")
+                        | (RuntimeValue::Number(b), RuntimeValue::Angle(a), "*") => a * b,
+                        (RuntimeValue::Angle(a), RuntimeValue::Number(b), "/") => a / b,
                         _ => return self.error(span, "Invalid angle operands"),
                     };
                     if !radians.is_finite() {
                         return self.error(span, "Non-finite angle");
                     }
-                    return Ok(Value::Angle(radians));
+                    return Ok(RuntimeValue::Angle(radians));
                 }
-                if let (Value::Quaternion(a), Value::Quaternion(b), "*") =
+                if let (RuntimeValue::Quaternion(a), RuntimeValue::Quaternion(b), "*") =
                     (&left, &right, *operator)
                 {
-                    return Ok(Value::Quaternion(Box::new(a.compose(b))));
+                    return Ok(RuntimeValue::Quaternion(Box::new(a.compose(b))));
                 }
-                if let (Value::Matrix(a), Value::Matrix(b), "*") = (&left, &right, *operator) {
+                if let (RuntimeValue::Matrix(a), RuntimeValue::Matrix(b), "*") =
+                    (&left, &right, *operator)
+                {
                     return a
                         .multiply(b)
-                        .map(|matrix| Value::Matrix(Box::new(matrix)))
+                        .map(|matrix| RuntimeValue::Matrix(Box::new(matrix)))
                         .ok_or_else(|| RuntimeError {
                             stack: Vec::new(),
                             location: None,
@@ -2231,25 +2331,30 @@ impl<'s> Runtime<'_, 's> {
                             message: "Matrix multiplication overflow".into(),
                         });
                 }
-                if matches!(left, Value::Vector(_)) || matches!(right, Value::Vector(_)) {
+                if matches!(left, RuntimeValue::Vector(_))
+                    || matches!(right, RuntimeValue::Vector(_))
+                {
                     let components = match (&left, &right, *operator) {
-                        (Value::Vector(a), Value::Vector(b), "+" | "-") if a.len() == b.len() => a
-                            .iter()
-                            .zip(b)
-                            .map(|(a, b)| if *operator == "+" { a + b } else { a - b })
-                            .collect(),
-                        (Value::Vector(a), Value::Number(b), "*" | "/") => a
+                        (RuntimeValue::Vector(a), RuntimeValue::Vector(b), "+" | "-")
+                            if a.len() == b.len() =>
+                        {
+                            a.iter()
+                                .zip(b)
+                                .map(|(a, b)| if *operator == "+" { a + b } else { a - b })
+                                .collect()
+                        }
+                        (RuntimeValue::Vector(a), RuntimeValue::Number(b), "*" | "/") => a
                             .iter()
                             .map(|a| if *operator == "*" { a * b } else { a / b })
                             .collect(),
-                        (Value::Number(a), Value::Vector(b), "*") => {
+                        (RuntimeValue::Number(a), RuntimeValue::Vector(b), "*") => {
                             b.iter().map(|b| a * b).collect()
                         }
                         _ => return self.error(span, "Invalid vector operands or dimensions"),
                     };
                     return self.vector(components, span);
                 }
-                let (Value::Number(a), Value::Number(b)) = (left, right) else {
+                let (RuntimeValue::Number(a), RuntimeValue::Number(b)) = (left, right) else {
                     return self.error(span, "Numeric operands required");
                 };
                 let number = match *operator {
@@ -2259,16 +2364,16 @@ impl<'s> Runtime<'_, 's> {
                     "/" => a / b,
                     "%" => a % b,
                     "**" => a.powf(b),
-                    "==" => return Ok(Value::Bool(a == b)),
-                    "!=" => return Ok(Value::Bool(a != b)),
-                    "<" => return Ok(Value::Bool(a < b)),
-                    ">" => return Ok(Value::Bool(a > b)),
-                    "<=" => return Ok(Value::Bool(a <= b)),
-                    ">=" => return Ok(Value::Bool(a >= b)),
+                    "==" => return Ok(RuntimeValue::Bool(a == b)),
+                    "!=" => return Ok(RuntimeValue::Bool(a != b)),
+                    "<" => return Ok(RuntimeValue::Bool(a < b)),
+                    ">" => return Ok(RuntimeValue::Bool(a > b)),
+                    "<=" => return Ok(RuntimeValue::Bool(a <= b)),
+                    ">=" => return Ok(RuntimeValue::Bool(a >= b)),
                     _ => return self.error(span, "Unsupported binary operator"),
                 };
                 if number.is_finite() {
-                    Ok(Value::Number(number))
+                    Ok(RuntimeValue::Number(number))
                 } else {
                     self.error(span, "Non-finite arithmetic result")
                 }
@@ -2276,14 +2381,19 @@ impl<'s> Runtime<'_, 's> {
             _ => self.error(span, "Expression is not executable yet"),
         }
     }
-    fn vector(&self, values: Vec<f64>, span: Span) -> Result<Value<'s>> {
+    fn vector(&self, values: Vec<f64>, span: Span) -> Result<RuntimeValue<'s>> {
         if values.iter().all(|x| x.is_finite()) {
-            Ok(Value::Vector(values))
+            Ok(RuntimeValue::Vector(values))
         } else {
             self.error(span, "Non-finite vector result")
         }
     }
-    fn math(&self, builtin: Builtin, arguments: &[Value<'s>], span: Span) -> Result<Value<'s>> {
+    fn math(
+        &self,
+        builtin: Builtin,
+        arguments: &[RuntimeValue<'s>],
+        span: Span,
+    ) -> Result<RuntimeValue<'s>> {
         if matches!(builtin, Builtin::Vec2 | Builtin::Vec3 | Builtin::Vec4) {
             let dimension = match builtin {
                 Builtin::Vec2 => 2,
@@ -2296,7 +2406,7 @@ impl<'s> Runtime<'_, 's> {
             let values = arguments
                 .iter()
                 .map(|v| {
-                    if let Value::Number(n) = v {
+                    if let RuntimeValue::Number(n) = v {
                         Some(*n)
                     } else {
                         None
@@ -2309,10 +2419,17 @@ impl<'s> Runtime<'_, 's> {
             };
         }
         match (builtin, arguments) {
-            (Builtin::Slerp, [Value::Quaternion(a), Value::Quaternion(b), Value::Number(t)]) => {
+            (
+                Builtin::Slerp,
+                [
+                    RuntimeValue::Quaternion(a),
+                    RuntimeValue::Quaternion(b),
+                    RuntimeValue::Number(t),
+                ],
+            ) => {
                 return a
                     .slerp(b, *t)
-                    .map(|q| Value::Quaternion(Box::new(q)))
+                    .map(|q| RuntimeValue::Quaternion(Box::new(q)))
                     .ok_or_else(|| RuntimeError {
                         stack: Vec::new(),
                         location: None,
@@ -2324,12 +2441,12 @@ impl<'s> Runtime<'_, 's> {
             (
                 Builtin::AxisAngle,
                 [
-                    Value::Vector(axis),
-                    Value::Number(angle) | Value::Angle(angle),
+                    RuntimeValue::Vector(axis),
+                    RuntimeValue::Number(angle) | RuntimeValue::Angle(angle),
                 ],
             ) if axis.len() == 3 => {
                 return crate::Quaternion::axis_angle([axis[0], axis[1], axis[2]], *angle)
-                    .map(|q| Value::Quaternion(Box::new(q)))
+                    .map(|q| RuntimeValue::Quaternion(Box::new(q)))
                     .ok_or_else(|| RuntimeError {
                         stack: Vec::new(),
                         location: None,
@@ -2338,13 +2455,15 @@ impl<'s> Runtime<'_, 's> {
                         message: "Rotation requires a finite nonzero axis and angle".into(),
                     });
             }
-            (Builtin::RotationMatrix, [Value::Quaternion(q)]) => {
-                return Ok(Value::Matrix(Box::new(q.matrix())));
+            (Builtin::RotationMatrix, [RuntimeValue::Quaternion(q)]) => {
+                return Ok(RuntimeValue::Matrix(Box::new(q.matrix())));
             }
             (Builtin::Identity, []) => {
-                return Ok(Value::Matrix(Box::new(crate::Matrix4::identity())));
+                return Ok(RuntimeValue::Matrix(Box::new(crate::Matrix4::identity())));
             }
-            (Builtin::Translation | Builtin::Scaling, [Value::Vector(v)]) if v.len() == 3 => {
+            (Builtin::Translation | Builtin::Scaling, [RuntimeValue::Vector(v)])
+                if v.len() == 3 =>
+            {
                 let mut matrix = crate::Matrix4::identity();
                 for (axis, value) in v.iter().enumerate() {
                     if builtin == Builtin::Translation {
@@ -2353,11 +2472,11 @@ impl<'s> Runtime<'_, 's> {
                         matrix.0[axis][axis] = *value;
                     }
                 }
-                return Ok(Value::Matrix(Box::new(matrix)));
+                return Ok(RuntimeValue::Matrix(Box::new(matrix)));
             }
             (
                 Builtin::RotationX | Builtin::RotationY | Builtin::RotationZ,
-                [Value::Number(angle) | Value::Angle(angle)],
+                [RuntimeValue::Number(angle) | RuntimeValue::Angle(angle)],
             ) => {
                 let mut matrix = crate::Matrix4::identity();
                 let (sin, cos) = angle.sin_cos();
@@ -2370,15 +2489,15 @@ impl<'s> Runtime<'_, 's> {
                 matrix.0[a][b] = -sin;
                 matrix.0[b][a] = sin;
                 matrix.0[b][b] = cos;
-                return Ok(Value::Matrix(Box::new(matrix)));
+                return Ok(RuntimeValue::Matrix(Box::new(matrix)));
             }
             (
                 Builtin::TransformPoint | Builtin::TransformDirection,
-                [Value::Matrix(matrix), Value::Vector(v)],
+                [RuntimeValue::Matrix(matrix), RuntimeValue::Vector(v)],
             ) => {
                 return matrix
                     .apply(v, builtin == Builtin::TransformPoint)
-                    .map(Value::Vector)
+                    .map(RuntimeValue::Vector)
                     .ok_or_else(|| RuntimeError {
                         stack: Vec::new(),
                         location: None,
@@ -2389,7 +2508,8 @@ impl<'s> Runtime<'_, 's> {
             }
             _ => {}
         }
-        if let (Builtin::Degrees | Builtin::Radians, [Value::Number(value)]) = (builtin, arguments)
+        if let (Builtin::Degrees | Builtin::Radians, [RuntimeValue::Number(value)]) =
+            (builtin, arguments)
         {
             let radians = if builtin == Builtin::Degrees {
                 value.to_radians()
@@ -2399,15 +2519,15 @@ impl<'s> Runtime<'_, 's> {
             if !radians.is_finite() {
                 return self.error(span, "Non-finite angle");
             }
-            return Ok(Value::Angle(radians));
+            return Ok(RuntimeValue::Angle(radians));
         }
         let shape = match (builtin, arguments) {
-            (Builtin::Polygon, [Value::List(points)]) => {
+            (Builtin::Polygon, [RuntimeValue::List(points)]) => {
                 self.collection_growth(0, points.len(), span)?;
                 let points = points
                     .iter()
                     .map(|p| match p {
-                        Value::Vector(v) if v.len() == 2 => Some([v[0], v[1]]),
+                        RuntimeValue::Vector(v) if v.len() == 2 => Some([v[0], v[1]]),
                         _ => None,
                     })
                     .collect::<Option<Vec<_>>>();
@@ -2416,17 +2536,18 @@ impl<'s> Runtime<'_, 's> {
                     None => Err("Polygon points must be vec2 values"),
                 })
             }
-            (Builtin::Translate, [Value::Polygon(polygon), Value::Vector(offset)])
-                if offset.len() == 2 =>
-            {
+            (
+                Builtin::Translate,
+                [RuntimeValue::Polygon(polygon), RuntimeValue::Vector(offset)],
+            ) if offset.len() == 2 => {
                 self.collection_growth(0, polygon.points().len(), span)?;
                 Some(polygon.translated([offset[0], offset[1]]))
             }
             (
                 Builtin::Rotate,
                 [
-                    Value::Polygon(polygon),
-                    Value::Number(angle) | Value::Angle(angle),
+                    RuntimeValue::Polygon(polygon),
+                    RuntimeValue::Number(angle) | RuntimeValue::Angle(angle),
                 ],
             ) => {
                 self.collection_growth(0, polygon.points().len(), span)?;
@@ -2435,16 +2556,18 @@ impl<'s> Runtime<'_, 's> {
             _ => None,
         };
         if let Some(shape) = shape {
-            return shape.map(Value::Polygon).map_err(|message| RuntimeError {
-                stack: Vec::new(),
-                location: None,
-                module: self.module.map(str::to_owned),
-                span,
-                message: message.into(),
-            });
+            return shape
+                .map(RuntimeValue::Polygon)
+                .map_err(|message| RuntimeError {
+                    stack: Vec::new(),
+                    location: None,
+                    module: self.module.map(str::to_owned),
+                    span,
+                    message: message.into(),
+                });
         }
         let number = match (builtin, arguments) {
-            (Builtin::Random, [Value::Number(seed), Value::Number(index)]) => {
+            (Builtin::Random, [RuntimeValue::Number(seed), RuntimeValue::Number(index)]) => {
                 crate::noise::random(*seed, *index).ok_or_else(|| RuntimeError {
                     stack: Vec::new(),
                     location: None,
@@ -2453,7 +2576,7 @@ impl<'s> Runtime<'_, 's> {
                     message: "random requires nonnegative exact integer seed and index".into(),
                 })?
             }
-            (Builtin::Noise, [Value::Number(x), Value::Number(seed)]) => {
+            (Builtin::Noise, [RuntimeValue::Number(x), RuntimeValue::Number(seed)]) => {
                 crate::noise::noise(*x, *seed).ok_or_else(|| RuntimeError {
                     stack: Vec::new(),
                     location: None,
@@ -2465,7 +2588,7 @@ impl<'s> Runtime<'_, 's> {
                 })?
             }
 
-            (Builtin::Cross, [Value::Vector(a), Value::Vector(b)])
+            (Builtin::Cross, [RuntimeValue::Vector(a), RuntimeValue::Vector(b)])
                 if a.len() == 3 && b.len() == 3 =>
             {
                 return self.vector(
@@ -2477,9 +2600,14 @@ impl<'s> Runtime<'_, 's> {
                     span,
                 );
             }
-            (Builtin::Lerp, [Value::Vector(a), Value::Vector(b), Value::Number(t)])
-                if a.len() == b.len() =>
-            {
+            (
+                Builtin::Lerp,
+                [
+                    RuntimeValue::Vector(a),
+                    RuntimeValue::Vector(b),
+                    RuntimeValue::Number(t),
+                ],
+            ) if a.len() == b.len() => {
                 return self.vector(
                     a.iter()
                         .zip(b)
@@ -2488,17 +2616,30 @@ impl<'s> Runtime<'_, 's> {
                     span,
                 );
             }
-            (Builtin::Lerp, [Value::Number(a), Value::Number(b), Value::Number(t)]) => {
-                a * (1.0 - t) + b * t
-            }
-            (Builtin::Clamp, [Value::Number(x), Value::Number(low), Value::Number(high)])
-                if low <= high =>
-            {
-                x.clamp(*low, *high)
-            }
-            (Builtin::Smoothstep, [Value::Number(low), Value::Number(high), Value::Number(x)])
-                if low < high =>
-            {
+            (
+                Builtin::Lerp,
+                [
+                    RuntimeValue::Number(a),
+                    RuntimeValue::Number(b),
+                    RuntimeValue::Number(t),
+                ],
+            ) => a * (1.0 - t) + b * t,
+            (
+                Builtin::Clamp,
+                [
+                    RuntimeValue::Number(x),
+                    RuntimeValue::Number(low),
+                    RuntimeValue::Number(high),
+                ],
+            ) if low <= high => x.clamp(*low, *high),
+            (
+                Builtin::Smoothstep,
+                [
+                    RuntimeValue::Number(low),
+                    RuntimeValue::Number(high),
+                    RuntimeValue::Number(x),
+                ],
+            ) if low < high => {
                 let t = if x <= low {
                     0.0
                 } else if x >= high {
@@ -2515,10 +2656,12 @@ impl<'s> Runtime<'_, 's> {
                 t * t * (3.0 - 2.0 * t)
             }
 
-            (Builtin::Dot, [Value::Vector(a), Value::Vector(b)]) if a.len() == b.len() => {
+            (Builtin::Dot, [RuntimeValue::Vector(a), RuntimeValue::Vector(b)])
+                if a.len() == b.len() =>
+            {
                 a.iter().zip(b).map(|(a, b)| a * b).sum()
             }
-            (Builtin::Length | Builtin::Normalize, [Value::Vector(v)]) => {
+            (Builtin::Length | Builtin::Normalize, [RuntimeValue::Vector(v)]) => {
                 if builtin == Builtin::Normalize {
                     let scale = v.iter().fold(0.0_f64, |scale, x| scale.max(x.abs()));
                     if scale == 0.0 || v.iter().any(|x| !x.is_finite()) {
@@ -2529,33 +2672,33 @@ impl<'s> Runtime<'_, 's> {
                 }
                 v.iter().fold(0.0_f64, |length, x| length.hypot(*x))
             }
-            (Builtin::Sin, [Value::Number(x) | Value::Angle(x)]) => x.sin(),
-            (Builtin::Cos, [Value::Number(x) | Value::Angle(x)]) => x.cos(),
-            (Builtin::Sqrt, [Value::Number(x)]) => x.sqrt(),
-            (Builtin::Deg, [Value::Number(x)]) => x.to_radians(),
+            (Builtin::Sin, [RuntimeValue::Number(x) | RuntimeValue::Angle(x)]) => x.sin(),
+            (Builtin::Cos, [RuntimeValue::Number(x) | RuntimeValue::Angle(x)]) => x.cos(),
+            (Builtin::Sqrt, [RuntimeValue::Number(x)]) => x.sqrt(),
+            (Builtin::Deg, [RuntimeValue::Number(x)]) => x.to_radians(),
             _ => return self.error(span, "Invalid mathematical arguments"),
         };
         if number.is_finite() {
-            Ok(Value::Number(number))
+            Ok(RuntimeValue::Number(number))
         } else {
             self.error(span, "Non-finite mathematical result")
         }
     }
     fn call(
         &mut self,
-        function: Value<'s>,
-        arguments: Cow<'_, [Value<'s>]>,
+        function: RuntimeValue<'s>,
+        arguments: Cow<'_, [RuntimeValue<'s>]>,
         span: Span,
-    ) -> Result<Value<'s>> {
+    ) -> Result<RuntimeValue<'s>> {
         self.check(span)?;
         if self.remaining == 0 {
             return self.error(span, "Execution limit exceeded");
         }
         self.remaining -= 1;
         let name = match &function {
-            Value::Function(f) => f.name.unwrap_or("<lambda>").to_owned(),
-            Value::Host(f) => f.name.to_owned(),
-            Value::Builtin(b) => format!("{b:?}"),
+            RuntimeValue::Function(f) => f.name.unwrap_or("<lambda>").to_owned(),
+            RuntimeValue::Host(f) => f.name.to_owned(),
+            RuntimeValue::Builtin(b) => format!("{b:?}"),
             _ => "<non-callable>".to_owned(),
         };
         let module = self.module.map(str::to_owned);
@@ -2564,7 +2707,7 @@ impl<'s> Runtime<'_, 's> {
         let line = prefix.bytes().filter(|b| *b == b'\n').count() + 1;
         let column = prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1;
         let result = match function {
-            Value::Function(function) => self.call_user(function, arguments, span),
+            RuntimeValue::Function(function) => self.call_user(function, arguments, span),
             other => self.call_inner(other, arguments, span),
         };
         result.map_err(|mut error| {
@@ -2588,20 +2731,22 @@ impl<'s> Runtime<'_, 's> {
     }
     fn call_inner(
         &mut self,
-        function: Value<'s>,
-        arguments: Cow<'_, [Value<'s>]>,
+        function: RuntimeValue<'s>,
+        arguments: Cow<'_, [RuntimeValue<'s>]>,
         span: Span,
-    ) -> Result<Value<'s>> {
-        if let Value::Host(function) = function {
+    ) -> Result<RuntimeValue<'s>> {
+        if let RuntimeValue::Host(function) = function {
             if arguments.len() != function.parameters.len()
                 || !function
                     .parameters
                     .iter()
                     .zip(arguments.iter())
-                    .all(|(ty, value)| ty.accepts(value))
+                    .all(|(ty, value)| ty.accepts_runtime(value))
             {
                 return self.error(span, "Host function arguments do not match its signature");
             }
+            let arguments: Vec<Value> =
+                arguments.into_owned().into_iter().map(Into::into).collect();
             let result = match self.contextual.get(&Rc::as_ptr(&function)) {
                 Some(callback) => callback(&arguments, self.cancellation),
                 None => (function.callback)(&arguments, self.cancellation),
@@ -2614,18 +2759,25 @@ impl<'s> Runtime<'_, 's> {
                 message,
             })?;
             self.check(span)?;
+            let result: RuntimeValue = result.into();
             self.host_value_size(&result, span, 0)?;
-            if !function.result.accepts(&result) {
+            if !function.result.accepts_runtime(&result) {
                 return self.error(span, "Host function returned an invalid value");
             }
             return Ok(result);
         }
-        if let Value::Builtin(builtin) = function {
+        if let RuntimeValue::Builtin(builtin) = function {
             for &(index, expected) in builtin.callback_arities() {
                 let valid = match arguments.get(index) {
-                    Some(Value::Function(function)) => Some(function.parameters.len() == expected),
-                    Some(Value::Host(function)) => Some(function.parameters.len() == expected),
-                    Some(Value::Builtin(function)) => Some(function.arity().contains(&expected)),
+                    Some(RuntimeValue::Function(function)) => {
+                        Some(function.parameters.len() == expected)
+                    }
+                    Some(RuntimeValue::Host(function)) => {
+                        Some(function.parameters.len() == expected)
+                    }
+                    Some(RuntimeValue::Builtin(function)) => {
+                        Some(function.arity().contains(&expected))
+                    }
                     _ => None,
                 };
                 if valid == Some(false) {
@@ -2637,10 +2789,10 @@ impl<'s> Runtime<'_, 's> {
                     return self.error(span, "iter requires one list or sequence");
                 };
                 let cursor = self.sequence_cursor(source.clone(), span)?;
-                return Ok(Value::Sequence(cursor.sequence));
+                return Ok(RuntimeValue::Sequence(cursor.sequence));
             }
             if builtin == Builtin::Collect {
-                let [source, Value::Number(limit)] = arguments.as_ref() else {
+                let [source, RuntimeValue::Number(limit)] = arguments.as_ref() else {
                     return self.error(span, "collect requires a sequence and maximum item count");
                 };
                 if !limit.is_finite()
@@ -2665,12 +2817,12 @@ impl<'s> Runtime<'_, 's> {
                     self.charge(1, span)?;
                     output.push(item);
                 }
-                return Ok(Value::List(output));
+                return Ok(RuntimeValue::List(output));
             }
             if matches!(builtin, Builtin::Map | Builtin::Filter)
                 && matches!(
                     arguments.first(),
-                    Some(Value::Range { .. } | Value::Sequence(_))
+                    Some(RuntimeValue::Range { .. } | RuntimeValue::Sequence(_))
                 )
             {
                 let [source, callback] = arguments.as_ref() else {
@@ -2678,7 +2830,7 @@ impl<'s> Runtime<'_, 's> {
                 };
                 if !matches!(
                     callback,
-                    Value::Function(_) | Value::Builtin(_) | Value::Host(_)
+                    RuntimeValue::Function(_) | RuntimeValue::Builtin(_) | RuntimeValue::Host(_)
                 ) {
                     return self.error(span, "Callback must be callable");
                 }
@@ -2703,7 +2855,7 @@ impl<'s> Runtime<'_, 's> {
                         span,
                         message: format!("Runtime sequence allocation failed: {e:?}"),
                     })?;
-                return Ok(Value::Sequence(Rc::new(sequence)));
+                return Ok(RuntimeValue::Sequence(Rc::new(sequence)));
             }
             if matches!(builtin, Builtin::Any | Builtin::All) {
                 let [source, callback] = arguments.as_ref() else {
@@ -2712,12 +2864,12 @@ impl<'s> Runtime<'_, 's> {
                 let mut cursor = self.sequence_cursor(source.clone(), span)?;
                 if !matches!(
                     callback,
-                    Value::Function(_) | Value::Builtin(_) | Value::Host(_)
+                    RuntimeValue::Function(_) | RuntimeValue::Builtin(_) | RuntimeValue::Host(_)
                 ) {
                     return self.error(span, "Predicate must be callable");
                 }
                 while let Some(item) = self.sequence_next(&mut cursor, span)? {
-                    let Value::Bool(result) = self.call(
+                    let RuntimeValue::Bool(result) = self.call(
                         callback.clone(),
                         Cow::Borrowed(std::slice::from_ref(&item)),
                         span,
@@ -2726,18 +2878,23 @@ impl<'s> Runtime<'_, 's> {
                         return self.error(span, "Predicate must return a boolean");
                     };
                     if result == (builtin == Builtin::Any) {
-                        return Ok(Value::Bool(result));
+                        return Ok(RuntimeValue::Bool(result));
                     }
                 }
-                return Ok(Value::Bool(builtin == Builtin::All));
+                return Ok(RuntimeValue::Bool(builtin == Builtin::All));
             }
             if builtin == Builtin::Get {
                 if arguments.len() != 2 {
                     return self.error(span, "get requires a collection and key");
                 }
                 let value = match (&arguments[0], &arguments[1]) {
-                    (Value::Record(fields), Value::String(key)) => fields.get(key).cloned(),
-                    (Value::List(items) | Value::Tuple(items), Value::Number(index)) => {
+                    (RuntimeValue::Record(fields), RuntimeValue::String(key)) => {
+                        fields.get(key).cloned()
+                    }
+                    (
+                        RuntimeValue::List(items) | RuntimeValue::Tuple(items),
+                        RuntimeValue::Number(index),
+                    ) => {
                         if !index.is_finite() || index.fract() != 0.0 || *index < 0.0 {
                             return self
                                 .error(span, "Collection index must be a non-negative integer");
@@ -2756,8 +2913,8 @@ impl<'s> Runtime<'_, 's> {
                     }
                 };
                 return Ok(match value {
-                    Some(value) => Value::Variant("Some", vec![value]),
-                    None => Value::Variant("None", vec![]),
+                    Some(value) => RuntimeValue::Variant("Some", vec![value]),
+                    None => RuntimeValue::Variant("None", vec![]),
                 });
             }
             if builtin == Builtin::Len {
@@ -2765,15 +2922,15 @@ impl<'s> Runtime<'_, 's> {
                     return self.error(span, "len requires one argument");
                 }
                 let count = match &arguments[0] {
-                    Value::List(items) | Value::Tuple(items) => items.len(),
-                    Value::Record(fields) => fields.len(),
-                    Value::String(text) => {
+                    RuntimeValue::List(items) | RuntimeValue::Tuple(items) => items.len(),
+                    RuntimeValue::Record(fields) => fields.len(),
+                    RuntimeValue::String(text) => {
                         self.charge(text.len(), span)?;
                         text.chars().count()
                     }
                     _ => return self.error(span, "len requires a list, tuple, record or string"),
                 };
-                return Ok(Value::Number(count as f64));
+                return Ok(RuntimeValue::Number(count as f64));
             }
             if builtin == Builtin::Assert {
                 if !builtin.arity().contains(&arguments.len()) {
@@ -2781,12 +2938,12 @@ impl<'s> Runtime<'_, 's> {
                 }
                 let message = match arguments.get(1) {
                     None => "Assertion failed",
-                    Some(Value::String(message)) => message.as_str(),
+                    Some(RuntimeValue::String(message)) => message.as_str(),
                     _ => return self.error(span, "Assertion message must be a string"),
                 };
                 return match arguments[0] {
-                    Value::Bool(true) => Ok(Value::Null),
-                    Value::Bool(false) => self.error(span, message),
+                    RuntimeValue::Bool(true) => Ok(RuntimeValue::Null),
+                    RuntimeValue::Bool(false) => self.error(span, message),
                     _ => self.error(span, "Assertion condition must be a boolean"),
                 };
             }
@@ -2807,11 +2964,12 @@ impl<'s> Runtime<'_, 's> {
                 if arguments.len() != count {
                     return self.error(span, "Invalid variant argument count");
                 }
-                return Ok(Value::Variant(tag, arguments.into_owned()));
+                return Ok(RuntimeValue::Variant(tag, arguments.into_owned()));
             }
 
             if builtin == Builtin::Mesh {
-                let [Value::List(points), Value::List(faces)] = arguments.as_ref() else {
+                let [RuntimeValue::List(points), RuntimeValue::List(faces)] = arguments.as_ref()
+                else {
                     return self.error(span, "mesh requires vertex and triangle lists");
                 };
                 self.collection_growth(0, points.len(), span)?;
@@ -2819,7 +2977,7 @@ impl<'s> Runtime<'_, 's> {
                 let mut vertices = Vec::new();
                 for point in points {
                     self.charge(1, span)?;
-                    let Value::Vector(v) = point else {
+                    let RuntimeValue::Vector(v) = point else {
                         return self.error(span, "Mesh vertex must be vec3");
                     };
                     if v.len() != 3 {
@@ -2830,7 +2988,7 @@ impl<'s> Runtime<'_, 's> {
                 let mut triangles = Vec::new();
                 for face in faces {
                     self.charge(1, span)?;
-                    let Value::List(indices) = face else {
+                    let RuntimeValue::List(indices) = face else {
                         return self.error(span, "Mesh triangle must be a list of three indices");
                     };
                     if indices.len() != 3 {
@@ -2838,7 +2996,7 @@ impl<'s> Runtime<'_, 's> {
                     }
                     let mut triangle = [0; 3];
                     for (slot, index) in triangle.iter_mut().zip(indices) {
-                        let Value::Number(index) = index else {
+                        let RuntimeValue::Number(index) = index else {
                             return self.error(span, "Mesh index must be an integer");
                         };
                         if !index.is_finite()
@@ -2853,7 +3011,7 @@ impl<'s> Runtime<'_, 's> {
                     triangles.push(triangle);
                 }
                 return crate::Mesh::new(vertices, triangles)
-                    .map(|mesh| Value::Mesh(Rc::new(mesh)))
+                    .map(|mesh| RuntimeValue::Mesh(Rc::new(mesh)))
                     .map_err(|message| RuntimeError {
                         stack: Vec::new(),
                         location: None,
@@ -2863,7 +3021,8 @@ impl<'s> Runtime<'_, 's> {
                     });
             }
             if builtin == Builtin::Transform {
-                let [Value::Mesh(mesh), Value::Matrix(matrix)] = arguments.as_ref() else {
+                let [RuntimeValue::Mesh(mesh), RuntimeValue::Matrix(matrix)] = arguments.as_ref()
+                else {
                     return self.error(span, "transform requires a mesh and mat4");
                 };
                 self.collection_growth(0, mesh.vertices().len(), span)?;
@@ -2882,7 +3041,7 @@ impl<'s> Runtime<'_, 's> {
                 }
                 self.charge(mesh.triangles().len(), span)?;
                 return crate::Mesh::new(vertices, mesh.triangles().to_vec())
-                    .map(|mesh| Value::Mesh(Rc::new(mesh)))
+                    .map(|mesh| RuntimeValue::Mesh(Rc::new(mesh)))
                     .map_err(|message| RuntimeError {
                         stack: Vec::new(),
                         location: None,
@@ -2892,7 +3051,8 @@ impl<'s> Runtime<'_, 's> {
                     });
             }
             if builtin == Builtin::GridMesh {
-                let [Value::List(xs), Value::List(ys), callback] = arguments.as_ref() else {
+                let [RuntimeValue::List(xs), RuntimeValue::List(ys), callback] = arguments.as_ref()
+                else {
                     return self.error(
                         span,
                         "grid_mesh requires x values, y values and a point function",
@@ -2929,7 +3089,7 @@ impl<'s> Runtime<'_, 's> {
                             Cow::Borrowed(&[x.clone(), y.clone()]),
                             span,
                         )?;
-                        let Value::Vector(point) = point else {
+                        let RuntimeValue::Vector(point) = point else {
                             return self.error(span, "Grid callback must return vec3");
                         };
                         if point.len() != 3 {
@@ -2950,7 +3110,7 @@ impl<'s> Runtime<'_, 's> {
                     }
                 }
                 return crate::Mesh::new(vertices, triangles)
-                    .map(|mesh| Value::Mesh(Rc::new(mesh)))
+                    .map(|mesh| RuntimeValue::Mesh(Rc::new(mesh)))
                     .map_err(|message| RuntimeError {
                         stack: Vec::new(),
                         location: None,
@@ -2960,7 +3120,7 @@ impl<'s> Runtime<'_, 's> {
                     });
             }
             if builtin == Builtin::Zip {
-                let [Value::List(a), Value::List(b)] = arguments.as_ref() else {
+                let [RuntimeValue::List(a), RuntimeValue::List(b)] = arguments.as_ref() else {
                     return self.error(span, "zip requires two lists");
                 };
                 self.collection_growth(0, a.len().min(b.len()), span)?;
@@ -2974,17 +3134,17 @@ impl<'s> Runtime<'_, 's> {
                         return self.error(span, "Execution limit exceeded");
                     }
                     self.remaining -= 1;
-                    values.push(Value::Tuple(vec![a.clone(), b.clone()]));
+                    values.push(RuntimeValue::Tuple(vec![a.clone(), b.clone()]));
                 }
-                return Ok(Value::List(values));
+                return Ok(RuntimeValue::List(values));
             }
             if matches!(builtin, Builtin::Range | Builtin::RangeIter) {
                 let (start, end, step) = match arguments.as_ref() {
-                    [Value::Number(start), Value::Number(end)] => (*start, *end, 1.0),
+                    [RuntimeValue::Number(start), RuntimeValue::Number(end)] => (*start, *end, 1.0),
                     [
-                        Value::Number(start),
-                        Value::Number(end),
-                        Value::Number(step),
+                        RuntimeValue::Number(start),
+                        RuntimeValue::Number(end),
+                        RuntimeValue::Number(step),
                     ] => (*start, *end, *step),
                     _ => return self.error(span, "range expects start, end and optional step"),
                 };
@@ -2995,7 +3155,7 @@ impl<'s> Runtime<'_, 's> {
                     return self.error(span, "Range arguments must be finite");
                 }
                 if builtin == Builtin::RangeIter {
-                    return Ok(Value::Range { start, end, step });
+                    return Ok(RuntimeValue::Range { start, end, step });
                 }
                 let mut values = Vec::new();
                 let mut current = start;
@@ -3012,14 +3172,14 @@ impl<'s> Runtime<'_, 's> {
                     if values.len() >= self.max_collection_items {
                         return self.error(span, "Collection item limit exceeded");
                     }
-                    values.push(Value::Number(current));
+                    values.push(RuntimeValue::Number(current));
                     let next = (values.len() as f64).mul_add(step, start);
                     if !next.is_finite() || next == current {
                         return self.error(span, "Range cannot advance finitely");
                     }
                     current = next;
                 }
-                return Ok(Value::List(values));
+                return Ok(RuntimeValue::List(values));
             }
 
             if matches!(builtin, Builtin::GroupBy | Builtin::FoldBy) {
@@ -3028,28 +3188,33 @@ impl<'s> Runtime<'_, 's> {
                 let callback = arguments.next().unwrap();
                 if !matches!(
                     callback,
-                    Value::Function(_) | Value::Builtin(_) | Value::Host(_)
+                    RuntimeValue::Function(_) | RuntimeValue::Builtin(_) | RuntimeValue::Host(_)
                 ) {
                     return self.error(span, "Callback must be callable");
                 }
-                let initial = arguments.next().unwrap_or(Value::Null);
+                let initial = arguments.next().unwrap_or(RuntimeValue::Null);
                 let reducer = arguments.next();
                 if reducer.as_ref().is_some_and(|f| {
-                    !matches!(f, Value::Function(_) | Value::Builtin(_) | Value::Host(_))
+                    !matches!(
+                        f,
+                        RuntimeValue::Function(_)
+                            | RuntimeValue::Builtin(_)
+                            | RuntimeValue::Host(_)
+                    )
                 }) {
                     return self.error(span, "Reducer must be callable");
                 }
                 let field = if reducer.is_some() { "value" } else { "values" };
                 let mut cursor = self.sequence_cursor(source, span)?;
                 let mut positions = BTreeMap::<String, usize>::new();
-                let mut groups = Vec::<(String, Value<'s>)>::new();
+                let mut groups = Vec::<(String, RuntimeValue<'s>)>::new();
                 while let Some(item) = self.sequence_next(&mut cursor, span)? {
                     let key = self.call(
                         callback.clone(),
                         Cow::Borrowed(std::slice::from_ref(&item)),
                         span,
                     )?;
-                    let Value::String(key) = key else {
+                    let RuntimeValue::String(key) = key else {
                         return self.error(span, "Group key must be a string");
                     };
                     self.string_growth(0, key.len(), span)?;
@@ -3066,16 +3231,17 @@ impl<'s> Runtime<'_, 's> {
                             if reducer.is_some() {
                                 initial.clone()
                             } else {
-                                Value::List(Vec::new())
+                                RuntimeValue::List(Vec::new())
                             },
                         ));
                         position
                     };
                     if let Some(reducer) = &reducer {
-                        let accumulator = std::mem::replace(&mut groups[position].1, Value::Null);
+                        let accumulator =
+                            std::mem::replace(&mut groups[position].1, RuntimeValue::Null);
                         groups[position].1 =
                             self.call(reducer.clone(), Cow::Borrowed(&[accumulator, item]), span)?;
-                    } else if let Value::List(values) = &mut groups[position].1 {
+                    } else if let RuntimeValue::List(values) = &mut groups[position].1 {
                         self.collection_growth(values.len(), 1, span)?;
                         values.push(item);
                     }
@@ -3083,12 +3249,12 @@ impl<'s> Runtime<'_, 's> {
                 let mut output = Vec::new();
                 for (key, values) in groups {
                     self.charge(1, span)?;
-                    output.push(Value::Record(BTreeMap::from([
-                        ("key".into(), Value::String(key)),
+                    output.push(RuntimeValue::Record(BTreeMap::from([
+                        ("key".into(), RuntimeValue::String(key)),
                         (field.into(), values),
                     ])));
                 }
-                return Ok(Value::List(output));
+                return Ok(RuntimeValue::List(output));
             }
             if !matches!(
                 builtin,
@@ -3106,12 +3272,12 @@ impl<'s> Runtime<'_, 's> {
             let mut accumulator = if builtin == Builtin::Fold {
                 arguments.next().unwrap()
             } else {
-                Value::Null
+                RuntimeValue::Null
             };
             let callback = arguments.next().unwrap();
             if !matches!(
                 callback,
-                Value::Function(_) | Value::Builtin(_) | Value::Host(_)
+                RuntimeValue::Function(_) | RuntimeValue::Builtin(_) | RuntimeValue::Host(_)
             ) {
                 return self.error(span, "Callback must be callable");
             }
@@ -3130,14 +3296,14 @@ impl<'s> Runtime<'_, 's> {
                         span,
                     )?
                 };
-                accumulator = Value::Null;
+                accumulator = RuntimeValue::Null;
                 match builtin {
                     Builtin::Map => {
                         self.collection_growth(output.len(), 1, span)?;
                         output.push(result);
                     }
                     Builtin::FlatMap => match result {
-                        Value::List(values) => {
+                        RuntimeValue::List(values) => {
                             self.charge(values.len(), span)?;
                             self.collection_growth(output.len(), values.len(), span)?;
                             output.extend(values);
@@ -3145,11 +3311,11 @@ impl<'s> Runtime<'_, 's> {
                         _ => return self.error(span, "Flat map callback must return a list"),
                     },
                     Builtin::Filter => match result {
-                        Value::Bool(true) => {
+                        RuntimeValue::Bool(true) => {
                             self.collection_growth(output.len(), 1, span)?;
                             output.push(item);
                         }
-                        Value::Bool(false) => {}
+                        RuntimeValue::Bool(false) => {}
                         _ => return self.error(span, "Filter callback must return a boolean"),
                     },
                     Builtin::Fold => accumulator = result,
@@ -3159,18 +3325,18 @@ impl<'s> Runtime<'_, 's> {
             return if builtin == Builtin::Fold {
                 Ok(accumulator)
             } else {
-                Ok(Value::List(output))
+                Ok(RuntimeValue::List(output))
             };
         }
-        self.error(span, "Value is not callable")
+        self.error(span, "RuntimeValue is not callable")
     }
 
     fn call_user(
         &mut self,
         function: Rc<Closure<'s>>,
-        arguments: Cow<'_, [Value<'s>]>,
+        arguments: Cow<'_, [RuntimeValue<'s>]>,
         span: Span,
-    ) -> Result<Value<'s>> {
+    ) -> Result<RuntimeValue<'s>> {
         if arguments.len() != function.parameters.len() {
             return self.error(span, "Incorrect argument count");
         }
@@ -3178,14 +3344,14 @@ impl<'s> Runtime<'_, 's> {
             .parameter_types
             .iter()
             .zip(arguments.iter())
-            .any(|(ty, value)| ty.as_ref().is_some_and(|ty| !ty.accepts(value)))
+            .any(|(ty, value)| ty.as_ref().is_some_and(|ty| !ty.accepts_runtime(value)))
         {
             return self.error(span, "Argument does not match its type annotation");
         }
         let mut environment = Environment::child(function.environment.clone());
         if let Some(name) = function.name {
             environment
-                .insert(name, Value::Function(function.clone()))
+                .insert(name, RuntimeValue::Function(function.clone()))
                 .map_err(|e| self.environment_error(span, e))?;
         }
         let previous_module = self.module;
@@ -3214,7 +3380,7 @@ impl<'s> Runtime<'_, 's> {
                             if returned == Flow::Return {
                                 value
                             } else {
-                                Value::Null
+                                RuntimeValue::Null
                             }
                         });
                 self.depth -= 1;
@@ -3229,7 +3395,7 @@ impl<'s> Runtime<'_, 's> {
         if function
             .result_type
             .as_ref()
-            .is_some_and(|ty| !ty.accepts(&value))
+            .is_some_and(|ty| !ty.accepts_runtime(&value))
         {
             return self.error(span, "Return value does not match its type annotation");
         }
