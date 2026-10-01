@@ -1056,3 +1056,34 @@ fn shared_allocation_outlives_budget_handle_until_its_last_owner_drops() {
     drop(alias);
     assert!(ledger.upgrade().is_none());
 }
+
+#[test]
+fn module_stack_allocation_failure_leaves_instance_reusable() {
+    let program = super::Program::compile("fn load() { import data; return data.answer }").unwrap();
+    let module = super::Program::compile("{answer: 42}").unwrap();
+    let token = super::CancellationToken::default();
+    let limits = super::ExecutionLimits::new(1000);
+    let mut instance = program
+        .instantiate(limits, &token, &[], &[], &[], &[("data", &module)])
+        .unwrap();
+    {
+        let _failure = AllocationFailure::after(0);
+        let error = instance.call("load", &[], limits).unwrap_err();
+        assert_eq!(
+            error.message,
+            "Runtime module stack allocation failed: Allocator"
+        );
+    }
+    assert!(instance.runtime.loading.is_empty());
+    assert!(instance.runtime.module_cache.is_empty());
+    assert_eq!(instance.runtime.module, None);
+    assert_eq!(instance.runtime.depth, 0);
+    assert!(Rc::ptr_eq(
+        &instance.runtime.loading.storage.reservation.ledger,
+        &instance.runtime.cells.storage.reservation.ledger
+    ));
+    assert_eq!(
+        instance.call("load", &[], limits).unwrap(),
+        super::Value::Number(42.0)
+    );
+}

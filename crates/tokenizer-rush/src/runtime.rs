@@ -853,7 +853,8 @@ impl<'s> Program<'s> {
             module: None,
             modules: HashMap::new(),
             module_cache: HashMap::new(),
-            loading: Vec::new(),
+            loading: memory::Slots::new(&memory, 0)
+                .expect("empty module stack requires no allocation"),
             module_globals: Environment::new(),
             references: HashMap::from([(None, self.references.clone())]),
             current_references: self.references.clone(),
@@ -951,7 +952,7 @@ struct Runtime<'a, 's> {
     module: Option<&'s str>,
     modules: HashMap<&'s str, crate::Module<'s>>,
     module_cache: HashMap<&'s str, Value<'s>>,
-    loading: Vec<&'s str>,
+    loading: memory::Slots<&'s str>,
     module_globals: Environment<'s>,
     references: HashMap<Option<&'s str>, Rc<Vec<CaptureReference<'s>>>>,
     current_references: Rc<Vec<CaptureReference<'s>>>,
@@ -1506,7 +1507,12 @@ impl<'s> Runtime<'_, 's> {
                     if self.depth >= self.max_depth {
                         return self.error(name.span, "Execution limit exceeded");
                     }
-                    self.loading.push(name.text);
+                    if let Err(error) = self.loading.push(name.text) {
+                        return self.error(
+                            name.span,
+                            &format!("Runtime module stack allocation failed: {error:?}"),
+                        );
+                    }
                     self.depth += 1;
                     let previous_module = self.module.replace(name.text);
                     let previous_references = std::mem::replace(
