@@ -1,0 +1,388 @@
+{
+  "method": "functional parity; no timings",
+  "cases": [
+    {
+      "case": "empty",
+      "accepted": true,
+      "expected": [],
+      "rush_stderr": "",
+      "lua_verified": true,
+      "lua_stderr": "",
+      "luau_verified": true,
+      "luau_stderr": "",
+      "rhai_verified": true,
+      "rhai_stderr": "",
+      "koto_verified": true,
+      "koto_stderr": ""
+    },
+    {
+      "case": "unicode-order-filter",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "Б\"\n",
+          "total": 1.5
+        },
+        {
+          "group": "next",
+          "total": -4.0
+        }
+      ],
+      "rush_stderr": "",
+      "lua_verified": true,
+      "lua_stderr": "",
+      "luau_verified": true,
+      "luau_stderr": "",
+      "rhai_verified": true,
+      "rhai_stderr": "",
+      "koto_verified": true,
+      "koto_stderr": ""
+    },
+    {
+      "case": "inactive",
+      "accepted": true,
+      "expected": [],
+      "rush_stderr": "",
+      "lua_verified": true,
+      "lua_stderr": "",
+      "luau_verified": true,
+      "luau_stderr": "",
+      "rhai_verified": true,
+      "rhai_stderr": "",
+      "koto_verified": true,
+      "koto_stderr": ""
+    },
+    {
+      "case": "zero",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 0.0
+        }
+      ],
+      "rush_stderr": "",
+      "lua_verified": true,
+      "lua_stderr": "",
+      "luau_verified": true,
+      "luau_stderr": "",
+      "rhai_verified": true,
+      "rhai_stderr": "",
+      "koto_verified": true,
+      "koto_stderr": ""
+    },
+    {
+      "case": "empty-and-nul-keys",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "",
+          "total": 0.0
+        },
+        {
+          "group": "\u0000",
+          "total": 3.0
+        }
+      ],
+      "rush_stderr": "",
+      "lua_verified": true,
+      "lua_stderr": "",
+      "luau_verified": true,
+      "luau_stderr": "",
+      "rhai_verified": true,
+      "rhai_stderr": "",
+      "koto_verified": true,
+      "koto_stderr": ""
+    },
+    {
+      "case": "inactive-before-active",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 2.0
+        },
+        {
+          "group": "b",
+          "total": 3.0
+        }
+      ],
+      "rush_stderr": "",
+      "lua_verified": true,
+      "lua_stderr": "",
+      "luau_verified": true,
+      "luau_stderr": "",
+      "rhai_verified": true,
+      "rhai_stderr": "",
+      "koto_verified": true,
+      "koto_stderr": ""
+    },
+    {
+      "case": "not-array",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Input must be an array\"\n",
+      "lua_verified": true,
+      "lua_stderr": "Input must be an array\n",
+      "luau_verified": true,
+      "luau_stderr": "Input must be an array\n",
+      "rhai_verified": true,
+      "rhai_stderr": "Input must be an array\n",
+      "koto_verified": true,
+      "koto_stderr": "Input must be an array\n"
+    },
+    {
+      "case": "non-object-row",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: group must be a string\"\n",
+      "lua_verified": true,
+      "lua_stderr": "runtime error: group must be a string\n",
+      "luau_verified": true,
+      "luau_stderr": "runtime error: group must be a string\n",
+      "rhai_verified": true,
+      "rhai_stderr": "group must be a string\n",
+      "koto_verified": true,
+      "koto_stderr": "group must be a string\n"
+    },
+    {
+      "case": "null-group",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: group must be a string\"\n",
+      "lua_verified": true,
+      "lua_stderr": "runtime error: group must be a string\n",
+      "luau_verified": true,
+      "luau_stderr": "runtime error: group must be a string\n",
+      "rhai_verified": true,
+      "rhai_stderr": "group must be a string\n",
+      "koto_verified": true,
+      "koto_stderr": "group must be a string\n"
+    },
+    {
+      "case": "numeric-active",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: active must be boolean\"\n",
+      "lua_verified": true,
+      "lua_stderr": "runtime error: active must be boolean\n",
+      "luau_verified": true,
+      "luau_stderr": "runtime error: active must be boolean\n",
+      "rhai_verified": true,
+      "rhai_stderr": "active must be boolean\n",
+      "koto_verified": true,
+      "koto_stderr": "active must be boolean\n"
+    },
+    {
+      "case": "missing-field",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: active must be boolean\"\n",
+      "lua_verified": true,
+      "lua_stderr": "runtime error: active must be boolean\n",
+      "luau_verified": true,
+      "luau_stderr": "runtime error: active must be boolean\n",
+      "rhai_verified": true,
+      "rhai_stderr": "active must be boolean\n",
+      "koto_verified": true,
+      "koto_stderr": "active must be boolean\n"
+    },
+    {
+      "case": "boolean-amount",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: amount must be finite\"\n",
+      "lua_verified": true,
+      "lua_stderr": "runtime error: amount must be finite\n",
+      "luau_verified": true,
+      "luau_stderr": "runtime error: amount must be finite\n",
+      "rhai_verified": true,
+      "rhai_stderr": "amount must be finite\n",
+      "koto_verified": true,
+      "koto_stderr": "amount must be finite\n"
+    },
+    {
+      "case": "string-amount",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: amount must be finite\"\n",
+      "lua_verified": true,
+      "lua_stderr": "runtime error: amount must be finite\n",
+      "luau_verified": true,
+      "luau_stderr": "runtime error: amount must be finite\n",
+      "rhai_verified": true,
+      "rhai_stderr": "amount must be finite\n",
+      "koto_verified": true,
+      "koto_stderr": "amount must be finite\n"
+    },
+    {
+      "case": "inactive-invalid",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: amount must be finite\"\n",
+      "lua_verified": true,
+      "lua_stderr": "runtime error: amount must be finite\n",
+      "luau_verified": true,
+      "luau_stderr": "runtime error: amount must be finite\n",
+      "rhai_verified": true,
+      "rhai_stderr": "amount must be finite\n",
+      "koto_verified": true,
+      "koto_stderr": "amount must be finite\n"
+    },
+    {
+      "case": "overflow",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Non-finite arithmetic result\"\n",
+      "lua_verified": true,
+      "lua_stderr": "runtime error: ../lua-records-shared.rs:88:11: total must be finite\nstack traceback:\n\t[C]: in ?\n\t[C]: in function 'error'\n\t../lua-records-shared.rs:88:11: in main chunk\n",
+      "luau_verified": true,
+      "luau_stderr": "runtime error: ../lua-records-shared.rs:88:11: total must be finite\nstack traceback:\n\t[C]: in ?\n\t[C]: in function 'error'\n\t../lua-records-shared.rs:88:11: in function <../lua-records-shared.rs:88:1>\n",
+      "rhai_verified": true,
+      "rhai_stderr": "Runtime error: total must be finite (line 13, position 28)\n",
+      "koto_verified": true,
+      "koto_stderr": "total must be finite\n--- 14:7\n    |\n 14 |       throw 'total must be finite'\n    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"
+    },
+    {
+      "case": "row-limit",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"At most 1000 rows are allowed\"\n",
+      "lua_verified": true,
+      "lua_stderr": "At most 1000 rows are allowed\n",
+      "luau_verified": true,
+      "luau_stderr": "At most 1000 rows are allowed\n",
+      "rhai_verified": true,
+      "rhai_stderr": "At most 1000 rows are allowed\n",
+      "koto_verified": true,
+      "koto_stderr": "At most 1000 rows are allowed\n"
+    },
+    {
+      "case": "jsonl-empty",
+      "accepted": true,
+      "expected": [],
+      "rush_stderr": "",
+      "lua_verified": true,
+      "lua_stderr": "",
+      "luau_verified": true,
+      "luau_stderr": "",
+      "rhai_verified": true,
+      "rhai_stderr": "",
+      "koto_verified": true,
+      "koto_stderr": ""
+    },
+    {
+      "case": "jsonl-crlf-final-no-newline",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 2.0
+        }
+      ],
+      "rush_stderr": "",
+      "lua_verified": true,
+      "lua_stderr": "",
+      "luau_verified": true,
+      "luau_stderr": "",
+      "rhai_verified": true,
+      "rhai_stderr": "",
+      "koto_verified": true,
+      "koto_stderr": ""
+    },
+    {
+      "case": "jsonl-large-stream",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 10000.0
+        }
+      ],
+      "rush_stderr": "",
+      "lua_verified": true,
+      "lua_stderr": "",
+      "luau_verified": true,
+      "luau_stderr": "",
+      "rhai_verified": true,
+      "rhai_stderr": "",
+      "koto_verified": true,
+      "koto_stderr": ""
+    },
+    {
+      "case": "jsonl-blank-line",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 2: EOF while parsing a value at line 2 column 0\"\n",
+      "lua_verified": true,
+      "lua_stderr": "EOF while parsing a value at line 2 column 0\nstack traceback:\n\t[C]: in function 'records'\n\t../lua-records-shared.rs:88:2: in main chunk\n\n",
+      "luau_verified": true,
+      "luau_stderr": "EOF while parsing a value at line 2 column 0\nstack traceback:\n\t[C]: in function 'records'\n\t../lua-records-shared.rs:88:2: in function <../lua-records-shared.rs:88:1>\n\n",
+      "rhai_verified": true,
+      "rhai_stderr": "Runtime error: EOF while parsing a value at line 2 column 0 (line 4, position 15)\n",
+      "koto_verified": true,
+      "koto_stderr": "EOF while parsing a value at line 2 column 0\n--- 4:9\n   |\n 4 |   row = next_record()\n   |         ^^^^^^^^^^^\n"
+    },
+    {
+      "case": "jsonl-malformed-second-line",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 2: EOF while parsing an object at line 1 column 1\"\n",
+      "lua_verified": true,
+      "lua_stderr": "EOF while parsing an object at line 1 column 1\nstack traceback:\n\t[C]: in function 'records'\n\t../lua-records-shared.rs:88:2: in main chunk\n\n",
+      "luau_verified": true,
+      "luau_stderr": "EOF while parsing an object at line 1 column 1\nstack traceback:\n\t[C]: in function 'records'\n\t../lua-records-shared.rs:88:2: in function <../lua-records-shared.rs:88:1>\n\n",
+      "rhai_verified": true,
+      "rhai_stderr": "Runtime error: EOF while parsing an object at line 1 column 1 (line 4, position 15)\n",
+      "koto_verified": true,
+      "koto_stderr": "EOF while parsing an object at line 1 column 1\n--- 4:9\n   |\n 4 |   row = next_record()\n   |         ^^^^^^^^^^^\n"
+    },
+    {
+      "case": "jsonl-invalid-utf8",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 1: stream did not contain valid UTF-8\"\n",
+      "lua_verified": true,
+      "lua_stderr": "stream did not contain valid UTF-8\nstack traceback:\n\t[C]: in function 'records'\n\t../lua-records-shared.rs:88:2: in main chunk\n\n",
+      "luau_verified": true,
+      "luau_stderr": "stream did not contain valid UTF-8\nstack traceback:\n\t[C]: in function 'records'\n\t../lua-records-shared.rs:88:2: in function <../lua-records-shared.rs:88:1>\n\n",
+      "rhai_verified": true,
+      "rhai_stderr": "Runtime error: stream did not contain valid UTF-8 (line 4, position 15)\n",
+      "koto_verified": true,
+      "koto_stderr": "stream did not contain valid UTF-8\n--- 4:9\n   |\n 4 |   row = next_record()\n   |         ^^^^^^^^^^^\n"
+    },
+    {
+      "case": "jsonl-exact-byte-limit",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 1.0
+        }
+      ],
+      "rush_stderr": "",
+      "lua_verified": true,
+      "lua_stderr": "",
+      "luau_verified": true,
+      "luau_stderr": "",
+      "rhai_verified": true,
+      "rhai_stderr": "",
+      "koto_verified": true,
+      "koto_stderr": ""
+    },
+    {
+      "case": "jsonl-over-byte-limit",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 1: exceeds 65536 bytes\"\n",
+      "lua_verified": true,
+      "lua_stderr": "runtime error: line exceeds byte limit\nstack traceback:\n\t[C]: in function 'records'\n\t../lua-records-shared.rs:88:2: in main chunk\n\n",
+      "luau_verified": true,
+      "luau_stderr": "runtime error: line exceeds byte limit\nstack traceback:\n\t[C]: in function 'records'\n\t../lua-records-shared.rs:88:2: in function <../lua-records-shared.rs:88:1>\n\n",
+      "rhai_verified": true,
+      "rhai_stderr": "Runtime error: line exceeds byte limit (line 4, position 15)\n",
+      "koto_verified": true,
+      "koto_stderr": "line exceeds byte limit\n--- 4:9\n   |\n 4 |   row = next_record()\n   |         ^^^^^^^^^^^\n"
+    }
+  ]
+}

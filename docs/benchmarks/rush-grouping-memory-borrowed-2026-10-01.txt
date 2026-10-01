@@ -1,0 +1,19 @@
+   Compiling themoretheless-tokenizer-rush v0.4.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `bench` profile [optimized] target(s) in 2.04s
+     Running benches/memory.rs (target/release/build/themoretheless-tokenizer-rush/fed22f83fb01bbcc/out/memory-fed22f83fb01bbcc)
+workload	items	run	peak_extra_bytes	live_after_drop_bytes	allocation_calls
+group_by	1000	1	140593	0	6162
+group_by	1000	2	140593	0	6162
+group_by	1000	3	140593	0	6162
+fold_by	1000	1	18495	0	6045
+fold_by	1000	2	18495	0	6045
+fold_by	1000	3	18495	0	6045
+group_by	100000	1	13262513	0	600176
+group_by	100000	2	13262513	0	600176
+group_by	100000	3	13262513	0	600176
+fold_by	100000	1	18495	0	600045
+fold_by	100000	2	18495	0	600045
+fold_by	100000	3	18495	0	600045
+fold_by	1000000	1	18495	0	6000045
+fold_by	1000000	2	18495	0	6000045
+fold_by	1000000	3	18495	0	6000045

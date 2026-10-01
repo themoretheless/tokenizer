@@ -1,0 +1,19 @@
+totals = {}
+order = []
+while true
+  row = next_record()
+  if row == null
+    break
+  if row[2]
+    key = row[0]
+    if not totals.contains_key(key)
+      totals.insert(key, 0.0)
+      order.push(key)
+    next = totals.get(key) + row[1]
+    if not finite(next)
+      throw 'total must be finite'
+    totals.insert(key, next)
+result = []
+for key in order
+  result.push {group: key, total: totals.get(key)}
+result

@@ -1,0 +1,288 @@
+{
+  "date": "2026-10-01T07:07:46.912804+00:00",
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "method": "whole process; warm filesystem cache; 2 warmups, 10 alternating rounds",
+  "runs": [
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 5.404375,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 60.279375,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 125.04425,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 6.593375,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 14.178958,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 64.254,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 59.978875,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 5.161042,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 6.422875,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 56.119084,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 59.676291,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 5.76425,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 5.267833,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 57.999583,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 60.979583,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 7.292041,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 6.952709,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 60.114458,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 55.955834,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 5.360042,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 20.599459,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 82.417666,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 75.361541,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 17.589083,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 20.090584,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 68.9405,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 72.772042,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 17.957791,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 18.73925,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 69.720542,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 73.999583,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 18.264084,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 18.172833,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 76.103333,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 69.206291,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 20.902125,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 18.687625,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 69.072875,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 71.718333,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 19.403041,
+      "verified": true
+    }
+  ]
+}

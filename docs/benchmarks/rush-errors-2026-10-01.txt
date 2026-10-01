@@ -1,0 +1,7 @@
+   Compiling themoretheless-tokenizer-rush v0.4.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `release` profile [optimized] target(s) in 1.94s
+     Running `target/release/examples/error_contracts`
+syntax-case.r:2 bytes 12..12: expected-expression: Expected an expression
+runtime-case.r:2 bytes 23..30: Value does not support member access
+host-case.r:1 bytes 14..25: host rejected operation
+Rush: error spans and reuse of the same prepared program verified

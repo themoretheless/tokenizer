@@ -1,0 +1,4 @@
+   Compiling rush-koto-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/koto-runtime)
+    Finished `release` profile [optimized] target(s) in 0.48s
+     Running `docs/benchmarks/koto-runtime/target/release/host-object`
+Koto 0.16.1: alias mutation, wrong argument type, nonfinite rejection, deleted owner and VM reuse passed

@@ -1,0 +1,30 @@
+   Compiling rush-rhai-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/rhai-runtime)
+    Finished `release` profile [optimized] target(s) in 1.22s
+     Running `docs/benchmarks/rhai-runtime/target/release/cancellation`
+Rhai 1.26.1; loop; 25 samples after 3 warmups; request 5ms after entry; host sleep 25ms when selected
+sample	request_to_return_us	reuse_result
+0	7.000	3
+1	7.125	3
+2	16.042	3
+3	5.583	3
+4	5.708	3
+5	6.625	3
+6	5.459	3
+7	5.334	3
+8	5.625	3
+9	57.000	3
+10	8.375	3
+11	5.333	3
+12	24.583	3
+13	7.667	3
+14	8.417	3
+15	5.916	3
+16	3.833	3
+17	4.958	3
+18	4.709	3
+19	3.375	3
+20	7.125	3
+21	4.542	3
+22	7.042	3
+23	30.000	3
+24	5.750	3

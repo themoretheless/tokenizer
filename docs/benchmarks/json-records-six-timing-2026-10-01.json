@@ -1,0 +1,1025 @@
+{
+  "date": "2026-10-01T08:37:30.866281+00:00",
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "method": "whole process; warm filesystem cache; 2 warmups, 12 cyclic rounds",
+  "engines": [
+    "Rush",
+    "CPython",
+    "Lua",
+    "Luau",
+    "Rhai",
+    "Koto"
+  ],
+  "rss": false,
+  "runs": [
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 3.81375,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 44.583708,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 3.987334,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 4.407083,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 4.546333,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 0,
+      "milliseconds": 5.217125,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 44.214042,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 3.932625,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 4.520875,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 4.325083,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 5.548292,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 1,
+      "milliseconds": 4.035041,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 3.745167,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 4.60075,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 4.198583,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 5.311792,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 3.928333,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 2,
+      "milliseconds": 44.875083,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 4.59825,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 4.793708,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 5.477708,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 3.895917,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 44.737041,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 3,
+      "milliseconds": 3.552875,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 4.104167,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 5.474125,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 3.756583,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 45.185167,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 3.931583,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 4,
+      "milliseconds": 4.932375,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 5.413,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 4.399792,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 43.972541,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 3.869833,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 4.789792,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 5,
+      "milliseconds": 4.666333,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 4.419084,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 46.604875,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 4.132834,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 4.50475,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 4.77875,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 6,
+      "milliseconds": 5.438041,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 45.600625,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 4.046584,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 4.542792,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 3.939667,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 4.686667,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 7,
+      "milliseconds": 3.945334,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 3.607084,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 4.610584,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 4.825667,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 5.131292,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 3.964458,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 8,
+      "milliseconds": 46.578541,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 4.946208,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 4.366375,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 5.364583,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 3.911417,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 45.982041,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 9,
+      "milliseconds": 4.041292,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 4.635416,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 5.694583,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 4.174042,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 46.370708,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 4.128667,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 10,
+      "milliseconds": 4.897458,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 5.346875,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 4.131792,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 44.529375,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 3.976208,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 4.62475,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 1000,
+      "round": 11,
+      "milliseconds": 4.8425,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 15.412916,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 57.705208,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 9.521625,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 10.945584,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 16.5665,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 0,
+      "milliseconds": 14.210416,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 58.513375,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 10.559959,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 10.991917,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 15.579916,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 13.85125,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 1,
+      "milliseconds": 14.110083,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 10.352166,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 11.332708,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 16.17775,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 14.6785,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 14.549875,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 2,
+      "milliseconds": 58.389584,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 11.441667,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 16.495584,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 13.8635,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 14.1685,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 55.582791,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 3,
+      "milliseconds": 9.841584,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 15.994417,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 15.035125,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 14.026417,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 54.9905,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 9.669542,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 4,
+      "milliseconds": 11.191459,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 14.37325,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 14.506167,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 56.575959,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 9.89825,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 11.251625,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 5,
+      "milliseconds": 15.355125,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 14.453125,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 57.463667,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 9.516417,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 11.196666,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 16.53025,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 6,
+      "milliseconds": 14.072083,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 56.581083,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 10.068083,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 10.798917,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 15.616333,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 14.576625,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 7,
+      "milliseconds": 14.318875,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 9.828792,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 11.092,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 17.15825,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 14.272542,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 14.033833,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 8,
+      "milliseconds": 57.830875,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 10.805875,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 15.952333,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 14.371916,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 14.230625,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 58.01175,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 9,
+      "milliseconds": 9.747083,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 16.648125,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 14.062042,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 14.709833,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 56.840708,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 10.259375,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 10,
+      "milliseconds": 11.556541,
+      "verified": true
+    },
+    {
+      "engine": "Koto",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 14.123959,
+      "verified": true
+    },
+    {
+      "engine": "Rush",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 14.620708,
+      "verified": true
+    },
+    {
+      "engine": "CPython",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 58.808792,
+      "verified": true
+    },
+    {
+      "engine": "Lua",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 11.246792,
+      "verified": true
+    },
+    {
+      "engine": "Luau",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 14.763083,
+      "verified": true
+    },
+    {
+      "engine": "Rhai",
+      "items": 10000,
+      "round": 11,
+      "milliseconds": 17.297209,
+      "verified": true
+    }
+  ]
+}

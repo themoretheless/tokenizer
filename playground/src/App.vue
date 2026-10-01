@@ -3,7 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { LANGUAGES, defaultModeFor, groupLabelFor, groupedLanguages, languageMeta, modeLabelFor, sampleFor } from './languages.js'
 import { INVISIBLE_KINDS, kindColor, kindCounts } from './kinds.js'
 import { LANGUAGE_CASES } from '../tests/language-cases.js'
-import { runTokenizer } from './tokenizer.js'
+import { runTokenizer, runRush } from './tokenizer.js'
+import { bytePosition, sourcePosition, utf16OffsetFromByte } from './source-position.js'
+import { completionRange as findCompletionRange, applyCompletion, completionCandidates } from './completion.js'
 import { PRESETS, depthLabel, depthOf, loadCatalog } from './catalog.js'
 
 const MAX_RENDERED_TOKENS = 4000
@@ -23,12 +25,48 @@ const language = ref(initialLang)
 const mode = ref(initialMode)
 const layer = ref(initialLayer)
 const result = ref(null)
+const resultSource = ref('')
+const completions = ref([])
+let completionRange = null
 const loading = ref(false)
 const error = ref('')
+const execution = ref(null)
+const executing = ref(false)
+let executionId = 0
+let executionController
+const executionUrl = computed(() => execution.value?.ok
+  ? `data:${execution.value.kind === 'svg' ? 'image/svg+xml' : 'text/plain'};charset=utf-8,${encodeURIComponent(execution.value.output)}`
+  : '')
+
+async function executeRush() {
+  executionController?.abort()
+  executionController = new AbortController()
+  const id = ++executionId
+  executing.value = true
+  execution.value = null
+  try {
+    const output = await runRush(source.value, executionController.signal)
+    if (id === executionId) execution.value = output
+  } catch (cause) {
+    if (id === executionId) execution.value = { ok: false, error: cause.message }
+  } finally {
+    if (id === executionId) executing.value = false
+  }
+}
+
+watch([source, language], () => {
+  executionController?.abort()
+  executionId += 1
+  execution.value = null
+  executing.value = false
+})
 const activeToken = ref(null)
 const kindHover = ref(null)
 const kindPin = ref(null)
 const activeCase = ref('sample')
+const rushExamples = [
+  { name: 'Flower · SVG', source: 'range(0, 360, 5)\n    | map(a => vec2(cos(deg(a)), sin(deg(a))) * (30 + 10 * cos(deg(a * 6))))\n    | polygon' },
+]
 const comboOpen = ref(false)
 const comboSearch = ref('')
 const comboActive = ref(0)
@@ -68,14 +106,17 @@ const showModePicker = computed(() => modes.value.length > 1)
 const visibleTokens = computed(() => result.value?.tokens ?? [])
 const renderedTokens = computed(() => visibleTokens.value.slice(0, MAX_RENDERED_TOKENS))
 const truncated = computed(() => visibleTokens.value.length > MAX_RENDERED_TOKENS)
-const diagnostics = computed(() => result.value?.diagnostics ?? [])
+const diagnostics = computed(() => [...(result.value?.diagnostics ?? []), ...(result.value?.executionDiagnostics ?? [])])
 const active = computed(() => visibleTokens.value.find((token) => token.index === activeToken.value))
 const effectiveMode = computed(() => (
   modes.value.includes(mode.value) ? mode.value : defaultModeFor(language.value)
 ))
 const kindFilter = computed(() => kindHover.value ?? kindPin.value)
 const legend = computed(() => kindCounts(visibleTokens.value))
-const casesForLanguage = computed(() => LANGUAGE_CASES[language.value]?.cases ?? [])
+const casesForLanguage = computed(() => [
+  ...(language.value === 'rush' ? rushExamples : []),
+  ...(LANGUAGE_CASES[language.value]?.cases ?? []),
+])
 const lineCount = computed(() => source.value.split('\n').length)
 const currentEngine = computed(() => engines.value[language.value])
 const secondEngine = computed(() => engines.value[secondId.value])
@@ -165,11 +206,11 @@ const statusLabel = computed(() => {
   if (!currentValidates.value) {
     return count ? `${count} FLAG${count === 1 ? '' : 'S'} · NOT VALIDATED` : 'TOKENIZED'
   }
-  if (result.value.valid) return 'VALID'
+  if (result.value.valid && !count) return 'VALID'
   return `${diagnostics.value.length} DIAG${diagnostics.value.length === 1 ? '' : 'S'}`
 })
 const statusBad = computed(() =>
-  Boolean(error.value) || Boolean(result.value && currentValidates.value && !result.value.valid),
+  Boolean(error.value) || Boolean(result.value && currentValidates.value && (!result.value.valid || diagnostics.value.length)),
 )
 
 function dotColor(kind) {
@@ -191,23 +232,22 @@ function tokenClass(token) {
 }
 
 function lineColumnAt(offset) {
-  const upto = source.value.slice(0, offset)
-  const lines = upto.split('\n')
-  return { line: lines.length, column: lines[lines.length - 1].length + 1 }
+  return bytePosition(source.value, offset)
 }
 
 async function tokenize() {
   const id = ++requestId
+  const requestedSource = source.value
   loading.value = true
   error.value = ''
   try {
     const payload = await runTokenizer({
-      source: source.value,
+      source: requestedSource,
       language: language.value,
       mode: effectiveMode.value,
       layer: layer.value,
     })
-    if (id === requestId) result.value = payload
+    if (id === requestId) { result.value = payload; resultSource.value = requestedSource }
   } catch (cause) {
     if (id === requestId) {
       result.value = null
@@ -367,7 +407,7 @@ function updateCursor() {
   if (!el) return
   const start = el.selectionStart ?? 0
   const end = el.selectionEnd ?? start
-  const position = lineColumnAt(start)
+  const position = sourcePosition(source.value, start)
   cursor.value = { ...position, selected: Math.max(0, end - start) }
 }
 
@@ -376,9 +416,54 @@ function syncGutter(event) {
 }
 
 function focusSpan(start, end) {
+  const editor = textareaEl.value
+  if (editor) {
+    editor.focus()
+    editor.setSelectionRange(utf16OffsetFromByte(source.value, start), utf16OffsetFromByte(source.value, end))
+    updateCursor()
+  }
   const token = visibleTokens.value.find((item) => item.start < Math.max(end, start + 1) && item.end > start)
   activeToken.value = token?.index ?? null
 }
+
+function goToDefinition(offset) {
+  if (source.value !== resultSource.value) return
+  const reference = result.value?.references?.find(item => item.start <= offset && offset < item.end)
+  if (reference?.definition) focusSpan(reference.definition.start, reference.definition.end)
+}
+
+function definitionAtCursor(event) {
+  if (language.value === 'rush' && event.ctrlKey && event.code === 'Space') {
+    event.preventDefault()
+    completionRange = findCompletionRange(source.value, textareaEl.value.selectionStart, textareaEl.value.selectionEnd)
+    completions.value = source.value === resultSource.value
+      ? completionCandidates(source.value, completionRange, result.value)
+      : []
+    return
+  }
+  if (event.key === 'Escape') completions.value = []
+  if (event.key !== 'F12' || language.value !== 'rush') return
+  event.preventDefault()
+  const offset = new TextEncoder().encode(source.value.slice(0, textareaEl.value.selectionStart)).length
+  goToDefinition(offset)
+}
+
+function insertCompletion(item) {
+  const range = completionRange
+  if (!range || range.source !== source.value) return
+  const edit = applyCompletion(source.value, range, item)
+  if (!edit) return
+  source.value = edit.source
+  completions.value = []
+  nextTick(() => {
+    textareaEl.value.focus()
+    const position = edit.cursor
+    textareaEl.value.setSelectionRange(position, position)
+    updateCursor()
+  })
+}
+
+watch([source, language], () => { completions.value = [] })
 
 watch(comboSearch, () => { comboActive.value = 0 })
 
@@ -429,6 +514,7 @@ onMounted(async () => {
   }
 })
 onBeforeUnmount(() => {
+  executionController?.abort()
   batchToken += 1
   clearTimeout(timer)
   clearTimeout(urlTimer)
@@ -554,6 +640,28 @@ onBeforeUnmount(() => {
 
     <p v-if="catalogError" class="bridge-error">Registry catalog unavailable: {{ catalogError }}</p>
 
+    <section v-if="language === 'rush' && view === 'single'" class="panel">
+      <div class="panel-head">
+        <span>RUSH / RESULT</span>
+        <button type="button" :disabled="executing" @click="executeRush">{{ executing ? 'Running…' : 'Run Rush' }}</button>
+        <button v-if="executing" type="button" @click="executionController?.abort()">Cancel execution</button>
+      </div>
+      <div aria-live="polite">
+        <div v-if="execution && !execution.ok" class="bridge-error" role="alert">
+          <button v-if="Number.isInteger(execution.start) && Number.isInteger(execution.end)"
+            type="button" @click="focusSpan(execution.start, execution.end)">
+            {{ execution.error }} · L{{ lineColumnAt(execution.start).line }}:{{ lineColumnAt(execution.start).column }}
+          </button>
+          <span v-else>{{ execution.error }}</span>
+        </div>
+        <template v-else-if="execution?.ok">
+          <img v-if="execution.kind === 'svg'" :src="executionUrl" alt="Rush polygon output" style="display: block; width: 100%; height: 280px; object-fit: contain; background: white">
+          <pre v-else style="max-height: 280px; overflow: auto; padding: 16px">{{ execution.output }}</pre>
+          <a :href="executionUrl" :download="`rush-result.${execution.kind === 'text' ? 'txt' : execution.kind}`">Download {{ execution.kind.toUpperCase() }}</a>
+        </template>
+      </div>
+    </section>
+
     <section v-if="view === 'matrix'" class="panel matrix-panel">
       <div class="panel-head">
         <span>02 / MATRIX · {{ preset || 'all engines' }}</span>
@@ -626,8 +734,13 @@ onBeforeUnmount(() => {
     <section v-else class="workspace" :class="{ 'is-compare': view === 'compare' }">
       <article class="panel editor-panel">
         <div class="panel-head">
-          <span>01 / INPUT</span>
+          <span>01 / INPUT <small v-if="language === 'rush'">· Ctrl+Space: names · F12: definition</small></span>
           <span>{{ language }} · L{{ cursor.line }}:{{ cursor.column }}<template v-if="cursor.selected"> · {{ cursor.selected }} SEL</template> · {{ result?.sourceBytes ?? 0 }} BYTES</span>
+        </div>
+        <div v-if="completions.length" aria-label="Rush name suggestions" style="max-height: 140px; overflow: auto; padding: 12px">
+          <button v-for="item in completions" :key="item.name" type="button" @click="insertCompletion(item)">
+            {{ item.name }} · <template v-if="item.kind === 'binding'">local</template><template v-else-if="item.kind === 'field'">field</template><template v-else>{{ item.minArgs === item.maxArgs ? item.minArgs : `${item.minArgs}–${item.maxArgs}` }} args</template>
+          </button>
         </div>
         <div class="editor-wrap">
           <div ref="gutterEl" class="gutter" aria-hidden="true">
@@ -640,6 +753,7 @@ onBeforeUnmount(() => {
             :aria-label="`${language} source`"
             @scroll="syncGutter"
             @keyup="updateCursor"
+            @keydown="definitionAtCursor"
             @click="updateCursor"
             @select="updateCursor"
           />
@@ -674,6 +788,7 @@ onBeforeUnmount(() => {
           @mouseenter="activeToken = token.index"
           @mouseleave="activeToken = null"
           @click="activeToken = token.index"
+          @dblclick="goToDefinition(token.start)"
         >{{ token.text }}</span><span v-if="!visibleTokens.length" class="empty">Waiting for input…</span></pre>
         <p v-if="truncated" class="trunc-note">Rendering first {{ MAX_RENDERED_TOKENS }} of {{ visibleTokens.length }} tokens.</p>
         <div v-if="active" class="inspector">

@@ -6,6 +6,11 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Rush `analyze` / `analyze_with` APIs for scoped duplicate declarations and immutable binding assignments, with bounded diagnostics.
+
+
 ### Changed
 
 - Rush now has a dedicated lexer, recovering parser and syntax validation.

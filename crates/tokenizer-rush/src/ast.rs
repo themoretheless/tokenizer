@@ -15,7 +15,7 @@ pub struct Type<'s> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parameter<'s> {
-    pub name: Name<'s>,
+    pub pattern: Expr<'s>,
     pub ty: Option<Type<'s>>,
 }
 
@@ -39,6 +39,11 @@ pub struct Stmt<'s> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StmtKind<'s> {
+    Import(Name<'s>),
+    Destructure {
+        pattern: Expr<'s>,
+        value: Expr<'s>,
+    },
     Function {
         name: Name<'s>,
         parameters: Vec<Parameter<'s>>,
@@ -81,6 +86,15 @@ pub struct Expr<'s> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprKind<'s> {
+    If {
+        condition: Box<Expr<'s>>,
+        then_value: Box<Expr<'s>>,
+        else_value: Box<Expr<'s>>,
+    },
+    Lambda {
+        parameters: Vec<Expr<'s>>,
+        body: Box<Expr<'s>>,
+    },
     Name(Name<'s>),
     Number(&'s str),
     String(&'s str),
@@ -113,6 +127,7 @@ pub enum ExprKind<'s> {
         index: Box<Expr<'s>>,
     },
     List(Vec<Expr<'s>>),
+    Tuple(Vec<Expr<'s>>),
     Map(Vec<(Expr<'s>, Expr<'s>)>),
     Pipeline {
         input: Box<Expr<'s>>,
@@ -129,6 +144,7 @@ pub enum ExprKind<'s> {
 pub struct MatchArm<'s> {
     pub span: Span,
     pub pattern: Expr<'s>,
+    pub guard: Option<Expr<'s>>,
     pub value: Expr<'s>,
 }
 

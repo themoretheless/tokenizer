@@ -1,7 +1,7 @@
 use themoretheless_tokenizer_core::{Diagnostic, InputLimits, LexToken, Lexed, Span, SyntaxKind};
 
 pub(crate) const KEYWORDS: &[&str] = &[
-    "fn", "let", "const", "return", "yield", "if", "else", "while", "for", "foreach", "in",
+    "fn", "let", "const", "mut", "return", "yield", "if", "else", "while", "for", "foreach", "in",
     "match", "break", "continue", "and", "or", "not", "true", "false", "null",
     // Reserved until their grammar and semantics are specified.
     "async", "await", "import",

@@ -1,0 +1,30 @@
+   Compiling rush-lua-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/lua-runtime)
+    Finished `release` profile [optimized] target(s) in 0.29s
+     Running `docs/benchmarks/lua-runtime/target/release/rush-lua-cancellation`
+rush-lua-comparison; 25 samples after 3 warmups; request 5ms after script entry
+sample	request_to_return_us	reuse_result
+0	4.459	3
+1	7.958	3
+2	21.875	3
+3	6.834	3
+4	6.500	3
+5	3.333	3
+6	5.958	3
+7	6.709	3
+8	7.000	3
+9	9.292	3
+10	9.500	3
+11	4.833	3
+12	4.583	3
+13	8.500	3
+14	6.292	3
+15	5.208	3
+16	4.792	3
+17	4.208	3
+18	2.958	3
+19	6.125	3
+20	6.208	3
+21	13.083	3
+22	8.167	3
+23	7.583	3
+24	49.084	3

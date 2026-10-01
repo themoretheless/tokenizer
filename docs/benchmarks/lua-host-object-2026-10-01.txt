@@ -1,0 +1,4 @@
+   Compiling rush-lua-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/lua-runtime)
+    Finished `release` profile [optimized] target(s) in 0.35s
+     Running `docs/benchmarks/lua-runtime/target/release/rush-lua-host-object`
+rush-lua-comparison: alias mutation, wrong argument type, nonfinite rejection, deleted owner and VM reuse passed

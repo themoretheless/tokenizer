@@ -1,0 +1,30 @@
+   Compiling rush-koto-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/koto-runtime)
+    Finished `release` profile [optimized] target(s) in 0.34s
+     Running `docs/benchmarks/koto-runtime/target/release/timeout`
+Koto 0.16.1; loop; execution limit 5ms; 25 samples after 3 warmups; elapsed run time, not request latency
+sample	run_us	reuse_result
+0	5003.791	3
+1	5010.375	3
+2	5008.750	3
+3	5009.708	3
+4	5011.250	3
+5	5004.166	3
+6	5005.083	3
+7	5016.125	3
+8	5004.125	3
+9	5009.833	3
+10	5002.375	3
+11	5007.458	3
+12	5008.333	3
+13	5008.375	3
+14	5016.417	3
+15	5010.916	3
+16	5002.875	3
+17	5007.708	3
+18	5005.709	3
+19	5008.458	3
+20	5013.250	3
+21	5007.791	3
+22	5008.541	3
+23	5015.292	3
+24	5001.708	3

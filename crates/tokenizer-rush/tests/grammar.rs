@@ -12,6 +12,12 @@ fn good(source: &str) -> themoretheless_tokenizer_rush::Parse<'_> {
         p.module
     );
     assert!(p.lexed.is_lossless(source));
+    let formatted = themoretheless_tokenizer_rush::format_source(source)
+        .unwrap_or_else(|error| panic!("Formatter rejected valid grammar: {source:?}: {error}"));
+    assert_eq!(
+        themoretheless_tokenizer_rush::format_source(&formatted).unwrap(),
+        formatted
+    );
     p
 }
 fn bad(source: &str, code: &str) {
@@ -75,7 +81,7 @@ fn function_signatures_preserve_parameters_types_and_body() {
         };
         assert_eq!(name.text, "greet");
         assert_eq!(parameters.len(), 1);
-        assert_eq!(parameters[0].name.text, "who");
+        assert!(matches!(&parameters[0].pattern.kind, ExprKind::Name(name) if name.text == "who"));
         assert_eq!(parameters[0].ty.as_ref().unwrap().name.text, "str");
         assert_eq!(result.as_ref().unwrap().name.text, "str");
         assert!(matches!(body.stmts[0].kind, StmtKind::Return(Some(_))));

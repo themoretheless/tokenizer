@@ -1,0 +1,244 @@
+{
+  "method": "functional parity; no timings",
+  "cases": [
+    {
+      "case": "empty",
+      "accepted": true,
+      "expected": [],
+      "rush_stderr": "",
+      "wren_verified": true,
+      "wren_stderr": ""
+    },
+    {
+      "case": "unicode-order-filter",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "Б\"\n",
+          "total": 1.5
+        },
+        {
+          "group": "next",
+          "total": -4.0
+        }
+      ],
+      "rush_stderr": "",
+      "wren_verified": true,
+      "wren_stderr": ""
+    },
+    {
+      "case": "inactive",
+      "accepted": true,
+      "expected": [],
+      "rush_stderr": "",
+      "wren_verified": true,
+      "wren_stderr": ""
+    },
+    {
+      "case": "zero",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 0.0
+        }
+      ],
+      "rush_stderr": "",
+      "wren_verified": true,
+      "wren_stderr": ""
+    },
+    {
+      "case": "empty-and-nul-keys",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "",
+          "total": 0.0
+        },
+        {
+          "group": "\u0000",
+          "total": 3.0
+        }
+      ],
+      "rush_stderr": "",
+      "wren_verified": true,
+      "wren_stderr": ""
+    },
+    {
+      "case": "inactive-before-active",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 2.0
+        },
+        {
+          "group": "b",
+          "total": 3.0
+        }
+      ],
+      "rush_stderr": "",
+      "wren_verified": true,
+      "wren_stderr": ""
+    },
+    {
+      "case": "not-array",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Input must be an array\"\n",
+      "wren_verified": true,
+      "wren_stderr": "Input must be an array\n"
+    },
+    {
+      "case": "non-object-row",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: group must be a string\"\n",
+      "wren_verified": true,
+      "wren_stderr": "group must be a string\n"
+    },
+    {
+      "case": "null-group",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: group must be a string\"\n",
+      "wren_verified": true,
+      "wren_stderr": "group must be a string\n"
+    },
+    {
+      "case": "numeric-active",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: active must be boolean\"\n",
+      "wren_verified": true,
+      "wren_stderr": "active must be boolean\n"
+    },
+    {
+      "case": "missing-field",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: active must be boolean\"\n",
+      "wren_verified": true,
+      "wren_stderr": "active must be boolean\n"
+    },
+    {
+      "case": "boolean-amount",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: amount must be finite\"\n",
+      "wren_verified": true,
+      "wren_stderr": "amount must be finite\n"
+    },
+    {
+      "case": "string-amount",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: amount must be finite\"\n",
+      "wren_verified": true,
+      "wren_stderr": "amount must be finite\n"
+    },
+    {
+      "case": "inactive-invalid",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: amount must be finite\"\n",
+      "wren_verified": true,
+      "wren_stderr": "amount must be finite\n"
+    },
+    {
+      "case": "overflow",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Non-finite arithmetic result\"\n",
+      "wren_verified": true,
+      "wren_stderr": "records:-1: total must be finite\nrecords:17: (script)\nWren execution failed\n"
+    },
+    {
+      "case": "row-limit",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"At most 1000 rows are allowed\"\n",
+      "wren_verified": true,
+      "wren_stderr": "At most 1000 rows are allowed\n"
+    },
+    {
+      "case": "jsonl-empty",
+      "accepted": true,
+      "expected": [],
+      "rush_stderr": "",
+      "wren_verified": true,
+      "wren_stderr": ""
+    },
+    {
+      "case": "jsonl-crlf-final-no-newline",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 2.0
+        }
+      ],
+      "rush_stderr": "",
+      "wren_verified": true,
+      "wren_stderr": ""
+    },
+    {
+      "case": "jsonl-large-stream",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 10000.0
+        }
+      ],
+      "rush_stderr": "",
+      "wren_verified": true,
+      "wren_stderr": ""
+    },
+    {
+      "case": "jsonl-blank-line",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 2: EOF while parsing a value at line 2 column 0\"\n",
+      "wren_verified": true,
+      "wren_stderr": "records:-1: input error\nrecords:8: (script)\nEOF while parsing a value at line 2 column 0\n"
+    },
+    {
+      "case": "jsonl-malformed-second-line",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 2: EOF while parsing an object at line 1 column 1\"\n",
+      "wren_verified": true,
+      "wren_stderr": "records:-1: input error\nrecords:8: (script)\nEOF while parsing an object at line 1 column 1\n"
+    },
+    {
+      "case": "jsonl-invalid-utf8",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 1: stream did not contain valid UTF-8\"\n",
+      "wren_verified": true,
+      "wren_stderr": "records:-1: input error\nrecords:8: (script)\nstream did not contain valid UTF-8\n"
+    },
+    {
+      "case": "jsonl-exact-byte-limit",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 1.0
+        }
+      ],
+      "rush_stderr": "",
+      "wren_verified": true,
+      "wren_stderr": ""
+    },
+    {
+      "case": "jsonl-over-byte-limit",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 1: exceeds 65536 bytes\"\n",
+      "wren_verified": true,
+      "wren_stderr": "records:-1: input error\nrecords:8: (script)\nline exceeds byte limit\n"
+    }
+  ]
+}

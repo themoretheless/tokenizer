@@ -1,0 +1,23 @@
+{
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "case": "collections_lazy",
+  "items": 1000,
+  "iterations": 10000,
+  "build_command": [
+    "cargo",
+    "bench",
+    "--locked",
+    "-p",
+    "themoretheless-tokenizer-rush",
+    "--bench",
+    "runtime",
+    "--no-run",
+    "--message-format=json"
+  ],
+  "executable": "/Users/themoretheless/Documents/Sources/tokenizer/target/release/build/themoretheless-tokenizer-rush/9303948f52421f56/out/runtime-9303948f52421f56",
+  "bench_debug": "1",
+  "sample_returncode": 0,
+  "sample_stdout": "",
+  "sample_stderr": "Sampling process 19940 for 5 seconds with 1 millisecond of run time between samples\nSampling completed, processing symbols...\nSample analysis of process 19940 written to file /Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/rush-lazy-profile-2026-10-01.txt\n",
+  "method": "5s sample at 1ms interval; benchmark validates result before timing; prepared runs with fresh runtime; instrumented timings are not baseline timings"
+}

@@ -1,0 +1,6 @@
+type=0 module=syntax-case line=2 Error at end of file: Expected expression.
+type=1 module=<none> line=-1 Null does not implement 'missing'.
+type=2 module=runtime-case line=2 (script)
+type=1 module=<none> line=-1 host rejected operation
+type=2 module=host-case line=4 (script)
+Wren 0.4.0: compile/runtime/foreign errors, source callbacks and VM reuse passed

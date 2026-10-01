@@ -1,0 +1,7 @@
+workload	operation	iterations/sample	min_us	median_us	max_us
+items=1000
+cells	prepared_run	10	933.712	942.517	951.383
+cells_cycles	prepared_run	10	1996.242	2038.492	2072.392
+items=10000
+cells_cycles	prepared_run	10	19940.342	20542.825	21192.412
+cells	prepared_run	10	9935.950	10097.979	10233.867

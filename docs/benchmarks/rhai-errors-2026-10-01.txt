@@ -1,0 +1,10 @@
+   Compiling rush-rhai-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/rhai-runtime)
+    Finished `release` profile [optimized] target(s) in 0.60s
+     Running `docs/benchmarks/rhai-runtime/target/release/errors`
+Rhai 1.26.1: compile/runtime/host errors, positions and engine reuse verified
+SYNTAX
+Script is incomplete (line 2, position 1)
+RUNTIME
+Unknown property 'missing' - a getter is not registered for type '()' (line 2, position 7)
+HOST
+Runtime error: host rejected operation (line 1, position 1)

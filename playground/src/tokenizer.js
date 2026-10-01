@@ -1,3 +1,4 @@
+import { executeInWorker } from './worker-execution.js'
 let wasmModulePromise
 
 async function tokenizeWithWasm({ source, language = 'json', mode, layer }) {
@@ -5,7 +6,7 @@ async function tokenizeWithWasm({ source, language = 'json', mode, layer }) {
     const base = import.meta.env.BASE_URL
     wasmModulePromise = import(/* @vite-ignore */ `${base}wasm/tokenizer_wasm.js`)
       .then(async (module) => {
-        await module.default(`${base}wasm/tokenizer_wasm_bg.wasm`)
+        await module.default({ module_or_path: `${base}wasm/tokenizer_wasm_bg.wasm` })
         return module
       })
       .catch((error) => {
@@ -40,7 +41,7 @@ async function catalogWithWasm() {
     const base = import.meta.env.BASE_URL
     wasmModulePromise = import(/* @vite-ignore */ `${base}wasm/tokenizer_wasm.js`)
       .then(async (module) => {
-        await module.default(`${base}wasm/tokenizer_wasm_bg.wasm`)
+        await module.default({ module_or_path: `${base}wasm/tokenizer_wasm_bg.wasm` })
         return module
       })
       .catch((error) => {
@@ -60,4 +61,18 @@ export async function runCatalog() {
   const result = await response.json()
   if (!response.ok) throw new Error(result.error || 'Catalog failed')
   return result
+}
+
+export async function runRush(source, signal) {
+  if (import.meta.env.DEV) {
+    const response = await fetch('/api/run-rush', { signal, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source }) })
+    if (!response.ok) throw new Error(`Execution request failed: ${response.status}`)
+    return response.json()
+  }
+  const base = new URL(import.meta.env.BASE_URL, window.location.href)
+  return executeInWorker(new Worker(new URL('./rush-worker.js', import.meta.url), { type: 'module' }), {
+    source,
+    moduleUrl: new URL('wasm/tokenizer_wasm.js', base).href,
+    wasmUrl: new URL('wasm/tokenizer_wasm_bg.wasm', base).href,
+  }, signal)
 }

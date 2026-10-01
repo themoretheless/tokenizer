@@ -249,20 +249,40 @@ impl<'s> Parser<'s> {
         }
         let kind = match self.text() {
             "fn" => self.function(token.indent),
-            "let" | "const" => {
-                let constant = self.eat("const");
-                if !constant {
-                    self.bump();
-                }
-                let name = self.inline_name("variable");
-                let ty = if self.eat(":") { Some(self.ty()) } else { None };
-                self.expect_inline("=");
-                let value = self.required_expr(false);
-                StmtKind::Declaration {
-                    name,
-                    constant,
-                    ty,
-                    value,
+            "import" => {
+                self.bump();
+                StmtKind::Import(self.inline_name("module"))
+            }
+            "let" | "const" | "mut" => {
+                let keyword = self.text();
+                self.bump();
+                let constant = if keyword == "let" {
+                    !self.eat("mut")
+                } else {
+                    keyword != "mut"
+                };
+                if self.at("(") || self.at("{") {
+                    if !constant {
+                        self.error(
+                            "immutable-pattern",
+                            "Destructuring bindings must be immutable",
+                        );
+                    }
+                    let pattern = self.expr(1, false, false);
+                    self.expect_inline("=");
+                    let value = self.required_expr(false);
+                    StmtKind::Destructure { pattern, value }
+                } else {
+                    let name = self.inline_name("variable");
+                    let ty = if self.eat(":") { Some(self.ty()) } else { None };
+                    self.expect_inline("=");
+                    let value = self.required_expr(false);
+                    StmtKind::Declaration {
+                        name,
+                        constant,
+                        ty,
+                        value,
+                    }
                 }
             }
             "return" => {
@@ -334,7 +354,7 @@ impl<'s> Parser<'s> {
                     StmtKind::Continue
                 }
             }
-            "async" | "await" | "import" => {
+            "async" | "await" => {
                 self.error(
                     "unsupported-syntax",
                     "This keyword is reserved but its grammar is not supported yet",
@@ -360,21 +380,23 @@ impl<'s> Parser<'s> {
         while self.peek().is_some()
             && !(parens && self.at(")"))
             && !self.at("->")
-            && !self.at("{")
+            && (parens || !self.at("{"))
             && !self.at(":")
             && (parens || !self.newline())
         {
             let before = self.pos;
-            let name = self.name("parameter");
-            if !names.insert(name.text) {
-                self.error_at(
-                    name.span,
-                    "duplicate-parameter",
-                    "A parameter name must be unique",
-                );
-            }
+            let pattern = if parens {
+                self.match_pattern()
+            } else {
+                let name = self.name("parameter");
+                Expr {
+                    span: name.span,
+                    kind: ExprKind::Name(name),
+                }
+            };
+            self.parameter_names(&pattern, &mut names);
             let ty = if self.eat(":") { Some(self.ty()) } else { None };
-            parameters.push(Parameter { name, ty });
+            parameters.push(Parameter { pattern, ty });
             if self.pos == before {
                 self.bump();
                 break;
@@ -415,7 +437,15 @@ impl<'s> Parser<'s> {
                 arguments: vec![],
             };
         }
-        let name = self.name("type");
+        let name = if self.at("null") {
+            let span = self.span();
+            let text = self.text();
+            self.bump();
+            self.roles.push((span, "type"));
+            Name { text, span }
+        } else {
+            self.name("type")
+        };
         let mut arguments = Vec::new();
         if self.eat("[") {
             while self.peek().is_some() && !self.at("]") {
@@ -505,6 +535,7 @@ impl<'s> Parser<'s> {
     }
     fn expr(&mut self, min_bp: u8, multiline: bool, commands: bool) -> Expr<'s> {
         let start = self.span().start;
+        let expression_indent = self.peek().map_or(0, |token| token.indent);
         if !self.enter() {
             return Expr {
                 span: Span::new(start, start),
@@ -513,7 +544,14 @@ impl<'s> Parser<'s> {
         }
         let mut left = self.prefix(multiline);
         let mut chain = 0;
-        while self.peek().is_some() && (multiline || !self.newline()) {
+        while self.peek().is_some()
+            && (multiline
+                || !self.newline()
+                || (self.at("|")
+                    && self
+                        .peek()
+                        .is_some_and(|token| token.indent > expression_indent)))
+        {
             if chain >= self.limits.max_depth.min(128) {
                 self.error("depth-limit", "Expression chain limit exceeded");
                 self.recover();
@@ -684,6 +722,84 @@ impl<'s> Parser<'s> {
     fn prefix(&mut self, multiline: bool) -> Expr<'s> {
         let span = self.span();
         let text = self.text();
+        // The closing outer parenthesis must be followed by a lambda arrow.
+        let spelling = |index: usize| {
+            self.tokens
+                .get(index)
+                .map(|t| &self.source[t.raw.span.start..t.raw.span.end])
+        };
+        let lambda = if text == "(" {
+            let mut cursor = self.pos + 1;
+            let mut depth = 1;
+            while let Some(token) = spelling(cursor) {
+                match token {
+                    "(" => depth += 1,
+                    ")" => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                cursor += 1;
+            }
+            depth == 0 && spelling(cursor + 1) == Some("=>")
+        } else {
+            self.peek().is_some_and(|t| {
+                matches!(t.raw.kind, SyntaxKind::Identifier | SyntaxKind::TypeIdent)
+            }) && spelling(self.pos + 1) == Some("=>")
+        };
+        if lambda {
+            let parens = self.eat("(");
+            let mut parameters: Vec<Expr<'s>> = Vec::new();
+            let mut names = std::collections::HashSet::new();
+            if !parens || !self.at(")") {
+                loop {
+                    let pattern = self.match_pattern();
+                    self.parameter_names(&pattern, &mut names);
+                    parameters.push(pattern);
+                    if !parens || !self.eat(",") || self.at(")") {
+                        break;
+                    }
+                }
+            }
+            if parens {
+                self.expect(")");
+            }
+            self.expect("=>");
+            let body = self.required_expr(multiline);
+            return Expr {
+                span: Span::new(span.start, body.span.end.max(span.end)),
+                kind: ExprKind::Lambda {
+                    parameters,
+                    body: Box::new(body),
+                },
+            };
+        }
+        if self.eat("if") {
+            let condition = self.expr(0, multiline, false);
+            self.expect("{");
+            let then_value = self.required_expr(true);
+            self.expect("}");
+            self.expect("else");
+            let else_value = if self.at("if") {
+                self.expr(0, multiline, false)
+            } else {
+                self.expect("{");
+                let value = self.required_expr(true);
+                self.expect("}");
+                value
+            };
+            return Expr {
+                span: Span::new(span.start, self.end()),
+                kind: ExprKind::If {
+                    condition: Box::new(condition),
+                    then_value: Box::new(then_value),
+                    else_value: Box::new(else_value),
+                },
+            };
+        }
         if text == "match" {
             return self.match_expr(multiline);
         }
@@ -703,7 +819,28 @@ impl<'s> Parser<'s> {
             };
         }
         if self.eat("(") {
+            if self.eat(")") {
+                return Expr {
+                    span: Span::new(span.start, self.end()),
+                    kind: ExprKind::Tuple(vec![]),
+                };
+            }
             let mut value = self.expr(0, true, false);
+            if self.eat(",") {
+                let mut values = vec![value];
+                while self.peek().is_some() && !self.at(")") {
+                    let before = self.pos;
+                    values.push(self.expr(0, true, false));
+                    if self.pos == before || !self.eat(",") {
+                        break;
+                    }
+                }
+                self.expect(")");
+                return Expr {
+                    span: Span::new(span.start, self.end()),
+                    kind: ExprKind::Tuple(values),
+                };
+            }
             self.expect(")");
             value.span = Span::new(span.start, self.end().max(span.end));
             return value;
@@ -776,6 +913,150 @@ impl<'s> Parser<'s> {
         };
         Expr { span, kind }
     }
+    fn parameter_names(
+        &mut self,
+        pattern: &Expr<'s>,
+        names: &mut std::collections::HashSet<&'s str>,
+    ) {
+        match &pattern.kind {
+            ExprKind::Name(name) => {
+                self.roles.push((name.span, "parameter"));
+                if name.text != "_" && !names.insert(name.text) {
+                    self.error_at(
+                        name.span,
+                        "duplicate-parameter",
+                        "A parameter name must be unique",
+                    );
+                }
+            }
+            ExprKind::Tuple(patterns) => {
+                for pattern in patterns {
+                    self.parameter_names(pattern, names);
+                }
+            }
+            ExprKind::Map(entries) => {
+                for (_, pattern) in entries {
+                    self.parameter_names(pattern, names);
+                }
+            }
+            _ => self.error_at(
+                pattern.span,
+                "invalid-parameter-pattern",
+                "Expected a name, tuple or record parameter pattern",
+            ),
+        }
+    }
+
+    fn match_pattern(&mut self) -> Expr<'s> {
+        let span = self.span();
+        if !self.enter() {
+            return Expr {
+                span,
+                kind: ExprKind::Error,
+            };
+        }
+        let result = if self.eat("(") {
+            let mut patterns = Vec::new();
+            while self.peek().is_some() && !self.at(")") {
+                let before = self.pos;
+                patterns.push(self.match_pattern());
+                if self.pos == before || !self.eat(",") {
+                    break;
+                }
+            }
+            self.expect(")");
+            Expr {
+                span: Span::new(span.start, self.end()),
+                kind: ExprKind::Tuple(patterns),
+            }
+        } else if self.eat("{") {
+            let mut entries = Vec::new();
+            let mut keys = std::collections::HashSet::new();
+            while self.peek().is_some() && !self.at("}") {
+                let before = self.pos;
+                let name = self.name("field");
+                if !keys.insert(name.text) {
+                    self.error_at(
+                        name.span,
+                        "duplicate-pattern-field",
+                        "Record pattern field is repeated",
+                    );
+                }
+                self.expect(":");
+                let value = self.match_pattern();
+                entries.push((
+                    Expr {
+                        span: name.span,
+                        kind: ExprKind::Name(name),
+                    },
+                    value,
+                ));
+                if self.pos == before || !self.eat(",") {
+                    break;
+                }
+            }
+            self.expect("}");
+            Expr {
+                span: Span::new(span.start, self.end()),
+                kind: ExprKind::Map(entries),
+            }
+        } else if self
+            .peek()
+            .is_some_and(|t| matches!(t.raw.kind, SyntaxKind::Identifier | SyntaxKind::TypeIdent))
+        {
+            let name = self.name("binding");
+            if self.eat("(") {
+                let mut arguments = Vec::new();
+                while self.peek().is_some() && !self.at(")") {
+                    let before = self.pos;
+                    arguments.push(self.match_pattern());
+                    if self.pos == before || !self.eat(",") {
+                        break;
+                    }
+                }
+                self.expect(")");
+                let expected = match name.text {
+                    "None" => Some(0),
+                    "Some" | "Ok" | "Err" => Some(1),
+                    _ => None,
+                };
+                if expected != Some(arguments.len()) {
+                    self.error_at(name.span, "invalid-pattern", "Invalid variant pattern");
+                }
+                Expr {
+                    span: Span::new(span.start, self.end()),
+                    kind: ExprKind::Call {
+                        callee: Box::new(Expr {
+                            span: name.span,
+                            kind: ExprKind::Name(name),
+                        }),
+                        arguments,
+                    },
+                }
+            } else {
+                Expr {
+                    span: name.span,
+                    kind: ExprKind::Name(name),
+                }
+            }
+        } else {
+            let pattern = self.expr(3, true, false);
+            let allowed = matches!(
+                pattern.kind,
+                ExprKind::Number(_) | ExprKind::String(_) | ExprKind::Bool(_) | ExprKind::Null
+            ) || matches!(&pattern.kind, ExprKind::Unary { operator: "-" | "+", value } if matches!(value.kind, ExprKind::Number(_)));
+            if !allowed {
+                self.error_at(
+                    pattern.span,
+                    "invalid-pattern",
+                    "Expected a literal, binding or variant pattern",
+                );
+            }
+            pattern
+        };
+        self.depth -= 1;
+        result
+    }
     fn match_expr(&mut self, multiline: bool) -> Expr<'s> {
         let start = self.span().start;
         self.bump();
@@ -791,22 +1072,7 @@ impl<'s> Parser<'s> {
         while self.peek().is_some() && !self.at("}") {
             let before = self.pos;
             let start = self.span().start;
-            let pattern = self.expr(3, true, false);
-            let allowed = matches!(
-                pattern.kind,
-                ExprKind::Number(_)
-                    | ExprKind::String(_)
-                    | ExprKind::Bool(_)
-                    | ExprKind::Null
-                    | ExprKind::Name(_)
-            ) || matches!(&pattern.kind, ExprKind::Unary { operator: "-" | "+", value } if matches!(value.kind, ExprKind::Number(_)));
-            if !allowed {
-                self.error_at(
-                    pattern.span,
-                    "invalid-pattern",
-                    "A pattern must be a literal, binding or _",
-                );
-            }
+            let pattern = self.match_pattern();
             if wildcard {
                 self.error_at(
                     pattern.span,
@@ -814,7 +1080,15 @@ impl<'s> Parser<'s> {
                     "A binding or wildcard must be the final match arm",
                 );
             }
-            if matches!(pattern.kind, ExprKind::Name(_)) {
+            let guard = if self.eat("if") {
+                self.expect("(");
+                let condition = self.expr(0, true, false);
+                self.expect(")");
+                Some(condition)
+            } else {
+                None
+            };
+            if guard.is_none() && matches!(pattern.kind, ExprKind::Name(_)) {
                 wildcard = true;
             }
             self.expect("=>");
@@ -822,6 +1096,7 @@ impl<'s> Parser<'s> {
             arms.push(MatchArm {
                 span: Span::new(start, value.span.end.max(start)),
                 pattern,
+                guard,
                 value,
             });
             if self.pos == before {
@@ -853,7 +1128,7 @@ impl<'s> Parser<'s> {
     }
 }
 
-fn binding(op: &str) -> Option<(u8, u8)> {
+pub(crate) fn binding(op: &str) -> Option<(u8, u8)> {
     Some(match op {
         "=" | "+=" | "-=" | "*=" | "/=" | "%=" => (0, 0),
         "|" => (1, 2),

@@ -1,0 +1,17 @@
+   Compiling rush-luau-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/luau-runtime)
+    Finished `release` profile [optimized] target(s) in 0.23s
+     Running `docs/benchmarks/luau-runtime/target/release/rush-luau-errors`
+rush-luau-comparison: syntax/runtime/host errors and VM reuse verified
+SYNTAX
+syntax error: [string "syntax-case.lua"]:2: Expected identifier when parsing expression, got <eof>
+RUNTIME
+runtime error: [string "runtime-case.lua"]:2: attempt to index nil with 'missing'
+stack traceback:
+	[C]: in ?
+	[string "runtime-case.lua"]:2: in function <[string "runtime-case.lua"]:1>
+HOST
+runtime error: host rejected operation
+stack traceback:
+	[C]: in function 'host_fail'
+	[string "host-case.lua"]:1: in function <[string "host-case.lua"]:1>
+
