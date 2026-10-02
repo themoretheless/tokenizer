@@ -81,11 +81,19 @@ fn run() -> Result<(), String> {
         return Err(format!("{path}: invalid program\n{diagnostics}"));
     }
     let mut limits = ExecutionLimits::new(1_000_000);
+    let mut strict = false;
     let mut limit_options = std::collections::HashSet::new();
     let mut values = Vec::new();
     let mut module_sources = Vec::new();
     let mut registered = std::collections::HashSet::new();
     while let Some(argument) = arguments.next() {
+        if argument == "--strict" {
+            if strict {
+                return Err("Duplicate option: --strict".into());
+            }
+            strict = true;
+            continue;
+        }
         if matches!(
             argument.as_str(),
             "--steps" | "--depth" | "--items" | "--string-bytes"
@@ -150,7 +158,9 @@ fn run() -> Result<(), String> {
                 .collect::<Vec<_>>()
                 .join("\n"));
         }
-        module_programs.push(Program::compile(contents).map_err(|error| error.message)?);
+        module_programs.push(Program::compile(contents).map_err(|error| {
+            diagnostic(module_path, contents, error.span.start, &error.message)
+        })?);
     }
     let modules = module_sources
         .iter()
@@ -184,19 +194,23 @@ fn run() -> Result<(), String> {
         }
     }
     if check_only {
-        Program::compile(&source)
-            .map_err(|error| error.message)?
-            .validate_modules(&modules)
-            .map_err(|error| {
-                if let Some(module) = &error.module
-                    && let Some((_, module_path, contents)) =
-                        module_sources.iter().find(|(name, _, _)| name == module)
-                {
-                    diagnostic(module_path, contents, error.span.start, &error.message)
-                } else {
-                    diagnostic(&path, &source, error.span.start, &error.message)
-                }
-            })?;
+        let checked = Program::compile(&source)
+            .map_err(|error| diagnostic(&path, &source, error.span.start, &error.message))?;
+        (if strict {
+            checked.validate_strict_modules(&modules)
+        } else {
+            checked.validate_modules(&modules)
+        })
+        .map_err(|error| {
+            if let Some(module) = &error.module
+                && let Some((_, module_path, contents)) =
+                    module_sources.iter().find(|(name, _, _)| name == module)
+            {
+                diagnostic(module_path, contents, error.span.start, &error.message)
+            } else {
+                diagnostic(&path, &source, error.span.start, &error.message)
+            }
+        })?;
         let names = names.into_iter().collect::<Vec<_>>();
         let mut messages = Vec::new();
         for (file, contents) in std::iter::once((path.as_str(), source.as_str())).chain(
@@ -227,7 +241,20 @@ fn run() -> Result<(), String> {
         println!("{path}: checks passed");
         return Ok(());
     }
-    let program = Program::compile(&source).map_err(|error| error.message)?;
+    let program = Program::compile(&source)
+        .map_err(|error| diagnostic(&path, &source, error.span.start, &error.message))?;
+    if strict {
+        program.validate_strict_modules(&modules).map_err(|error| {
+            if let Some(module) = &error.module
+                && let Some((_, module_path, contents)) =
+                    module_sources.iter().find(|(name, _, _)| name == module)
+            {
+                diagnostic(module_path, contents, error.span.start, &error.message)
+            } else {
+                diagnostic(&path, &source, error.span.start, &error.message)
+            }
+        })?;
+    }
     let value = program
         .run_with_limits(
             limits,

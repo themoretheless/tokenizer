@@ -211,7 +211,9 @@ impl<'s> Parser<'s> {
             let stmt = self.statement();
             let compound = matches!(
                 stmt.kind,
-                StmtKind::Function { .. }
+                StmtKind::Struct { .. }
+                    | StmtKind::Enum { .. }
+                    | StmtKind::Function { .. }
                     | StmtKind::If { .. }
                     | StmtKind::While { .. }
                     | StmtKind::For { .. }
@@ -238,6 +240,67 @@ impl<'s> Parser<'s> {
         }
         stmts
     }
+    fn user_type(&mut self) -> StmtKind<'s> {
+        let is_enum = self.at("enum");
+        self.bump();
+        let name = self.inline_name("type");
+        self.expect_inline("{");
+        let mut fields = Vec::new();
+        let mut variants = Vec::new();
+        let mut names = std::collections::HashSet::new();
+        while self.peek().is_some() && !self.at("}") {
+            let before = self.pos;
+            let member = self.name(if is_enum { "variant" } else { "field" });
+            if !names.insert(member.text) {
+                self.error_at(
+                    member.span,
+                    "duplicate-type-member",
+                    "Type member is repeated",
+                );
+            }
+            if is_enum {
+                let mut types = Vec::new();
+                if self.eat("(") {
+                    while self.peek().is_some() && !self.at(")") {
+                        let before = self.pos;
+                        types.push(self.ty());
+                        if self.pos == before || !self.eat(",") {
+                            break;
+                        }
+                    }
+                    self.expect(")");
+                }
+                variants.push((member, types));
+            } else {
+                self.expect(":");
+                fields.push((member, self.ty()));
+            }
+            if self.pos == before {
+                self.bump();
+                break;
+            }
+            if !self.eat(",") && !self.at("}") && !self.newline() {
+                self.error(
+                    "expected-separator",
+                    "Expected a comma or newline between type members",
+                );
+                break;
+            }
+        }
+        self.expect("}");
+        if is_enum {
+            if variants.is_empty() {
+                self.error_at(
+                    name.span,
+                    "empty-enum",
+                    "Enum requires at least one variant",
+                );
+            }
+            StmtKind::Enum { name, variants }
+        } else {
+            StmtKind::Struct { name, fields }
+        }
+    }
     fn statement(&mut self) -> Stmt<'s> {
         let token = self.peek().unwrap();
         let start = token.raw.span.start;
@@ -248,7 +311,16 @@ impl<'s> Parser<'s> {
             };
         }
         let kind = match self.text() {
+            "struct" | "enum" => self.user_type(),
             "fn" => self.function(token.indent),
+            "export" => {
+                self.bump();
+                let mut names = vec![self.inline_name("export")];
+                while self.eat(",") {
+                    names.push(self.inline_name("export"));
+                }
+                StmtKind::Export(names)
+            }
             "import" => {
                 self.bump();
                 StmtKind::Import(self.inline_name("module"))
@@ -437,7 +509,7 @@ impl<'s> Parser<'s> {
                 arguments: vec![],
             };
         }
-        let name = if self.at("null") {
+        let mut name = if self.at("null") {
             let span = self.span();
             let text = self.text();
             self.bump();
@@ -446,6 +518,11 @@ impl<'s> Parser<'s> {
         } else {
             self.name("type")
         };
+        while self.eat(".") {
+            let part = self.name("type");
+            name.span.end = part.span.end;
+            name.text = &self.source[name.span.start..name.span.end];
+        }
         let mut arguments = Vec::new();
         if self.eat("[") {
             while self.peek().is_some() && !self.at("]") {
@@ -558,6 +635,23 @@ impl<'s> Parser<'s> {
                 break;
             }
             let op = self.text();
+            if op == "?" && min_bp <= 20 {
+                let operator_span = self.span();
+                self.bump();
+                chain += 1;
+                if self.functions == 0 {
+                    self.error_at(
+                        operator_span,
+                        "try-outside-function",
+                        "? requires a function with an Option or Result return type",
+                    );
+                }
+                left = Expr {
+                    span: Span::new(start, self.end()),
+                    kind: ExprKind::Try(Box::new(left)),
+                };
+                continue;
+            }
             if matches!(op, "(" | "[" | ".") && min_bp <= 20 {
                 chain += 1;
                 if self.eat("(") {
@@ -1005,6 +1099,22 @@ impl<'s> Parser<'s> {
             .is_some_and(|t| matches!(t.raw.kind, SyntaxKind::Identifier | SyntaxKind::TypeIdent))
         {
             let name = self.name("binding");
+            let mut callee = Expr {
+                span: name.span,
+                kind: ExprKind::Name(name.clone()),
+            };
+            let mut qualified = false;
+            while self.eat(".") {
+                qualified = true;
+                let field = self.name("variant");
+                callee = Expr {
+                    span: Span::new(name.span.start, field.span.end),
+                    kind: ExprKind::Member {
+                        object: Box::new(callee),
+                        field,
+                    },
+                };
+            }
             if self.eat("(") {
                 let mut arguments = Vec::new();
                 while self.peek().is_some() && !self.at(")") {
@@ -1020,24 +1130,25 @@ impl<'s> Parser<'s> {
                     "Some" | "Ok" | "Err" => Some(1),
                     _ => None,
                 };
-                if expected != Some(arguments.len()) {
+                if !qualified && expected != Some(arguments.len()) {
                     self.error_at(name.span, "invalid-pattern", "Invalid variant pattern");
                 }
                 Expr {
                     span: Span::new(span.start, self.end()),
                     kind: ExprKind::Call {
-                        callee: Box::new(Expr {
-                            span: name.span,
-                            kind: ExprKind::Name(name),
-                        }),
+                        callee: Box::new(callee),
                         arguments,
                     },
                 }
             } else {
-                Expr {
-                    span: name.span,
-                    kind: ExprKind::Name(name),
+                if qualified {
+                    self.error_at(
+                        callee.span,
+                        "invalid-pattern",
+                        "Variant patterns require parentheses",
+                    );
                 }
+                callee
             }
         } else {
             let pattern = self.expr(3, true, false);

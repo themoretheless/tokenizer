@@ -1,0 +1,523 @@
+Analysis of sampling rush-call-after-runtime (pid 14297) every 1 millisecond
+Process:         rush-call-after-runtime [14297]
+Path:            /private/tmp/rush-call-after-runtime
+Load Address:    0x1007f4000
+Identifier:      rush-call-after-runtime
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  zsh [14296]
+Target Type:     live task
+
+Date/Time:       2026-10-02 05:28:16.275 +0400
+Launch Time:     2026-10-02 05:28:16.243 +0400
+OS Version:      macOS 26.7.1 (25G313)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         1408K
+Physical footprint (peak):  1408K
+Idle exit:                  untracked
+----
+
+Call graph:
+    2283 Thread_14399168   DispatchQueue_1: com.apple.main-thread  (serial)
+      2275 start  (in dyld) + 6992  [0x18b4a44e4]
+      + 2275 main  (in rush-call-after-runtime) + 52  [0x1007fa124]
+      +   2275 _RNvNtCsidjG4scr4Ts_3std2rt19lang_start_internal  (in rush-call-after-runtime) + 952  [0x100896ae4]
+      +     2275 _RNCINvNtCsidjG4scr4Ts_3std2rt10lang_startuE0CsgtreUZj3zGQ_7runtime  (in rush-call-after-runtime) + 16  [0x1007fb69c]
+      +       2275 _RINvNtNtCsidjG4scr4Ts_3std3sys9backtrace28___rust_begin_short_backtraceFEuuECsgtreUZj3zGQ_7runtime  (in rush-call-after-runtime) + 12  [0x1007fa174]
+      +         2275 _RNvCsgtreUZj3zGQ_7runtime4main  (in rush-call-after-runtime) + 7128  [0x1007f8dc8]
+      +           2275 _RNvMsf_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Program3run  (in rush-call-after-runtime) + 52  [0x10080860c]
+      +             2272 _RNvMsf_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Program15run_with_limits  (in rush-call-after-runtime) + 464  [0x1008083fc]
+      +             ! 2247 _RNvMsf_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Program11instantiate  (in rush-call-after-runtime) + 4248  [0x1008068e8]
+      +             ! : 2247 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime17module_statements  (in rush-call-after-runtime) + 80  [0x100813ce4]
+      +             ! :   2247 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime10statements  (in rush-call-after-runtime) + 2384  [0x10080dd64]
+      +             ! :     2247 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 164  [0x100815bd4]
+      +             ! :       2233 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 2492  [0x1008187ac]
+      +             ! :       | 2233 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 732  [0x100814448]
+      +             ! :       |   1877 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime10call_inner  (in rush-call-after-runtime) + 7564  [0x10080ad80]
+      +             ! :       |   + 1760 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13sequence_next  (in rush-call-after-runtime) + 892  [0x100812b44]
+      +             ! :       |   + ! 1084 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 4564  [0x100815340]
+      +             ! :       |   + ! : 1059 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 164  [0x100815bd4]
+      +             ! :       |   + ! : | 575 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 880  [0x100818160]
+      +             ! :       |   + ! : | + 557 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 164  [0x100815bd4]
+      +             ! :       |   + ! : | + ! 233 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 13184  [0x10081b170]
+      +             ! :       |   + ! : | + ! : 229 fmod  (in libsystem_m.dylib) + 268,224,...  [0x19b62b6cc,0x19b62b6a0,...]
+      +             ! :       |   + ! : | + ! : 4 DYLD-STUB$$fmod  (in rush-call-after-runtime) + 0,4  [0x1008c294c,0x1008c2950]
+      +             ! :       |   + ! : | + ! 163 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 860,1772,...  [0x10081814c,0x1008184dc,...]
+      +             ! :       |   + ! : | + ! 61 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1012  [0x1008181e4]
+      +             ! :       |   + ! : | + ! : 47 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 164  [0x100815bd4]
+      +             ! :       |   + ! : | + ! : | 19 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 6268  [0x10081966c]
+      +             ! :       |   + ! : | + ! : | + 10 _RNvXs2_NtNtCsgjhbjqSDj5g_4core3num11float_parsedNtNtNtB9_3str6traits7FromStr8from_str  (in rush-call-after-runtime) + 96  [0x1008b2e50]
+      +             ! :       |   + ! : | + ! : | + ! 10 _RNvNtNtNtNtCsgjhbjqSDj5g_4core3num3imp7dec2flt5parse12parse_number  (in rush-call-after-runtime) + 1120,224,...  [0x1008b015c,0x1008afddc,...]
+      +             ! :       |   + ! : | + ! : | + 9 _RNvXs2_NtNtCsgjhbjqSDj5g_4core3num11float_parsedNtNtNtB9_3str6traits7FromStr8from_str  (in rush-call-after-runtime) + 96,272,...  [0x1008b2e50,0x1008b2f00,...]
+      +             ! :       |   + ! : | + ! : | 15 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 92,20,...  [0x100817e4c,0x100817e04,...]
+      +             ! :       |   + ! : | + ! : | 13 _RNvXs2_NtNtCsgjhbjqSDj5g_4core3num11float_parsedNtNtNtB9_3str6traits7FromStr8from_str  (in rush-call-after-runtime) + 592,584,...  [0x1008b3040,0x1008b3038,...]
+      +             ! :       |   + ! : | + ! : 9 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 120,44,...  [0x100815ba8,0x100815b5c,...]
+      +             ! :       |   + ! : | + ! : 5 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 10420,10408  [0x10081a6a4,0x10081a698]
+      +             ! :       |   + ! : | + ! 47 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 880  [0x100818160]
+      +             ! :       |   + ! : | + ! : 35 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 164  [0x100815bd4]
+      +             ! :       |   + ! : | + ! : | 19 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1784  [0x1008184e8]
+      +             ! :       |   + ! : | + ! : | + 11 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime) + 76  [0x1008040cc]
+      +             ! :       |   + ! : | + ! : | + ! 9 _platform_memcmp  (in libsystem_platform.dylib) + 272,0,...  [0x18b877020,0x18b876f10,...]
+      +             ! :       |   + ! : | + ! : | + ! 2 DYLD-STUB$$memcmp  (in rush-call-after-runtime) + 4  [0x1008c29a4]
+      +             ! :       |   + ! : | + ! : | + 8 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime) + 104,120,...  [0x1008040e8,0x1008040f8,...]
+      +             ! :       |   + ! : | + ! : | 8 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 92,16,...  [0x100817e4c,0x100817e00,...]
+      +             ! :       |   + ! : | + ! : | 4 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1816  [0x100818508]
+      +             ! :       |   + ! : | + ! : | + 4 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 48  [0x10081d350]
+      +             ! :       |   + ! : | + ! : | 3 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 1116,1124  [0x10081d77c,0x10081d784]
+      +             ! :       |   + ! : | + ! : | 1 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime) + 240  [0x100804170]
+      +             ! :       |   + ! : | + ! : 7 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 52,16,...  [0x100815b64,0x100815b40,...]
+      +             ! :       |   + ! : | + ! : 5 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 10420  [0x10081a6a4]
+      +             ! :       |   + ! : | + ! 29 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1784  [0x1008184e8]
+      +             ! :       |   + ! : | + ! : 16 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime) + 104,56,...  [0x1008040e8,0x1008040b8,...]
+      +             ! :       |   + ! : | + ! : 13 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime) + 76  [0x1008040cc]
+      +             ! :       |   + ! : | + ! :   10 _platform_memcmp  (in libsystem_platform.dylib) + 140,260,...  [0x18b876f9c,0x18b877014,...]
+      +             ! :       |   + ! : | + ! :   3 DYLD-STUB$$memcmp  (in rush-call-after-runtime) + 4  [0x1008c29a4]
+      +             ! :       |   + ! : | + ! 10 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 11192  [0x10081a9a8]
+      +             ! :       |   + ! : | + ! : 5 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 24,84  [0x100801358,0x100801394]
+      +             ! :       |   + ! : | + ! : 5 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueTNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueBC_EEBG_  (in rush-call-after-runtime) + 20  [0x1008022e0]
+      +             ! :       |   + ! : | + ! :   5 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 24,12,...  [0x100801358,0x10080134c,...]
+      +             ! :       |   + ! : | + ! 4 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1816  [0x100818508]
+      +             ! :       |   + ! : | + ! : 4 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 60,48  [0x10081d35c,0x10081d350]
+      +             ! :       |   + ! : | + ! 3 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 84  [0x100801394]
+      +             ! :       |   + ! : | + ! 3 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 280  [0x100815c48]
+      +             ! :       |   + ! : | + ! 3 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 1124,1116  [0x10081d784,0x10081d77c]
+      +             ! :       |   + ! : | + ! 1 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime) + 240  [0x100804170]
+      +             ! :       |   + ! : | + 13 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 48,104,...  [0x100815b60,0x100815b98,...]
+      +             ! :       |   + ! : | + 5 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 10420  [0x10081a6a4]
+      +             ! :       |   + ! : | 303 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 8772  [0x10081a034]
+      +             ! :       |   + ! : | + 194 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5equal  (in rush-call-after-runtime) + 3120  [0x100817ccc]
+      +             ! :       |   + ! : | + ! 123 _xzm_free  (in libsystem_malloc.dylib) + 1048  [0x18b68c530]
+      +             ! :       |   + ! : | + ! : 119 mach_absolute_time  (in libsystem_kernel.dylib) + 108,16,...  [0x18b82c10c,0x18b82c0b0,...]
+      +             ! :       |   + ! : | + ! : 4 DYLD-STUB$$mach_absolute_time  (in libsystem_malloc.dylib) + 12  [0x18b6a3b9c]
+      +             ! :       |   + ! : | + ! 57 _xzm_free  (in libsystem_malloc.dylib) + 0,28,...  [0x18b68c118,0x18b68c134,...]
+      +             ! :       |   + ! : | + ! 7 DYLD-STUB$$free  (in rush-call-after-runtime) + 4,0  [0x1008c295c,0x1008c2958]
+      +             ! :       |   + ! : | + ! 7 _free  (in libsystem_malloc.dylib) + 0,36  [0x18b69bcd0,0x18b69bcf4]
+      +             ! :       |   + ! : | + 78 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5equal  (in rush-call-after-runtime) + 72  [0x1008170e4]
+      +             ! :       |   + ! : | + ! 29 _xzm_xzone_malloc_tiny  (in libsystem_malloc.dylib) + 88,420,...  [0x18b690f94,0x18b6910e0,...]
+      +             ! :       |   + ! : | + ! 20 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 112,136,...  [0x18b68b1cc,0x18b68b1e4,...]
+      +             ! :       |   + ! : | + ! 13 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 12,120,...  [0x18b69b0c8,0x18b69b134,...]
+      +             ! :       |   + ! : | + ! 8 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 192,8,...  [0x18b68ba10,0x18b68b958,...]
+      +             ! :       |   + ! : | + ! 6 _RNvCs2iPT9Bg7O3E_7___rustc11___rdl_alloc  (in rush-call-after-runtime) + 0  [0x1008895e0]
+      +             ! :       |   + ! : | + ! 2 DYLD-STUB$$malloc  (in rush-call-after-runtime) + 4  [0x1008c2998]
+      +             ! :       |   + ! : | + 16 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5equal  (in rush-call-after-runtime) + 3096,124,...  [0x100817cb4,0x100817118,...]
+      +             ! :       |   + ! : | + 6 _xzm_free  (in libsystem_malloc.dylib) + 1552  [0x18b68c728]
+      +             ! :       |   + ! : | + 3 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5equal  (in rush-call-after-runtime) + 1388  [0x100817608]
+      +             ! :       |   + ! : | + ! 3 _RNvXsq_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core3cmp9PartialEq2eq  (in rush-call-after-runtime) + 16,36,...  [0x10081d83c,0x10081d850,...]
+      +             ! :       |   + ! : | + 2 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5equal  (in rush-call-after-runtime) + 184  [0x100817154]
+      +             ! :       |   + ! : | + ! 2 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime6charge  (in rush-call-after-runtime) + 56,108  [0x10081b874,0x10081b8a8]
+      +             ! :       |   + ! : | + 2 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime6charge  (in rush-call-after-runtime) + 392  [0x10081b9c4]
+      +             ! :       |   + ! : | + 2 _RNvXsq_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core3cmp9PartialEq2eq  (in rush-call-after-runtime) + 2020  [0x10081e010]
+      +             ! :       |   + ! : | 77 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1012  [0x1008181e4]
+      +             ! :       |   + ! : | + 58 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 164  [0x100815bd4]
+      +             ! :       |   + ! : | + ! 23 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 488,524,...  [0x100817fd8,0x100817ffc,...]
+      +             ! :       |   + ! : | + ! 20 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 6268  [0x10081966c]
+      +             ! :       |   + ! : | + ! : 11 _RNvXs2_NtNtCsgjhbjqSDj5g_4core3num11float_parsedNtNtNtB9_3str6traits7FromStr8from_str  (in rush-call-after-runtime) + 48,96,...  [0x1008b2e20,0x1008b2e50,...]
+      +             ! :       |   + ! : | + ! : 9 _RNvXs2_NtNtCsgjhbjqSDj5g_4core3num11float_parsedNtNtNtB9_3str6traits7FromStr8from_str  (in rush-call-after-runtime) + 96  [0x1008b2e50]
+      +             ! :       |   + ! : | + ! :   9 _RNvNtNtNtNtCsgjhbjqSDj5g_4core3num3imp7dec2flt5parse12parse_number  (in rush-call-after-runtime) + 1120,160,...  [0x1008b015c,0x1008afd9c,...]
+      +             ! :       |   + ! : | + ! 15 _RNvXs2_NtNtCsgjhbjqSDj5g_4core3num11float_parsedNtNtNtB9_3str6traits7FromStr8from_str  (in rush-call-after-runtime) + 592,584,...  [0x1008b3040,0x1008b3038,...]
+      +             ! :       |   + ! : | + 13 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 52,16,...  [0x100815b64,0x100815b40,...]
+      +             ! :       |   + ! : | + 5 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 10420  [0x10081a6a4]
+      +             ! :       |   + ! : | + 1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5equal  (in rush-call-after-runtime) + 3120  [0x100817ccc]
+      +             ! :       |   + ! : | +   1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 8772  [0x10081a034]
+      +             ! :       |   + ! : | +     1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5equal  (in rush-call-after-runtime) + 24  [0x1008170b4]
+      +             ! :       |   + ! : | 68 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 92,936,...  [0x100817e4c,0x100818198,...]
+      +             ! :       |   + ! : | 21 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 11192  [0x10081a9a8]
+      +             ! :       |   + ! : | + 11 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueTNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueBC_EEBG_  (in rush-call-after-runtime) + 20  [0x1008022e0]
+      +             ! :       |   + ! : | + ! 11 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 40,24,...  [0x100801368,0x100801358,...]
+      +             ! :       |   + ! : | + 9 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 24,84  [0x100801358,0x100801394]
+      +             ! :       |   + ! : | + 1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueTNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueBC_EEBG_  (in rush-call-after-runtime) + 8  [0x1008022d4]
+      +             ! :       |   + ! : | 9 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 280  [0x100815c48]
+      +             ! :       |   + ! : | 3 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5equal  (in rush-call-after-runtime) + 3140  [0x100817ce0]
+      +             ! :       |   + ! : | 2 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 10388  [0x10081a684]
+      +             ! :       |   + ! : | + 2 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 76  [0x10080138c]
+      +             ! :       |   + ! : | 1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 84  [0x100801394]
+      +             ! :       |   + ! : 16 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 52,164,...  [0x100815b64,0x100815bd4,...]
+      +             ! :       |   + ! : 9 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 10420,10412,...  [0x10081a6a4,0x10081a69c,...]
+      +             ! :       |   + ! 269 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 3868  [0x100815088]
+      +             ! :       |   + ! : 222 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime12bind_pattern  (in rush-call-after-runtime) + 492  [0x10081236c]
+      +             ! :       |   + ! : | 205 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime) + 228  [0x100803e18]
+      +             ! :       |   + ! : | + 121 _RNvMs8_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_5SlotsTReNtB7_7BindingEE7reserveB9_  (in rush-call-after-runtime) + 256  [0x1008565ec]
+      +             ! :       |   + ! : | + ! 44 _xzm_xzone_malloc_tiny  (in libsystem_malloc.dylib) + 88,420,...  [0x18b690f94,0x18b6910e0,...]
+      +             ! :       |   + ! : | + ! 27 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 112,0,...  [0x18b68b1cc,0x18b68b15c,...]
+      +             ! :       |   + ! : | + ! 26 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 8,184,...  [0x18b68b958,0x18b68ba08,...]
+      +             ! :       |   + ! : | + ! 17 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 12,36,...  [0x18b69b0c8,0x18b69b0e0,...]
+      +             ! :       |   + ! : | + ! 6 DYLD-STUB$$malloc  (in rush-call-after-runtime) + 4  [0x1008c2998]
+      +             ! :       |   + ! : | + ! 1 _RNvCs2iPT9Bg7O3E_7___rustc11___rdl_alloc  (in rush-call-after-runtime) + 0  [0x1008895e0]
+      +             ! :       |   + ! : | + 36 _RNvMs8_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_5SlotsTReNtB7_7BindingEE7reserveB9_  (in rush-call-after-runtime) + 76,84,...  [0x100856538,0x100856540,...]
+      +             ! :       |   + ! : | + 22 _RNvMs8_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_5SlotsTReNtB7_7BindingEE7reserveB9_  (in rush-call-after-runtime) + 344  [0x100856644]
+      +             ! :       |   + ! : | + ! 22 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueINtNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memory5SlotsTReNtBG_7BindingEEEBI_  (in rush-call-after-runtime) + 20,160,...  [0x10085207c,0x100852108,...]
+      +             ! :       |   + ! : | + 20 _RNvMs8_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_5SlotsTReNtB7_7BindingEE7reserveB9_  (in rush-call-after-runtime) + 328  [0x100856634]
+      +             ! :       |   + ! : | + ! 18 _platform_memmove  (in libsystem_platform.dylib) + 460,428,...  [0x18b87952c,0x18b87950c,...]
+      +             ! :       |   + ! : | + ! 2 DYLD-STUB$$memcpy  (in rush-call-after-runtime) + 4  [0x1008c29b0]
+      +             ! :       |   + ! : | + 4 _RNvMs8_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_5SlotsTReNtB7_7BindingEE7reserveB9_  (in rush-call-after-runtime) + 244  [0x1008565e0]
+      +             ! :       |   + ! : | + ! 4 _RNvCs2iPT9Bg7O3E_7___rustc35___rust_no_alloc_shim_is_unstable_v2  (in rush-call-after-runtime) + 0  [0x1007fb974]
+      +             ! :       |   + ! : | + 2 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueINtNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memory5SlotsTReNtBG_7BindingEEEBI_  (in rush-call-after-runtime) + 176  [0x100852118]
+      +             ! :       |   + ! : | 17 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime) + 44,228,...  [0x100803d60,0x100803e18,...]
+      +             ! :       |   + ! : 24 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime12bind_pattern  (in rush-call-after-runtime) + 56,492,...  [0x1008121b8,0x10081236c,...]
+      +             ! :       |   + ! : 11 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime12bind_pattern  (in rush-call-after-runtime) + 472  [0x100812358]
+      +             ! :       |   + ! : | 11 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 60,24,...  [0x10081d35c,0x10081d338,...]
+      +             ! :       |   + ! : 8 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 1116  [0x10081d77c]
+      +             ! :       |   + ! : 4 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime) + 704  [0x100803ff4]
+      +             ! :       |   + ! 205 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 5132  [0x100815578]
+      +             ! :       |   + ! : 166 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime11EnvironmentEBF_  (in rush-call-after-runtime) + 136  [0x100800e24]
+      +             ! :       |   + ! : | 94 _xzm_free  (in libsystem_malloc.dylib) + 0,996,...  [0x18b68c118,0x18b68c4fc,...]
+      +             ! :       |   + ! : | 57 _xzm_free  (in libsystem_malloc.dylib) + 352  [0x18b68c278]
+      +             ! :       |   + ! : | + 51 __bzero  (in libsystem_platform.dylib) + 0  [0x18b879030]
+      +             ! :       |   + ! : | + 5 _platform_memset  (in libsystem_platform.dylib) + 160  [0x18b879130]
+      +             ! :       |   + ! : | + 1 DYLD-STUB$$_platform_bzero  (in libsystem_malloc.dylib) + 12  [0x18b6a387c]
+      +             ! :       |   + ! : | 11 _free  (in libsystem_malloc.dylib) + 0,36,...  [0x18b69bcd0,0x18b69bcf4,...]
+      +             ! :       |   + ! : | 3 DYLD-STUB$$free  (in rush-call-after-runtime) + 4,8  [0x1008c295c,0x1008c2960]
+      +             ! :       |   + ! : | 1 free  (in libsystem_malloc.dylib) + 0  [0x18b6626b8]
+      +             ! :       |   + ! : 22 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime11EnvironmentEBF_  (in rush-call-after-runtime) + 164,20,...  [0x100800e40,0x100800db0,...]
+      +             ! :       |   + ! : 7 _RNvXs6_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_6SharedNtB7_11EnvironmentENtNtNtCsgjhbjqSDj5g_4core3ops4drop4Drop4dropB9_  (in rush-call-after-runtime) + 12,24,...  [0x100856fbc,0x100856fc8,...]
+      +             ! :       |   + ! : 5 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime11EnvironmentEBF_  (in rush-call-after-runtime) + 52  [0x100800dd0]
+      +             ! :       |   + ! : | 5 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 8,24,...  [0x100852494,0x1008524a4,...]
+      +             ! :       |   + ! : 4 _xzm_free  (in libsystem_malloc.dylib) + 1568  [0x18b68c738]
+      +             ! :       |   + ! : 1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 84  [0x1008524e0]
+      +             ! :       |   + ! 159 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 3840,5068,...  [0x10081506c,0x100815538,...]
+      +             ! :       |   + ! 14 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 5144  [0x100815584]
+      +             ! :       |   + ! : 14 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13reclaim_cells  (in rush-call-after-runtime) + 72,36,...  [0x100812668,0x100812644,...]
+      +             ! :       |   + ! 8 _RNvXs6_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_6SharedNtB7_11EnvironmentENtNtNtCsgjhbjqSDj5g_4core3ops4drop4Drop4dropB9_  (in rush-call-after-runtime) + 140  [0x10085703c]
+      +             ! :       |   + ! 6 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13reclaim_cells  (in rush-call-after-runtime) + 264  [0x100812728]
+      +             ! :       |   + ! 6 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 5264  [0x1008155fc]
+      +             ! :       |   + ! : 6 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueINtNtCsalmxspwcmAN_5alloc6borrow3CowSNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEEB1g_  (in rush-call-after-runtime) + 24,20,...  [0x100800040,0x10080003c,...]
+      +             ! :       |   + ! 4 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime12bind_pattern  (in rush-call-after-runtime) + 1004  [0x10081256c]
+      +             ! :       |   + ! 3 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueINtNtCsalmxspwcmAN_5alloc6borrow3CowSNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEEB1g_  (in rush-call-after-runtime) + 128,132  [0x1008000a8,0x1008000ac]
+      +             ! :       |   + ! 2 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 280  [0x100815c48]
+      +             ! :       |   + 40 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13sequence_next  (in rush-call-after-runtime) + 924,1048,...  [0x100812b64,0x100812be0,...]
+      +             ! :       |   + 15 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13sequence_next  (in rush-call-after-runtime) + 844  [0x100812b14]
+      +             ! :       |   + ! 15 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 60,716,...  [0x10081d35c,0x10081d5ec,...]
+      +             ! :       |   + 10 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 1116,1108  [0x10081d77c,0x10081d774]
+      +             ! :       |   + 8 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 3704,3712  [0x100814fe4,0x100814fec]
+      +             ! :       |   + 7 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 84,92  [0x100801394,0x10080139c]
+      +             ! :       |   + 7 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13sequence_next  (in rush-call-after-runtime) + 1072  [0x100812bf8]
+      +             ! :       |   + ! 7 _RNvXsq_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core3cmp9PartialEq2eq  (in rush-call-after-runtime) + 36,16,...  [0x10081d850,0x10081d83c,...]
+      +             ! :       |   + 7 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13sequence_next  (in rush-call-after-runtime) + 1104  [0x100812c18]
+      +             ! :       |   + ! 7 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 24  [0x100801358]
+      +             ! :       |   + 5 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13sequence_next  (in rush-call-after-runtime) + 1096  [0x100812c10]
+      +             ! :       |   + ! 5 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 24,0,...  [0x100801358,0x100801340,...]
+      +             ! :       |   + 5 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime6charge  (in rush-call-after-runtime) + 392,380  [0x10081b9c4,0x10081b9b8]
+      +             ! :       |   + 4 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13sequence_next  (in rush-call-after-runtime) + 1124  [0x100812c2c]
+      +             ! :       |   + ! 4 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime6charge  (in rush-call-after-runtime) + 56,20,...  [0x10081b874,0x10081b850,...]
+      +             ! :       |   + 4 _RNvXsq_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core3cmp9PartialEq2eq  (in rush-call-after-runtime) + 2020  [0x10081e010]
+      +             ! :       |   + 3 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13sequence_next  (in rush-call-after-runtime) + 780  [0x100812ad4]
+      +             ! :       |   + ! 3 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 64,24  [0x100801380,0x100801358]
+      +             ! :       |   + 2 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13sequence_next  (in rush-call-after-runtime) + 1084  [0x100812c04]
+      +             ! :       |   +   2 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 24,64  [0x100801358,0x100801380]
+      +             ! :       |   333 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime10call_inner  (in rush-call-after-runtime) + 8044  [0x10080af60]
+      +             ! :       |   + 139 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 3868  [0x100815088]
+      +             ! :       |   + ! 121 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime12bind_pattern  (in rush-call-after-runtime) + 492  [0x10081236c]
+      +             ! :       |   + ! : 104 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime) + 228  [0x100803e18]
+      +             ! :       |   + ! : | 49 _RNvMs8_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_5SlotsTReNtB7_7BindingEE7reserveB9_  (in rush-call-after-runtime) + 344  [0x100856644]
+      +             ! :       |   + ! : | + 44 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueINtNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memory5SlotsTReNtBG_7BindingEEEBI_  (in rush-call-after-runtime) + 136  [0x1008520f0]
+      +             ! :       |   + ! : | + ! 27 _xzm_free  (in libsystem_malloc.dylib) + 0,48,...  [0x18b68c118,0x18b68c148,...]
+      +             ! :       |   + ! : | + ! 13 _xzm_free  (in libsystem_malloc.dylib) + 352  [0x18b68c278]
+      +             ! :       |   + ! : | + ! : 11 __bzero  (in libsystem_platform.dylib) + 0,24  [0x18b879030,0x18b879048]
+      +             ! :       |   + ! : | + ! : 2 _platform_memset  (in libsystem_platform.dylib) + 160  [0x18b879130]
+      +             ! :       |   + ! : | + ! 2 DYLD-STUB$$free  (in rush-call-after-runtime) + 4  [0x1008c295c]
+      +             ! :       |   + ! : | + ! 2 _free  (in libsystem_malloc.dylib) + 76  [0x18b69bd1c]
+      +             ! :       |   + ! : | + 4 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueINtNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memory5SlotsTReNtBG_7BindingEEEBI_  (in rush-call-after-runtime) + 20,116,...  [0x10085207c,0x1008520dc,...]
+      +             ! :       |   + ! : | + 1 _xzm_free  (in libsystem_malloc.dylib) + 1568  [0x18b68c738]
+      +             ! :       |   + ! : | 36 _RNvMs8_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_5SlotsTReNtB7_7BindingEE7reserveB9_  (in rush-call-after-runtime) + 256  [0x1008565ec]
+      +             ! :       |   + ! : | + 18 _xzm_xzone_malloc_tiny  (in libsystem_malloc.dylib) + 312,420,...  [0x18b691074,0x18b6910e0,...]
+      +             ! :       |   + ! : | + 7 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 80,12,...  [0x18b69b10c,0x18b69b0c8,...]
+      +             ! :       |   + ! : | + 7 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 8,336,...  [0x18b68b958,0x18b68baa0,...]
+      +             ! :       |   + ! : | + 2 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 112  [0x18b68b1cc]
+      +             ! :       |   + ! : | + 1 DYLD-STUB$$malloc  (in rush-call-after-runtime) + 4  [0x1008c2998]
+      +             ! :       |   + ! : | + 1 _RNvCs2iPT9Bg7O3E_7___rustc11___rdl_alloc  (in rush-call-after-runtime) + 0  [0x1008895e0]
+      +             ! :       |   + ! : | 10 _RNvMs8_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_5SlotsTReNtB7_7BindingEE7reserveB9_  (in rush-call-after-runtime) + 328  [0x100856634]
+      +             ! :       |   + ! : | + 10 _platform_memmove  (in libsystem_platform.dylib) + 428,460,...  [0x18b87950c,0x18b87952c,...]
+      +             ! :       |   + ! : | 7 _RNvMs8_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_5SlotsTReNtB7_7BindingEE7reserveB9_  (in rush-call-after-runtime) + 4,84,...  [0x1008564f0,0x100856540,...]
+      +             ! :       |   + ! : | 1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueINtNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memory5SlotsTReNtBG_7BindingEEEBI_  (in rush-call-after-runtime) + 176  [0x100852118]
+      +             ! :       |   + ! : | 1 _RNvMs8_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_5SlotsTReNtB7_7BindingEE7reserveB9_  (in rush-call-after-runtime) + 244  [0x1008565e0]
+      +             ! :       |   + ! : |   1 _RNvCs2iPT9Bg7O3E_7___rustc35___rust_no_alloc_shim_is_unstable_v2  (in rush-call-after-runtime) + 0  [0x1007fb974]
+      +             ! :       |   + ! : 11 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime) + 44,152,...  [0x100803d60,0x100803dcc,...]
+      +             ! :       |   + ! : 4 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime) + 172  [0x100803de0]
+      +             ! :       |   + ! : | 3 _platform_memcmp  (in libsystem_platform.dylib) + 0,196,...  [0x18b876f10,0x18b876fd4,...]
+      +             ! :       |   + ! : | 1 DYLD-STUB$$memcmp  (in rush-call-after-runtime) + 4  [0x1008c29a4]
+      +             ! :       |   + ! : 2 _RNvMs8_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_5SlotsTReNtB7_7BindingEE7reserveB9_  (in rush-call-after-runtime) + 384  [0x10085666c]
+      +             ! :       |   + ! 8 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime12bind_pattern  (in rush-call-after-runtime) + 48,64,...  [0x1008121b0,0x1008121c0,...]
+      +             ! :       |   + ! 5 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime12bind_pattern  (in rush-call-after-runtime) + 472  [0x100812358]
+      +             ! :       |   + ! : 5 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 60,24  [0x10081d35c,0x10081d338]
+      +             ! :       |   + ! 3 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime) + 704,700  [0x100803ff4,0x100803ff0]
+      +             ! :       |   + ! 2 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 1116  [0x10081d77c]
+      +             ! :       |   + 80 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 4564  [0x100815340]
+      +             ! :       |   + ! 76 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 164  [0x100815bd4]
+      +             ! :       |   + ! : 26 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 880  [0x100818160]
+      +             ! :       |   + ! : | 22 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 164  [0x100815bd4]
+      +             ! :       |   + ! : | + 14 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1784  [0x1008184e8]
+      +             ! :       |   + ! : | + ! 9 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime) + 76  [0x1008040cc]
+      +             ! :       |   + ! : | + ! : 7 _platform_memcmp  (in libsystem_platform.dylib) + 260,280,...  [0x18b877014,0x18b877028,...]
+      +             ! :       |   + ! : | + ! : 2 DYLD-STUB$$memcmp  (in rush-call-after-runtime) + 4  [0x1008c29a4]
+      +             ! :       |   + ! : | + ! 3 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime) + 104,188,...  [0x1008040e8,0x10080413c,...]
+      +             ! :       |   + ! : | + ! 2 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime) + 164  [0x100804124]
+      +             ! :       |   + ! : | + !   1 DYLD-STUB$$memcmp  (in rush-call-after-runtime) + 4  [0x1008c29a4]
+      +             ! :       |   + ! : | + !   1 _platform_memcmp  (in libsystem_platform.dylib) + 280  [0x18b877028]
+      +             ! :       |   + ! : | + 4 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 10392,12,...  [0x10081a688,0x100817dfc,...]
+      +             ! :       |   + ! : | + 2 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1816  [0x100818508]
+      +             ! :       |   + ! : | + ! 2 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 60  [0x10081d35c]
+      +             ! :       |   + ! : | + 2 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 1116,1124  [0x10081d77c,0x10081d784]
+      +             ! :       |   + ! : | 3 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 44,104,...  [0x100815b5c,0x100815b98,...]
+      +             ! :       |   + ! : | 1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 10420  [0x10081a6a4]
+      +             ! :       |   + ! : 26 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1012  [0x1008181e4]
+      +             ! :       |   + ! : | 20 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 164  [0x100815bd4]
+      +             ! :       |   + ! : | + 16 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1784  [0x1008184e8]
+      +             ! :       |   + ! : | + ! 8 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime) + 164  [0x100804124]
+      +             ! :       |   + ! : | + ! : 4 DYLD-STUB$$memcmp  (in rush-call-after-runtime) + 4,0  [0x1008c29a4,0x1008c29a0]
+      +             ! :       |   + ! : | + ! : 4 _platform_memcmp  (in libsystem_platform.dylib) + 272,260  [0x18b877020,0x18b877014]
+      +             ! :       |   + ! : | + ! 5 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime) + 188,24,...  [0x10080413c,0x100804098,...]
+      +             ! :       |   + ! : | + ! 3 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime) + 76  [0x1008040cc]
+      +             ! :       |   + ! : | + !   3 _platform_memcmp  (in libsystem_platform.dylib) + 272,140  [0x18b877020,0x18b876f9c]
+      +             ! :       |   + ! : | + 2 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 1116  [0x10081d77c]
+      +             ! :       |   + ! : | + 1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1816  [0x100818508]
+      +             ! :       |   + ! : | + ! 1 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 48  [0x10081d350]
+      +             ! :       |   + ! : | + 1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 92  [0x100817e4c]
+      +             ! :       |   + ! : | 5 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 120,44  [0x100815ba8,0x100815b5c]
+      +             ! :       |   + ! : | 1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 10420  [0x10081a6a4]
+      +             ! :       |   + ! : 14 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 92,7848,...  [0x100817e4c,0x100819c98,...]
+      +             ! :       |   + ! : 6 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 11192  [0x10081a9a8]
+      +             ! :       |   + ! : | 4 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueTNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueBC_EEBG_  (in rush-call-after-runtime) + 20  [0x1008022e0]
+      +             ! :       |   + ! : | + 4 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 24  [0x100801358]
+      +             ! :       |   + ! : | 2 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 24  [0x100801358]
+      +             ! :       |   + ! : 4 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 280  [0x100815c48]
+      +             ! :       |   + ! 4 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 52,40,...  [0x100815b64,0x100815b58,...]
+      +             ! :       |   + 77 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 5132  [0x100815578]
+      +             ! :       |   + ! 63 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime11EnvironmentEBF_  (in rush-call-after-runtime) + 136  [0x100800e24]
+      +             ! :       |   + ! : 31 _xzm_free  (in libsystem_malloc.dylib) + 1048  [0x18b68c530]
+      +             ! :       |   + ! : | 31 mach_absolute_time  (in libsystem_kernel.dylib) + 108,16,...  [0x18b82c10c,0x18b82c0b0,...]
+      +             ! :       |   + ! : 17 _xzm_free  (in libsystem_malloc.dylib) + 0,28,...  [0x18b68c118,0x18b68c134,...]
+      +             ! :       |   + ! : 7 _xzm_free  (in libsystem_malloc.dylib) + 352  [0x18b68c278]
+      +             ! :       |   + ! : | 5 __bzero  (in libsystem_platform.dylib) + 0,24  [0x18b879030,0x18b879048]
+      +             ! :       |   + ! : | 1 DYLD-STUB$$_platform_bzero  (in libsystem_malloc.dylib) + 12  [0x18b6a387c]
+      +             ! :       |   + ! : | 1 _platform_memset  (in libsystem_platform.dylib) + 160  [0x18b879130]
+      +             ! :       |   + ! : 5 _free  (in libsystem_malloc.dylib) + 36,108,...  [0x18b69bcf4,0x18b69bd3c,...]
+      +             ! :       |   + ! : 3 DYLD-STUB$$free  (in rush-call-after-runtime) + 4,0  [0x1008c295c,0x1008c2958]
+      +             ! :       |   + ! 8 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime11EnvironmentEBF_  (in rush-call-after-runtime) + 52,116,...  [0x100800dd0,0x100800e10,...]
+      +             ! :       |   + ! 3 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 84  [0x1008524e0]
+      +             ! :       |   + ! 2 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime11EnvironmentEBF_  (in rush-call-after-runtime) + 52  [0x100800dd0]
+      +             ! :       |   + ! : 2 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 24  [0x1008524a4]
+      +             ! :       |   + ! 1 _xzm_free  (in libsystem_malloc.dylib) + 1548  [0x18b68c724]
+      +             ! :       |   + 33 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 568,0,...  [0x1008143a4,0x10081416c,...]
+      +             ! :       |   + 2 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13reclaim_cells  (in rush-call-after-runtime) + 252,260  [0x10081271c,0x100812724]
+      +             ! :       |   + 1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 5264  [0x1008155fc]
+      +             ! :       |   + ! 1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueINtNtCsalmxspwcmAN_5alloc6borrow3CowSNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEEB1g_  (in rush-call-after-runtime) + 116  [0x10080009c]
+      +             ! :       |   + 1 _RNvXs6_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_6SharedNtB7_11EnvironmentENtNtNtCsgjhbjqSDj5g_4core3ops4drop4Drop4dropB9_  (in rush-call-after-runtime) + 136  [0x100857038]
+      +             ! :       |   5 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime10call_inner  (in rush-call-after-runtime) + 13308  [0x10080c3f0]
+      +             ! :       |   + 2 _RNvMs6_NtCsalmxspwcmAN_5alloc2rcINtB5_2RcNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime7ClosureE9drop_slowBH_  (in rush-call-after-runtime) + 88  [0x100869a24]
+      +             ! :       |   + ! 2 _xzm_free  (in libsystem_malloc.dylib) + 1048  [0x18b68c530]
+      +             ! :       |   + !   2 mach_absolute_time  (in libsystem_kernel.dylib) + 16,112  [0x18b82c0b0,0x18b82c110]
+      +             ! :       |   + 2 _xzm_free  (in libsystem_malloc.dylib) + 120,684  [0x18b68c190,0x18b68c3c4]
+      +             ! :       |   + 1 _RNvMs6_NtCsalmxspwcmAN_5alloc2rcINtB5_2RcNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime7ClosureE9drop_slowBH_  (in rush-call-after-runtime) + 204  [0x100869a98]
+      +             ! :       |   +   1 _xzm_free  (in libsystem_malloc.dylib) + 352  [0x18b68c278]
+      +             ! :       |   +     1 __bzero  (in libsystem_platform.dylib) + 0  [0x18b879030]
+      +             ! :       |   4 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime10call_inner  (in rush-call-after-runtime) + 7956  [0x10080af08]
+      +             ! :       |   + 4 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 60,68  [0x10081d35c,0x10081d364]
+      +             ! :       |   4 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime10call_inner  (in rush-call-after-runtime) + 7604,8116,...  [0x10080ada8,0x10080afa8,...]
+      +             ! :       |   3 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime10call_inner  (in rush-call-after-runtime) + 13328  [0x10080c404]
+      +             ! :       |   + 3 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime14SequenceCursorEBF_  (in rush-call-after-runtime) + 40  [0x100801234]
+      +             ! :       |   +   2 _RNvMs6_NtCsalmxspwcmAN_5alloc2rcINtB5_2RcNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime8SequenceE9drop_slowBH_  (in rush-call-after-runtime) + 116  [0x100869c94]
+      +             ! :       |   +   ! 2 _RNvXs6_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_6SharedINtB5_5SlotsNtB7_13SequenceStageEENtNtNtCsgjhbjqSDj5g_4core3ops4drop4Drop4dropB9_  (in rush-call-after-runtime) + 76  [0x100856e9c]
+      +             ! :       |   +   !   2 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueINtNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memory5SlotsNtBG_13SequenceStageEEBI_  (in rush-call-after-runtime) + 48  [0x100851d18]
+      +             ! :       |   +   !     2 _RNvMs6_NtCsalmxspwcmAN_5alloc2rcINtB5_2RcNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime7ClosureE9drop_slowBH_  (in rush-call-after-runtime) + 204  [0x100869a98]
+      +             ! :       |   +   !       1 _free  (in libsystem_malloc.dylib) + 36  [0x18b69bcf4]
+      +             ! :       |   +   !       1 _xzm_free  (in libsystem_malloc.dylib) + 1048  [0x18b68c530]
+      +             ! :       |   +   !         1 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x18b82c10c]
+      +             ! :       |   +   1 _xzm_free  (in libsystem_malloc.dylib) + 0  [0x18b68c118]
+      +             ! :       |   2 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 1116,1124  [0x10081d77c,0x10081d784]
+      +             ! :       |   1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime10call_inner  (in rush-call-after-runtime) + 4200  [0x10080a05c]
+      +             ! :       |   + 1 _xzm_free  (in libsystem_malloc.dylib) + 196  [0x18b68c1dc]
+      +             ! :       |   1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime10call_inner  (in rush-call-after-runtime) + 6940  [0x10080ab10]
+      +             ! :       |   + 1 _RNvMs6_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_14SequenceStages6append  (in rush-call-after-runtime) + 404  [0x100804c58]
+      +             ! :       |   +   1 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 60  [0x10081d35c]
+      +             ! :       |   1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime10call_inner  (in rush-call-after-runtime) + 7544  [0x10080ad6c]
+      +             ! :       |   + 1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 64  [0x100801380]
+      +             ! :       |   1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime10call_inner  (in rush-call-after-runtime) + 8136  [0x10080afbc]
+      +             ! :       |   + 1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 52  [0x100801374]
+      +             ! :       |   1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13sequence_next  (in rush-call-after-runtime) + 1304  [0x100812ce0]
+      +             ! :       8 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 2636  [0x10081883c]
+      +             ! :       | 8 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 164  [0x100815bd4]
+      +             ! :       |   2 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1412  [0x100818374]
+      +             ! :       |   + 1 _RNvXsb_NtCsalmxspwcmAN_5alloc3vecINtB5_3VecNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush3ast4ExprENtNtCsgjhbjqSDj5g_4core5clone5Clone5cloneBJ_  (in rush-call-after-runtime) + 144  [0x100842d1c]
+      +             ! :       |   + ! 1 _RNvXsE_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush3astNtB5_8ExprKindNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 28  [0x1008404ac]
+      +             ! :       |   + 1 _RNvXsb_NtCsalmxspwcmAN_5alloc3vecINtB5_3VecNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush3ast4ExprENtNtCsgjhbjqSDj5g_4core5clone5Clone5cloneBJ_  (in rush-call-after-runtime) + 124  [0x100842d08]
+      +             ! :       |   2 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1448  [0x100818398]
+      +             ! :       |   + 1 _RNvXsd_NtCsalmxspwcmAN_5alloc5boxedINtB5_3BoxNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush3ast4ExprENtNtCsgjhbjqSDj5g_4core5clone5Clone5cloneBL_  (in rush-call-after-runtime) + 44  [0x10081d060]
+      +             ! :       |   + ! 1 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 212  [0x18b68b230]
+      +             ! :       |   + 1 _RNvXsd_NtCsalmxspwcmAN_5alloc5boxedINtB5_3BoxNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush3ast4ExprENtNtCsgjhbjqSDj5g_4core5clone5Clone5cloneBL_  (in rush-call-after-runtime) + 336  [0x10081d184]
+      +             ! :       |   +   1 _RNvXsd_NtCsalmxspwcmAN_5alloc5boxedINtB5_3BoxNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush3ast4ExprENtNtCsgjhbjqSDj5g_4core5clone5Clone5cloneBL_  (in rush-call-after-runtime) + 80  [0x10081d084]
+      +             ! :       |   1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1524  [0x1008183e4]
+      +             ! :       |   + 1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime7capture  (in rush-call-after-runtime) + 276  [0x10081bc1c]
+      +             ! :       |   1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 1680  [0x100818480]
+      +             ! :       |   + 1 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 8  [0x18b68b958]
+      +             ! :       |   1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 6268  [0x10081966c]
+      +             ! :       |   + 1 _RNvXs2_NtNtCsgjhbjqSDj5g_4core3num11float_parsedNtNtNtB9_3str6traits7FromStr8from_str  (in rush-call-after-runtime) + 96  [0x1008b2e50]
+      +             ! :       |   +   1 _RNvNtNtNtNtCsgjhbjqSDj5g_4core3num3imp7dec2flt5parse12parse_number  (in rush-call-after-runtime) + 200  [0x1008afdc4]
+      +             ! :       |   1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 10032  [0x10081a520]
+      +             ! :       |     1 _xzm_free  (in libsystem_malloc.dylib) + 352  [0x18b68c278]
+      +             ! :       |       1 DYLD-STUB$$_platform_bzero  (in libsystem_malloc.dylib) + 12  [0x18b6a387c]
+      +             ! :       3 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 2708  [0x100818884]
+      +             ! :       | 2 _RNvMs7_NtCsalmxspwcmAN_5alloc7raw_vecINtB5_6RawVecNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueE8grow_oneBQ_  (in rush-call-after-runtime) + 60  [0x1008bcc60]
+      +             ! :       | + 2 _RNvMs8_NtCsalmxspwcmAN_5alloc7raw_vecNtB5_11RawVecInner11finish_growCs7cGVlOcdlTS_29themoretheless_tokenizer_rush  (in rush-call-after-runtime) + 92  [0x1008bcefc]
+      +             ! :       | +   2 _realloc  (in libsystem_malloc.dylib) + 452  [0x18b69bf14]
+      +             ! :       | +     2 _malloc_zone_realloc  (in libsystem_malloc.dylib) + 148  [0x18b69b6f8]
+      +             ! :       | +       1 xzm_realloc  (in libsystem_malloc.dylib) + 880  [0x18b68bef4]
+      +             ! :       | +       ! 1 _platform_memmove  (in libsystem_platform.dylib) + 0  [0x18b879360]
+      +             ! :       | +       1 xzm_realloc  (in libsystem_malloc.dylib) + 904  [0x18b68bf0c]
+      +             ! :       | +         1 _xzm_free  (in libsystem_malloc.dylib) + 1048  [0x18b68c530]
+      +             ! :       | +           1 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x18b82c10c]
+      +             ! :       | 1 _RNvMs7_NtCsalmxspwcmAN_5alloc7raw_vecINtB5_6RawVecNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueE8grow_oneBQ_  (in rush-call-after-runtime) + 60  [0x1008bcc60]
+      +             ! :       2 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 2180  [0x100818674]
+      +             ! :       | 2 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 164  [0x100815bd4]
+      +             ! :       |   1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 304  [0x100817f20]
+      +             ! :       |   + 1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 48  [0x100815b60]
+      +             ! :       |   1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 484  [0x100817fd4]
+      +             ! :       |     1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime) + 732  [0x100814448]
+      +             ! :       |       1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime10call_inner  (in rush-call-after-runtime) + 4200  [0x10080a05c]
+      +             ! :       |         1 _xzm_free  (in libsystem_malloc.dylib) + 1048  [0x18b68c530]
+      +             ! :       |           1 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x18b82c10c]
+      +             ! :       1 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 16  [0x100817e00]
+      +             ! 22 _RNvMsf_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Program11instantiate  (in rush-call-after-runtime) + 2616  [0x100806288]
+      +             ! : 7 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime) + 644  [0x100803fb8]
+      +             ! : | 7 _platform_memmove  (in libsystem_platform.dylib) + 624,648  [0x18b8795d0,0x18b8795e8]
+      +             ! : 6 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime) + 592,172,...  [0x100803f84,0x100803de0,...]
+      +             ! : 5 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime) + 172  [0x100803de0]
+      +             ! : | 5 _platform_memcmp  (in libsystem_platform.dylib) + 0,152,...  [0x18b876f10,0x18b876fa8,...]
+      +             ! : 3 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime) + 112  [0x100803da4]
+      +             ! : | 2 _platform_memcmp  (in libsystem_platform.dylib) + 0,168  [0x18b876f10,0x18b876fb8]
+      +             ! : | 1 DYLD-STUB$$memcmp  (in rush-call-after-runtime) + 4  [0x1008c29a4]
+      +             ! : 1 _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime) + 228  [0x100803e18]
+      +             ! :   1 _RNvMs8_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_5SlotsTReNtB7_7BindingEE7reserveB9_  (in rush-call-after-runtime) + 344  [0x100856644]
+      +             ! :     1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueINtNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memory5SlotsTReNtBG_7BindingEEEBI_  (in rush-call-after-runtime) + 136  [0x1008520f0]
+      +             ! :       1 _xzm_free  (in libsystem_malloc.dylib) + 352  [0x18b68c278]
+      +             ! 1 _RNvMsf_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Program11instantiate  (in rush-call-after-runtime) + 4324  [0x100806934]
+      +             ! : 1 _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 1116  [0x10081d77c]
+      +             ! 1 _RNvMsf_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Program11instantiate  (in rush-call-after-runtime) + 4516  [0x1008069f4]
+      +             ! : 1 _RNvMs4_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime8instanceNtB7_14ScriptInstance16initialize_usage  (in rush-call-after-runtime) + 96  [0x100804a50]
+      +             ! :   1 _RNvMs1_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime8instanceNtB5_5Usage5value  (in rush-call-after-runtime) + 28  [0x100875054]
+      +             ! 1 _RNvMsf_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Program11instantiate  (in rush-call-after-runtime) + 4532  [0x100806a04]
+      +             !   1 _platform_memmove  (in libsystem_platform.dylib) + 180  [0x18b879414]
+      +             2 _RNvMsf_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Program15run_with_limits  (in rush-call-after-runtime) + 640  [0x1008084ac]
+      +             ! 1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime7RuntimeEBF_  (in rush-call-after-runtime) + 460  [0x100801974]
+      +             ! : 1 _xzm_free  (in libsystem_malloc.dylib) + 1048  [0x18b68c530]
+      +             ! :   1 mach_absolute_time  (in libsystem_kernel.dylib) + 16  [0x18b82c0b0]
+      +             ! 1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime7RuntimeEBF_  (in rush-call-after-runtime) + 712  [0x100801a70]
+      +             !   1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime11EnvironmentEBF_  (in rush-call-after-runtime) + 52  [0x100800dd0]
+      +             !     1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 4  [0x100852490]
+      +             1 _RNvMsf_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Program15run_with_limits  (in rush-call-after-runtime) + 648  [0x1008084b4]
+      +               1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime11EnvironmentEBF_  (in rush-call-after-runtime) + 52  [0x100800dd0]
+      +                 1 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 40  [0x1008524b4]
+      4 ???  (in <unknown binary>)  [0x12898]
+      + 4 ???  (in <unknown binary>)  [0x18b591000]
+      +   4 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 10380  [0x10081a67c]
+      +     4 _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 4  [0x100801344]
+      4 _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 6268  [0x10081966c]
+        4 _RNvXs2_NtNtCsgjhbjqSDj5g_4core3num11float_parsedNtNtNtB9_3str6traits7FromStr8from_str  (in rush-call-after-runtime) + 20  [0x1008b2e04]
+
+Total number in stack (recursive counted multiple, when >=5):
+        18       _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime) + 0  [0x10081d320]
+        17       _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 0  [0x100801340]
+        16       _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime) + 0  [0x100817df0]
+        13       _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 0  [0x100815b30]
+        12       _xzm_free  (in libsystem_malloc.dylib) + 0  [0x18b68c118]
+        11       _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime) + 164  [0x100815bd4]
+        9       _platform_memcmp  (in libsystem_platform.dylib) + 0  [0x18b876f10]
+        7       DYLD-STUB$$memcmp  (in rush-call-after-runtime) + 0  [0x1008c29a0]
+        7       _xzm_free  (in libsystem_malloc.dylib) + 1048  [0x18b68c530]
+        7       mach_absolute_time  (in libsystem_kernel.dylib) + 0  [0x18b82c0a0]
+        6       _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime) + 0  [0x10085248c]
+        6       _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime) + 0  [0x100804080]
+        5       _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime) + 0  [0x100803d34]
+        5       _RNvXs2_NtNtCsgjhbjqSDj5g_4core3num11float_parsedNtNtNtB9_3str6traits7FromStr8from_str  (in rush-call-after-runtime) + 0  [0x1008b2df0]
+        5       _free  (in libsystem_malloc.dylib) + 0  [0x18b69bcd0]
+        5       _platform_memmove  (in libsystem_platform.dylib) + 0  [0x18b879360]
+        5       _xzm_free  (in libsystem_malloc.dylib) + 352  [0x18b68c278]
+
+Sort by top of stack, same collapsed (when >= 5):
+        _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5inner  (in rush-call-after-runtime)        328
+        fmod  (in libsystem_m.dylib)        229
+        _xzm_free  (in libsystem_malloc.dylib)        212
+        _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4call  (in rush-call-after-runtime)        200
+        mach_absolute_time  (in libsystem_kernel.dylib)        156
+        _xzm_xzone_malloc_tiny  (in libsystem_malloc.dylib)        91
+        _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime4expr  (in rush-call-after-runtime)        89
+        _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEBF_  (in rush-call-after-runtime)        85
+        _RNvXsn_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core5clone5Clone5clone  (in rush-call-after-runtime)        80
+        __bzero  (in libsystem_platform.dylib)        68
+        _RNvXs2_NtNtCsgjhbjqSDj5g_4core3num11float_parsedNtNtNtB9_3str6traits7FromStr8from_str  (in rush-call-after-runtime)        52
+        <deduplicated_symbol>  (in libsystem_malloc.dylib)        50
+        _RNvMs8_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_5SlotsTReNtB7_7BindingEE7reserveB9_  (in rush-call-after-runtime)        45
+        _platform_memcmp  (in libsystem_platform.dylib)        44
+        _xzm_xzone_malloc  (in libsystem_malloc.dylib)        42
+        _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment14insert_binding  (in rush-call-after-runtime)        41
+        _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13sequence_next  (in rush-call-after-runtime)        41
+        _malloc_zone_malloc  (in libsystem_malloc.dylib)        37
+        _platform_memmove  (in libsystem_platform.dylib)        37
+        _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime12bind_pattern  (in rush-call-after-runtime)        36
+        _RNvMs1_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_11Environment3get  (in rush-call-after-runtime)        34
+        _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime11EnvironmentEBF_  (in rush-call-after-runtime)        30
+        _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueINtNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memory5SlotsTReNtBG_7BindingEEEBI_  (in rush-call-after-runtime)        29
+        _free  (in libsystem_malloc.dylib)        26
+        _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime13reclaim_cells  (in rush-call-after-runtime)        22
+        _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime5equal  (in rush-call-after-runtime)        20
+        _RNvNtNtNtNtCsgjhbjqSDj5g_4core3num3imp7dec2flt5parse12parse_number  (in rush-call-after-runtime)        20
+        _RNvXs6_NtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime6memoryINtB5_6SharedNtB7_11EnvironmentENtNtNtCsgjhbjqSDj5g_4core3ops4drop4Drop4dropB9_  (in rush-call-after-runtime)        16
+        _RNvXsq_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_5ValueNtNtCsgjhbjqSDj5g_4core3cmp9PartialEq2eq  (in rush-call-after-runtime)        16
+        DYLD-STUB$$free  (in rush-call-after-runtime)        15
+        DYLD-STUB$$memcmp  (in rush-call-after-runtime)        14
+        _RNvMsg_NtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtimeNtB5_7Runtime6charge  (in rush-call-after-runtime)        13
+        _RINvNtCsgjhbjqSDj5g_4core3ptr9drop_glueINtNtCsalmxspwcmAN_5alloc6borrow3CowSNtNtCs7cGVlOcdlTS_29themoretheless_tokenizer_rush7runtime5ValueEEB1g_  (in rush-call-after-runtime)        10
+        DYLD-STUB$$malloc  (in rush-call-after-runtime)        9
+        _RNvCs2iPT9Bg7O3E_7___rustc11___rdl_alloc  (in rush-call-after-runtime)        8
+        _platform_memset  (in libsystem_platform.dylib)        8
+        _RNvCs2iPT9Bg7O3E_7___rustc35___rust_no_alloc_shim_is_unstable_v2  (in rush-call-after-runtime)        5
+
+Binary Images:
+       0x1007f4000 -        0x1008f80e7 +rush-call-after-runtime (0) <5A94C394-AFB1-3E9C-B4D8-16F33E4C49F3> /tmp/rush-call-after-runtime
+       0x18b3fc000 -        0x18b44eb4b  libobjc.A.dylib (951.7) <1D62B376-2303-376A-B993-9432A2004EB6> /usr/lib/libobjc.A.dylib
+       0x18b44f000 -        0x18b483d58  libdyld.dylib (1387) <00D0926E-2EAD-3810-9D40-F8E1F054BDC9> /usr/lib/system/libdyld.dylib
+       0x18b484000 -        0x18b537503  dyld (1.0.0 - 1387) <8B859F47-7C96-34F6-9D07-6F55CE3625C6> /usr/lib/dyld
+       0x18b538000 -        0x18b53b228  libsystem_blocks.dylib (96) <B33F1440-9364-38E4-AF85-8A21BFF24324> /usr/lib/system/libsystem_blocks.dylib
+       0x18b53c000 -        0x18b59055f  libxpc.dylib (3102.160.5) <325B7B6F-A547-30B6-9417-94915D72B91E> /usr/lib/system/libxpc.dylib
+       0x18b591000 -        0x18b5b19ff  libsystem_trace.dylib (1861.160.4) <2DE27033-24FB-30FB-BF15-7BC4BB913EBA> /usr/lib/system/libsystem_trace.dylib
+       0x18b5b2000 -        0x18b6606b7  libcorecrypto.dylib (1922.160.10.700.1) <1AB30A65-3FE6-3A5A-9078-796D9D590B7C> /usr/lib/system/libcorecrypto.dylib
+       0x18b661000 -        0x18b6b1257  libsystem_malloc.dylib (812.160.5) <BE7DCE21-9656-3C9E-9B8A-A26D090CAEC3> /usr/lib/system/libsystem_malloc.dylib
+       0x18b6b2000 -        0x18b6f923f  libdispatch.dylib (1542.160.2) <80E75F3F-333F-38A8-A3DD-6279FCDB771B> /usr/lib/system/libdispatch.dylib
+       0x18b6fa000 -        0x18b6fcffb  libsystem_featureflags.dylib (103) <5725BCFE-07F3-3629-9B44-551A435E2DE2> /usr/lib/system/libsystem_featureflags.dylib
+       0x18b6fd000 -        0x18b77e1e7  libsystem_c.dylib (1752.160.4) <3498CA79-EF40-3587-AD44-75187CEE7D95> /usr/lib/system/libsystem_c.dylib
+       0x18b77f000 -        0x18b80fae7  libc++.1.dylib (2100.43) <D6EADBE3-BA0C-3862-B84A-3B907CF4641C> /usr/lib/libc++.1.dylib
+       0x18b810000 -        0x18b82a75f  libc++abi.dylib (2100.43) <9106CD43-009C-3B85-8FC5-9CE451DC5B78> /usr/lib/libc++abi.dylib
+       0x18b82b000 -        0x18b8682f7  libsystem_kernel.dylib (12377.161.15.701.19) <9AA2E0EB-68FE-3A5C-A673-C09024878B22> /usr/lib/system/libsystem_kernel.dylib
+       0x18b869000 -        0x18b875b3b  libsystem_pthread.dylib (539.100.4) <275D7230-23C1-32EF-B22B-14F61E30AA89> /usr/lib/system/libsystem_pthread.dylib
+       0x18b876000 -        0x18b87e963  libsystem_platform.dylib (375.120.2) <3AF14164-15FE-3623-9EE3-46DE29FD5B5A> /usr/lib/system/libsystem_platform.dylib
+       0x18b87f000 -        0x18b8ae6eb  libsystem_info.dylib (600) <0037F576-2C50-36F0-9F36-6CB7A049D5B1> /usr/lib/system/libsystem_info.dylib
+       0x18f851000 -        0x18f85ae5f  libsystem_darwin.dylib (1752.160.4) <B808D04B-2798-36C9-96F6-35534BDFCF11> /usr/lib/system/libsystem_darwin.dylib
+       0x18fcbc000 -        0x18fcce1b6  libsystem_notify.dylib (348.160.3) <922BDCF4-CD33-3EEB-BC56-9DCAE54F8F65> /usr/lib/system/libsystem_notify.dylib
+       0x191f8d000 -        0x191fa7f7b  libsystem_networkextension.dylib (2226.161.1.700.2) <83F224A4-40C4-3106-A97B-788D1D961DCB> /usr/lib/system/libsystem_networkextension.dylib
+       0x19202a000 -        0x192041fdf  libsystem_asl.dylib (406) <FF6BE113-1093-3D23-8A55-E0A5B327CA8E> /usr/lib/system/libsystem_asl.dylib
+       0x193be6000 -        0x193bee387  libsystem_symptoms.dylib (2169.160.3.701.1) <7F0D4E31-268A-3EBB-8A2C-30CCC771A5A5> /usr/lib/system/libsystem_symptoms.dylib
+       0x197e8b000 -        0x197ec3373  libsystem_containermanager.dylib (725.160.3.701.2) <1207D51D-2B9C-3B08-91DA-99A9D0394312> /usr/lib/system/libsystem_containermanager.dylib
+       0x19929d000 -        0x1992a15d7  libsystem_configuration.dylib (1405.160.3.702.1) <0C344D77-0ED6-342F-BBCD-52C6593FAAAD> /usr/lib/system/libsystem_configuration.dylib
+       0x1992a2000 -        0x1992a899f  libsystem_sandbox.dylib (2680.160.6.700.3) <57AC636C-C7C7-3A9B-A7CA-2ACD0458D721> /usr/lib/system/libsystem_sandbox.dylib
+       0x19a8fd000 -        0x19a9001fb  libquarantine.dylib (196.160.2.700.3) <0C2FD596-CB4D-3B9B-8414-50338B7DEF1F> /usr/lib/system/libquarantine.dylib
+       0x19b09c000 -        0x19b0a2d03  libsystem_coreservices.dylib (191.5.1) <BF51842C-BC69-3725-9EB2-7A52804963F8> /usr/lib/system/libsystem_coreservices.dylib
+       0x19b62b000 -        0x19b668a77  libsystem_m.dylib (3312.100.1) <E1EEE243-AA66-3CE8-8648-B4E2CD10589D> /usr/lib/system/libsystem_m.dylib
+       0x19b66a000 -        0x19b66d527  libmacho.dylib (1387) <F07DDA12-CC51-3CE9-AC26-D7B73C130F73> /usr/lib/system/libmacho.dylib
+       0x19b687000 -        0x19b6943a7  libcommonCrypto.dylib (600035) <EBA6E4D0-4DD2-33BB-BF95-48A58591AAAD> /usr/lib/system/libcommonCrypto.dylib
+       0x19b695000 -        0x19b69eca3  libunwind.dylib (2100.2) <81A35518-53E4-3519-B5BC-AE6A796E9DE1> /usr/lib/system/libunwind.dylib
+       0x19b6a7000 -        0x19b6b1d2b  libcopyfile.dylib (240.160.2.703.1) <16861DD1-EA84-358E-A019-816FB5A69685> /usr/lib/system/libcopyfile.dylib
+       0x19b6b2000 -        0x19b6b5987  libcompiler_rt.dylib (103.3) <65D09B50-BE7D-3491-8547-6B85A3C2216D> /usr/lib/system/libcompiler_rt.dylib
+       0x19b6b6000 -        0x19b6ba78b  libsystem_collections.dylib (1752.160.4) <34CEFA68-1E15-32F2-A5B1-97C0170A77C5> /usr/lib/system/libsystem_collections.dylib
+       0x19b6bb000 -        0x19b6be4cf  libsystem_secinit.dylib (168.100.7) <B6B286B6-6E08-3578-8AFC-E4C55697C760> /usr/lib/system/libsystem_secinit.dylib
+       0x19b6bf000 -        0x19b6c1bf7  libremovefile.dylib (85.100.6) <33530415-3DB6-3556-A59A-24C22681D632> /usr/lib/system/libremovefile.dylib
+       0x19b6c2000 -        0x19b6c2f27  libkeymgr.dylib (31) <AD45B9EE-CE2B-3E1F-B96B-15F7F9FA3712> /usr/lib/system/libkeymgr.dylib
+       0x19b6c3000 -        0x19b6cbe3f  libsystem_dnssd.dylib (2881.160.4.700.1) <865BFB9D-4EDD-3866-B0D8-E5FAB1D0C61F> /usr/lib/system/libsystem_dnssd.dylib
+       0x19b6cc000 -        0x19b6d109b  libcache.dylib (95) <A13AF0DC-5928-38BE-97FF-E04C29EF96AF> /usr/lib/system/libcache.dylib
+       0x19b6d2000 -        0x19b6d3ce3  libSystem.B.dylib (1356) <8A197E38-519D-32D1-9011-49E892FA320D> /usr/lib/libSystem.B.dylib
+       0x28f3b7000 -        0x28f3be349  libRosetta.dylib (367.9) <3DBB2990-262D-3776-8FAC-B88C0373DCF0> /usr/lib/libRosetta.dylib
+       0x290fc9000 -        0x290fcca4b  libsystem_darwindirectory.dylib (122) <6246210A-5279-391D-8F58-E62A87CAB309> /usr/lib/system/libsystem_darwindirectory.dylib
+       0x290fcd000 -        0x290fd739b  libsystem_eligibility.dylib (319.160.17) <85C0486B-60BE-3E10-ABBF-DD74341B7376> /usr/lib/system/libsystem_eligibility.dylib
+       0x290fd8000 -        0x290fdf88b  libsystem_sanitizers.dylib (26.1) <A8C4F7FC-3443-35F7-B306-068D06237ED0> /usr/lib/system/libsystem_sanitizers.dylib
+       0x290fe0000 -        0x290fe0bbf  libsystem_trial.dylib (474.2.18.2.1) <83FF8DEB-1153-35BA-99C3-2AEF9B7559CD> /usr/lib/system/libsystem_trial.dylib

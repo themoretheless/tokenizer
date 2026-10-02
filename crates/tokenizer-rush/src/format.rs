@@ -165,6 +165,57 @@ impl<'s> Writer<'s> {
     fn statement(&mut self, statement: &Stmt<'s>) {
         self.before(statement.span.start);
         match &statement.kind {
+            StmtKind::Struct { name, fields } => {
+                self.text("struct ");
+                self.name(name);
+                self.text(" {");
+                self.newline();
+                self.indent += 1;
+                for (name, ty) in fields {
+                    self.name(name);
+                    self.text(": ");
+                    self.ty(ty);
+                    self.text(",");
+                    self.newline();
+                }
+                self.before(statement.span.end);
+                self.indent -= 1;
+                self.text("}");
+            }
+            StmtKind::Enum { name, variants } => {
+                self.text("enum ");
+                self.name(name);
+                self.text(" {");
+                self.newline();
+                self.indent += 1;
+                for (name, types) in variants {
+                    self.name(name);
+                    if !types.is_empty() {
+                        self.text("(");
+                        for (i, ty) in types.iter().enumerate() {
+                            if i > 0 {
+                                self.text(", ");
+                            }
+                            self.ty(ty);
+                        }
+                        self.text(")");
+                    }
+                    self.text(",");
+                    self.newline();
+                }
+                self.before(statement.span.end);
+                self.indent -= 1;
+                self.text("}");
+            }
+            StmtKind::Export(names) => {
+                self.text("export ");
+                for (index, name) in names.iter().enumerate() {
+                    if index > 0 {
+                        self.text(", ");
+                    }
+                    self.name(name);
+                }
+            }
             StmtKind::Import(name) => {
                 self.text("import ");
                 self.name(name);
@@ -331,7 +382,10 @@ impl<'s> Writer<'s> {
             ExprKind::Pipeline { .. } => 1,
             ExprKind::Binary { operator, .. } => crate::parser::binding(operator).unwrap().0,
             ExprKind::Unary { .. } => 13,
-            ExprKind::Call { .. } | ExprKind::Member { .. } | ExprKind::Index { .. } => 20,
+            ExprKind::Try(_)
+            | ExprKind::Call { .. }
+            | ExprKind::Member { .. }
+            | ExprKind::Index { .. } => 20,
             _ => 21,
         };
         // Keeping comments with newlines inside grouping preserves expression continuation.
@@ -352,6 +406,10 @@ impl<'s> Writer<'s> {
             ExprKind::Number(text) | ExprKind::String(text) => self.text(text),
             ExprKind::Bool(value) => self.text(if *value { "true" } else { "false" }),
             ExprKind::Null => self.text("null"),
+            ExprKind::Try(value) => {
+                self.expr(value, 20);
+                self.text("?");
+            }
             ExprKind::Unary { operator, value } => {
                 self.text(operator);
                 self.text(" ");

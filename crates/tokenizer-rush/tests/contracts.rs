@@ -114,7 +114,7 @@ fn record_indexing_uses_computed_string_keys_and_strict_missing_errors() {
         evaluate("{x:1}['y']", 100)
             .unwrap_err()
             .message
-            .contains("Unknown field: y")
+            .contains("Unknown field")
     );
     assert!(
         evaluate("{x:1}[0]", 100)

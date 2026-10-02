@@ -289,3 +289,24 @@ fn closed_output_reports_io_error_without_panicking() {
     assert!(!error.contains("panicked"), "{error}");
     std::fs::remove_file(path).unwrap();
 }
+#[test]
+fn strict_check_requires_a_complete_function_contract() {
+    let path = std::env::temp_dir().join(format!("rush-strict-{}.r", std::process::id()));
+    std::fs::write(&path, "fn identity(x){return x}").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .args(["--check", path.to_str().unwrap(), "--strict"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("dynamic-contract"));
+    std::fs::write(&path, "fn next(n){return n+1}").unwrap();
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_rush"))
+            .args(["--check", path.to_str().unwrap(), "--strict"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    std::fs::remove_file(path).unwrap();
+}

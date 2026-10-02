@@ -170,6 +170,12 @@ impl<'a, 's> Graph<'a, 's> {
                             .extend(values.iter().map(|value| (from, Work::Value(value))))
                             .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
                     }
+                    Value::UserData(data) => {
+                        self.charge(data.values.len())?;
+                        self.work
+                            .extend(data.values.iter().map(|value| (from, Work::Value(value))))
+                            .map_err(|e| self.runtime.gc_allocation_error(self.span, e))?;
+                    }
                     Value::Record(fields) => {
                         self.charge(fields.len())?;
                         self.work

@@ -285,6 +285,21 @@ impl Usage {
         }
     }
     fn value(&mut self, value: &Value<'_>) {
+        if let Value::UserData(data) = value {
+            self.add(std::mem::size_of::<super::UserData<'_>>());
+            self.add(data.type_name.capacity());
+            if let Some(variant) = &data.variant {
+                self.add(variant.capacity());
+            }
+            self.add(
+                data.values
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Value<'_>>()),
+            );
+            for value in &data.values {
+                self.value(value);
+            }
+        }
         match value {
             Value::String(text) => self.add(text.capacity()),
             Value::Vector(v) => self.add(v.capacity().saturating_mul(8)),
@@ -360,6 +375,20 @@ impl Runtime<'_, '_> {
         for (value, _) in self.cells.iter() {
             usage.value(value);
         }
+        for task in self.coroutines.values() {
+            usage.value(&Value::Function(task.function.clone()));
+            usage.add(
+                task.frames
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<super::coroutine::Frame<'_>>()),
+            );
+            for frame in &task.frames {
+                usage.environment(frame.environment());
+                if let Some(sequence) = frame.sequence() {
+                    usage.value(&Value::Sequence(sequence.clone()));
+                }
+            }
+        }
         usage.environment(&self.module_globals);
         if let Some(environment) = &self.instance_roots {
             usage.environment(environment);
@@ -423,6 +452,15 @@ impl ScriptInstance<'_, '_> {
 
 fn owned_value(value: Value<'_>) -> std::result::Result<Value<'static>, String> {
     Ok(match value {
+        Value::UserData(data) => Value::UserData(Box::new(super::UserData {
+            type_name: data.type_name,
+            variant: data.variant,
+            values: data
+                .values
+                .into_iter()
+                .map(owned_value)
+                .collect::<std::result::Result<_, _>>()?,
+        })),
         Value::HostObject(v) => Value::HostObject(v),
         Value::Angle(v) => Value::Angle(v),
         Value::Mesh(v) => Value::Mesh(v),

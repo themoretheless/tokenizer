@@ -2,6 +2,11 @@
 //! See the crate README for the supported grammar. The experimental evaluator
 //! executes a bounded functional subset; parsing supports a broader grammar.
 
+mod project;
+pub use project::{
+    ModuleEditorAnalysis, ProjectEdit, analyze_editor_project, import_completions,
+    rename_project_symbol,
+};
 mod analysis;
 pub use analysis::{LexicalBinding, MemberCompletion, NameReference};
 mod ast;
@@ -24,10 +29,11 @@ mod runtime;
 mod string_literal;
 pub use ast::*;
 pub use runtime::{
-    Builtin, CallFrame, CancellationToken, Closure, ExecutionLimits, HostCallback, HostFunction,
-    HostRegistration, HostSequence, HostSequenceIterator, OwnedScriptInstance, Program,
-    RuntimeError, ScriptInstance, ScriptState, Sequence, SourceLocation, StateValue, Value,
-    ValueType, builtin_catalog, evaluate,
+    Builtin, CallFrame, CancellationToken, Closure, CoroutineId, CoroutineScheduler,
+    CoroutineState, ExecutionLimits, HostCallback, HostFunction, HostRegistration, HostSequence,
+    HostSequenceIterator, OwnedScriptInstance, Program, RuntimeError, ScheduledState,
+    ScheduledStep, ScriptInstance, ScriptState, Sequence, SourceLocation, StateValue, UserData,
+    Value, ValueType, WakeRequest, builtin_catalog, evaluate,
 };
 
 use themoretheless_tokenizer_core::{
@@ -219,6 +225,22 @@ pub fn analyze_editor_details(source: &str) -> EditorAnalysis<'_> {
     let mut parsed = parse(source);
     let (references, bindings, member_completions) =
         analysis::editor(&mut parsed, InputLimits::conservative().max_diagnostics);
+    EditorAnalysis {
+        parsed,
+        references,
+        bindings,
+        member_completions,
+    }
+}
+
+/// Inspect explicit module interfaces without initializing modules or invoking host code.
+pub fn analyze_editor_modules<'s>(
+    source: &'s str,
+    modules: &[(&str, &Program<'_>)],
+) -> EditorAnalysis<'s> {
+    let mut parsed = parse(source);
+    let exports = analysis::module_interfaces(modules);
+    let (references, bindings, member_completions) = analysis::editor_modules(&mut parsed, exports);
     EditorAnalysis {
         parsed,
         references,

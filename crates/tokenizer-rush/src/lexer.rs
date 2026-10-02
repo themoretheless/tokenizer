@@ -1,10 +1,10 @@
 use themoretheless_tokenizer_core::{Diagnostic, InputLimits, LexToken, Lexed, Span, SyntaxKind};
 
 pub(crate) const KEYWORDS: &[&str] = &[
-    "fn", "let", "const", "mut", "return", "yield", "if", "else", "while", "for", "foreach", "in",
-    "match", "break", "continue", "and", "or", "not", "true", "false", "null",
+    "struct", "enum", "fn", "let", "const", "mut", "return", "yield", "if", "else", "while", "for",
+    "foreach", "in", "match", "break", "continue", "and", "or", "not", "true", "false", "null",
     // Reserved until their grammar and semantics are specified.
-    "async", "await", "import",
+    "async", "await", "import", "export",
 ];
 const TYPES: &[&str] = &[
     "int", "f64", "str", "bool", "list", "map", "float", "string",
@@ -162,7 +162,7 @@ pub(crate) fn run(source: &str, limits: InputLimits) -> (Lexed, bool) {
                 i += c.len_utf8();
                 kind = if "()[]{}.,:;".contains(c) {
                     SyntaxKind::Punctuation
-                } else if "+-*/%=<>!|".contains(c) {
+                } else if "+-*/%=<>!|?".contains(c) {
                     SyntaxKind::Operator
                 } else {
                     error = Some(("invalid-character", "Unexpected character in Rush source"));

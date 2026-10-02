@@ -1,0 +1,356 @@
+{
+  "method": "fresh processes in alternating order; correctness assertions, 10 warmups and 7 samples per process; no profiler/allocator instrumentation",
+  "bench": "coroutine",
+  "operation": "spawn_resume_drop",
+  "iterations": 100,
+  "pairs": 6,
+  "binaries": {
+    "before": {
+      "path": "/private/tmp/rush-coroutine-before",
+      "sha256": "7d7a559c3024fc24b4c6e8b7a2e3a0362b603f6fffb29671aae472fee42168a1"
+    },
+    "after": {
+      "path": "/private/tmp/rush-coroutine-after",
+      "sha256": "e68d77fa7e185035682252ccf99f115e6141d9b34a9175d7a82be538fa32ed73"
+    }
+  },
+  "records": [
+    {
+      "case": "while",
+      "pair": 0,
+      "binary": "before",
+      "min_us": 506.198,
+      "median_us": 525.627,
+      "max_us": 547.303
+    },
+    {
+      "case": "while",
+      "pair": 0,
+      "binary": "after",
+      "min_us": 330.382,
+      "median_us": 336.919,
+      "max_us": 348.055
+    },
+    {
+      "case": "while",
+      "pair": 1,
+      "binary": "after",
+      "min_us": 327.565,
+      "median_us": 338.22,
+      "max_us": 351.31
+    },
+    {
+      "case": "while",
+      "pair": 1,
+      "binary": "before",
+      "min_us": 521.494,
+      "median_us": 540.275,
+      "max_us": 555.216
+    },
+    {
+      "case": "while",
+      "pair": 2,
+      "binary": "before",
+      "min_us": 526.707,
+      "median_us": 535.66,
+      "max_us": 542.241
+    },
+    {
+      "case": "while",
+      "pair": 2,
+      "binary": "after",
+      "min_us": 310.172,
+      "median_us": 311.538,
+      "max_us": 314.708
+    },
+    {
+      "case": "while",
+      "pair": 3,
+      "binary": "after",
+      "min_us": 315.127,
+      "median_us": 319.073,
+      "max_us": 329.11
+    },
+    {
+      "case": "while",
+      "pair": 3,
+      "binary": "before",
+      "min_us": 515.802,
+      "median_us": 523.747,
+      "max_us": 528.395
+    },
+    {
+      "case": "while",
+      "pair": 4,
+      "binary": "before",
+      "min_us": 511.915,
+      "median_us": 517.366,
+      "max_us": 534.809
+    },
+    {
+      "case": "while",
+      "pair": 4,
+      "binary": "after",
+      "min_us": 325.08,
+      "median_us": 330.827,
+      "max_us": 336.254
+    },
+    {
+      "case": "while",
+      "pair": 5,
+      "binary": "after",
+      "min_us": 319.448,
+      "median_us": 325.377,
+      "max_us": 341.675
+    },
+    {
+      "case": "while",
+      "pair": 5,
+      "binary": "before",
+      "min_us": 526.731,
+      "median_us": 535.031,
+      "max_us": 541.544
+    },
+    {
+      "case": "for",
+      "pair": 0,
+      "binary": "before",
+      "min_us": 303.172,
+      "median_us": 305.798,
+      "max_us": 310.274
+    },
+    {
+      "case": "for",
+      "pair": 0,
+      "binary": "after",
+      "min_us": 199.281,
+      "median_us": 201.101,
+      "max_us": 204.937
+    },
+    {
+      "case": "for",
+      "pair": 1,
+      "binary": "after",
+      "min_us": 203.538,
+      "median_us": 205.228,
+      "max_us": 211.317
+    },
+    {
+      "case": "for",
+      "pair": 1,
+      "binary": "before",
+      "min_us": 313.769,
+      "median_us": 315.346,
+      "max_us": 319.464
+    },
+    {
+      "case": "for",
+      "pair": 2,
+      "binary": "before",
+      "min_us": 305.487,
+      "median_us": 309.986,
+      "max_us": 316.789
+    },
+    {
+      "case": "for",
+      "pair": 2,
+      "binary": "after",
+      "min_us": 202.858,
+      "median_us": 205.006,
+      "max_us": 210.51
+    },
+    {
+      "case": "for",
+      "pair": 3,
+      "binary": "after",
+      "min_us": 200.843,
+      "median_us": 205.063,
+      "max_us": 207.332
+    },
+    {
+      "case": "for",
+      "pair": 3,
+      "binary": "before",
+      "min_us": 308.969,
+      "median_us": 314.438,
+      "max_us": 318.005
+    },
+    {
+      "case": "for",
+      "pair": 4,
+      "binary": "before",
+      "min_us": 317.363,
+      "median_us": 318.657,
+      "max_us": 320.624
+    },
+    {
+      "case": "for",
+      "pair": 4,
+      "binary": "after",
+      "min_us": 208.101,
+      "median_us": 208.868,
+      "max_us": 210.923
+    },
+    {
+      "case": "for",
+      "pair": 5,
+      "binary": "after",
+      "min_us": 202.358,
+      "median_us": 202.906,
+      "max_us": 203.142
+    },
+    {
+      "case": "for",
+      "pair": 5,
+      "binary": "before",
+      "min_us": 317.55,
+      "median_us": 320.625,
+      "max_us": 325.255
+    },
+    {
+      "case": "yield",
+      "pair": 0,
+      "binary": "before",
+      "min_us": 792.604,
+      "median_us": 807.706,
+      "max_us": 833.781
+    },
+    {
+      "case": "yield",
+      "pair": 0,
+      "binary": "after",
+      "min_us": 660.193,
+      "median_us": 675.428,
+      "max_us": 691.837
+    },
+    {
+      "case": "yield",
+      "pair": 1,
+      "binary": "after",
+      "min_us": 683.117,
+      "median_us": 684.56,
+      "max_us": 696.593
+    },
+    {
+      "case": "yield",
+      "pair": 1,
+      "binary": "before",
+      "min_us": 792.878,
+      "median_us": 796.427,
+      "max_us": 800.044
+    },
+    {
+      "case": "yield",
+      "pair": 2,
+      "binary": "before",
+      "min_us": 784.945,
+      "median_us": 793.671,
+      "max_us": 805.431
+    },
+    {
+      "case": "yield",
+      "pair": 2,
+      "binary": "after",
+      "min_us": 676.919,
+      "median_us": 682.772,
+      "max_us": 686.963
+    },
+    {
+      "case": "yield",
+      "pair": 3,
+      "binary": "after",
+      "min_us": 671.843,
+      "median_us": 676.514,
+      "max_us": 680.523
+    },
+    {
+      "case": "yield",
+      "pair": 3,
+      "binary": "before",
+      "min_us": 766.531,
+      "median_us": 778.691,
+      "max_us": 799.829
+    },
+    {
+      "case": "yield",
+      "pair": 4,
+      "binary": "before",
+      "min_us": 789.632,
+      "median_us": 795.296,
+      "max_us": 800.844
+    },
+    {
+      "case": "yield",
+      "pair": 4,
+      "binary": "after",
+      "min_us": 660.7,
+      "median_us": 668.976,
+      "max_us": 672.139
+    },
+    {
+      "case": "yield",
+      "pair": 5,
+      "binary": "after",
+      "min_us": 659.567,
+      "median_us": 664.218,
+      "max_us": 667.974
+    },
+    {
+      "case": "yield",
+      "pair": 5,
+      "binary": "before",
+      "min_us": 790.967,
+      "median_us": 797.441,
+      "max_us": 805.756
+    }
+  ],
+  "summary": {
+    "while": {
+      "before_median_us": 530.329,
+      "after_median_us": 328.102,
+      "speedup": 1.6163540606274878,
+      "before_process_range_us": [
+        517.366,
+        540.275
+      ],
+      "after_process_range_us": [
+        311.538,
+        338.22
+      ]
+    },
+    "for": {
+      "before_median_us": 314.892,
+      "after_median_us": 205.03449999999998,
+      "speedup": 1.535800072670697,
+      "before_process_range_us": [
+        305.798,
+        320.625
+      ],
+      "after_process_range_us": [
+        201.101,
+        208.868
+      ]
+    },
+    "yield": {
+      "before_median_us": 795.8615,
+      "after_median_us": 675.971,
+      "speedup": 1.1773604193079288,
+      "before_process_range_us": [
+        778.691,
+        807.706
+      ],
+      "after_process_range_us": [
+        664.218,
+        684.56
+      ]
+    }
+  },
+  "environment": {
+    "hardware": "Apple M4 Max",
+    "os": "macOS 26.7.1 (25G313)",
+    "rustc": "1.101.0-nightly (c1070d693 2026-09-28)",
+    "target": "aarch64-apple-darwin",
+    "llvm": "23.1.1"
+  },
+  "workload": "Each process runs while, for and yield in that order; the selected row is retained. Each case traverses 1000 loop iterations per coroutine. Compilation and instance preparation are excluded; spawn, resumes and task cleanup are included."
+}

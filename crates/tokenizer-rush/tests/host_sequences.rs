@@ -450,11 +450,67 @@ fn wrong_callback_arity_does_not_open_a_host_source() {
     ] {
         let stats = fresh();
         let text = format!("source(0) | {consumer}");
-        let program = Program::compile(&text).unwrap();
-        let error = program
-            .run_with_host(10000, &CancellationToken::default(), &[], &[registered()])
-            .unwrap_err();
+        let error = Program::compile(&text)
+            .err()
+            .expect("invalid callback must fail at load time");
         assert!(error.message.contains("Callback argument count"));
         assert_eq!(counts(&stats), (0, 0, 0));
+    }
+}
+
+#[test]
+fn question_operator_closes_sources_when_returning_out_of_a_loop() {
+    let stats = fresh();
+    let program = Program::compile(
+        "fn f() -> Option[number] { for x in source(0) { let v=None()? }; return Some(0) }; f()",
+    )
+    .unwrap();
+    assert_eq!(
+        program
+            .run_with_host(1000, &CancellationToken::default(), &[], &[registered()])
+            .unwrap(),
+        Value::Variant("None", vec![])
+    );
+    assert_eq!(counts(&stats), (1, 1, 1));
+}
+
+#[test]
+fn cancelling_suspended_coroutines_closes_their_host_iterators() {
+    let stats = fresh();
+    let token = CancellationToken::default();
+    let limits = themoretheless_tokenizer_rush::ExecutionLimits::new(1000);
+    let program = Program::compile("fn work() { for x in source(0) { yield x } }").unwrap();
+    let mut script = program
+        .instantiate(limits, &token, &[], &[registered()], &[], &[])
+        .unwrap();
+    let task = script.spawn_coroutine("work", &[], limits).unwrap();
+    script.resume_coroutine(task, limits).unwrap();
+    assert_eq!(counts(&stats), (1, 1, 0));
+    assert!(script.cancel_coroutine(task));
+    assert_eq!(counts(&stats), (1, 1, 1));
+}
+#[test]
+fn scheduler_cancellation_and_drop_close_waiting_host_iterators() {
+    use themoretheless_tokenizer_rush::{CoroutineScheduler, ExecutionLimits};
+    let limits = ExecutionLimits::new(1000);
+    let program=Program::compile("enum Wait{After(number),Event(str)}; fn work(){for x in source(0){yield Wait.Event('go')}}").unwrap();
+    for cancel in [true, false] {
+        let stats = fresh();
+        let token = CancellationToken::default();
+        let mut script = program
+            .instantiate(limits, &token, &[], &[registered()], &[], &[])
+            .unwrap();
+        {
+            let mut scheduler = CoroutineScheduler::new(&mut script);
+            let id = scheduler.spawn("work", &[], limits).unwrap();
+            scheduler.poll(std::time::Duration::ZERO, limits).unwrap();
+            assert_eq!(counts(&stats), (1, 1, 0));
+            if cancel {
+                assert!(scheduler.cancel(id));
+                assert_eq!(counts(&stats), (1, 1, 1));
+                assert_eq!(scheduler.subscriptions("go"), 0);
+            }
+        }
+        assert_eq!(counts(&stats), (1, 1, 1));
     }
 }

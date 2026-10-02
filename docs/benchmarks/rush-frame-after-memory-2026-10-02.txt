@@ -1,0 +1,10 @@
+   Compiling themoretheless-tokenizer-rush v0.7.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `bench` profile [optimized] target(s) in 3.72s
+     Running benches/memory.rs (target/release/build/themoretheless-tokenizer-rush/f5f46dbfc9872c77/out/memory-f5f46dbfc9872c77)
+workload	items	run	peak_extra_bytes	live_after_drop_bytes	allocation_calls
+eager	1000	1	89004	0	3413
+eager	1000	2	89004	0	3413
+eager	1000	3	89004	0	3413
+lazy	1000	1	10220	0	3385
+lazy	1000	2	10220	0	3385
+lazy	1000	3	10220	0	3385

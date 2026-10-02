@@ -186,6 +186,16 @@ fn host_contract_errors_order_and_cancellation_match_working_rush() {
             })
             .map_err(|err| (err.span, err.message));
         let expected_trace = trace();
+        if !themoretheless_tokenizer_rush::analyze_host_calls(source, &hosts).is_valid() {
+            // Invalid programs now stop at load time; prototype differential checks
+            // below compare execution only for statically valid programs.
+            assert!(expected.is_err(), "{source}");
+            assert!(
+                expected_trace.is_empty(),
+                "load errors must precede all host effects: {source}"
+            );
+            continue;
+        }
         let tree = Tree::compile_with_hosts(source, &[], &hosts).unwrap();
         let actual = tree
             .run(&[], 1000, &CancellationToken::default())
@@ -254,7 +264,7 @@ fn scalar_tree_and_bytecode_match_rush_values() {
 #[test]
 fn errors_have_matching_order_spans_and_reusable_stack() {
     let token = CancellationToken::default();
-    for source in ["1/0", "1%0", "1e308*2", "true+1", "(1/0)+(2/0)"] {
+    for source in ["1/0", "1%0", "1e308*2", "(1/0)+(2/0)"] {
         let tree = Tree::compile(source, &[]).unwrap();
         let bytecode = tree.bytecode();
         let mut stack = bytecode.stack();
@@ -347,7 +357,6 @@ fn branches_match_rush_and_skip_errors_and_budget() {
     for source in [
         "(if true { 7 } else { 1/0 })",
         "(if false { 1/0 } else { 9 })",
-        "(if 1 { 7 } else { 9 })",
         "10+(if false { 1/0 } else { (if true { 3 } else { 4 }) })",
         "false and (1/0 == 0)",
         "true or (1/0 == 0)",
@@ -355,10 +364,6 @@ fn branches_match_rush_and_skip_errors_and_budget() {
         "true || (1/0 == 0)",
         "true and false",
         "false or true",
-        "true and 3",
-        "false or 3",
-        "1 and (1/0 == 0)",
-        "1 or true",
         "(if true { 1/0 } else { 2/0 })",
         "(if false { 1/0 } else { 2/0 })",
         "(true and false) or (true and true)",
@@ -397,5 +402,22 @@ fn branches_match_rush_and_skip_errors_and_budget() {
         let tree = Tree::compile(source, &[]).unwrap();
         assert!(tree.run(&[], fuel, &token).is_ok(), "{source}");
         assert!(tree.run(&[], fuel - 1, &token).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn invalid_scalar_types_are_rejected_at_load_time() {
+    for source in [
+        "true+1",
+        "(if 1 { 7 } else { 9 })",
+        "true and 3",
+        "false or 3",
+        "1 and (1/0 == 0)",
+        "1 or true",
+    ] {
+        assert!(
+            themoretheless_tokenizer_rush::Program::compile(source).is_err(),
+            "{source}"
+        );
     }
 }

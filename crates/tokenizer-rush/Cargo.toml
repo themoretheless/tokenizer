@@ -57,3 +57,15 @@ harness = false
 [[bench]]
 name = "scalar_closures"
 harness = false
+
+[[bench]]
+name = "loading"
+harness = false
+
+[[bench]]
+name = "coroutine"
+harness = false
+
+[[bench]]
+name = "remainder"
+harness = false

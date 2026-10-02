@@ -9,6 +9,8 @@ use themoretheless_tokenizer_core::{Diagnostic, Span};
 pub struct NameReference {
     pub usage: Span,
     pub definition: Option<Span>,
+    /// None denotes the current document; imported symbols identify their module.
+    pub definition_module: Option<String>,
 }
 
 /// A binding and the half-open byte-offset interval where it is visible.
@@ -56,7 +58,19 @@ pub(crate) fn editor_with_hosts(
     let trailing_member = parsed.source.trim_end().ends_with('.')
         && parsed.diagnostics.len() == 1
         && parsed.diagnostics[0].code == "expected-name";
-    inspect_inner(parsed, limit, calls, hosts, trailing_member, true)
+    inspect_inner(
+        parsed,
+        limit,
+        calls,
+        hosts,
+        trailing_member,
+        true,
+        ModuleContext {
+            exports: HashMap::new(),
+            name: None,
+            interface: None,
+        },
+    )
 }
 
 pub(crate) fn check(parsed: &mut Parse<'_>, limit: usize) -> Vec<NameReference> {
@@ -79,9 +93,167 @@ pub(crate) fn inspect(
     calls: bool,
     host_functions: HashMap<String, Rc<HostFunction>>,
 ) -> (Vec<NameReference>, Vec<LexicalBinding>) {
-    let (references, bindings, _) =
-        inspect_inner(parsed, limit, calls, host_functions, false, false);
+    let (references, bindings, _) = inspect_inner(
+        parsed,
+        limit,
+        calls,
+        host_functions,
+        false,
+        false,
+        ModuleContext {
+            exports: HashMap::new(),
+            name: None,
+            interface: None,
+        },
+    );
     (references, bindings)
+}
+pub(crate) fn editor_modules(
+    parsed: &mut Parse<'_>,
+    exports: ModuleInterfaces,
+) -> (
+    Vec<NameReference>,
+    Vec<LexicalBinding>,
+    Vec<MemberCompletion>,
+) {
+    let recover = parsed.source.trim_end().ends_with('.')
+        && parsed.diagnostics.len() == 1
+        && parsed.diagnostics[0].code == "expected-name";
+    inspect_inner(
+        parsed,
+        crate::InputLimits::conservative().max_diagnostics,
+        true,
+        HashMap::new(),
+        recover,
+        true,
+        ModuleContext {
+            exports,
+            name: None,
+            interface: None,
+        },
+    )
+}
+pub(crate) fn editor_module(
+    parsed: &mut Parse<'_>,
+    exports: ModuleInterfaces,
+    module: &str,
+) -> (
+    Vec<NameReference>,
+    Vec<LexicalBinding>,
+    Vec<MemberCompletion>,
+) {
+    let recover = parsed.source.trim_end().ends_with('.')
+        && parsed.diagnostics.len() == 1
+        && parsed.diagnostics[0].code == "expected-name";
+    inspect_inner(
+        parsed,
+        crate::InputLimits::conservative().max_diagnostics,
+        true,
+        HashMap::new(),
+        recover,
+        true,
+        ModuleContext {
+            exports,
+            name: Some(module),
+            interface: None,
+        },
+    )
+}
+pub(crate) type FunctionContract = (Vec<Option<ValueType>>, Option<ValueType>);
+pub(crate) fn compile_analysis(
+    parsed: &mut Parse<'_>,
+) -> (Vec<NameReference>, HashMap<usize, FunctionContract>) {
+    let mut interface = ModuleInterface::default();
+    let references = inspect_inner(
+        parsed,
+        crate::InputLimits::conservative().max_diagnostics,
+        true,
+        HashMap::new(),
+        false,
+        false,
+        ModuleContext {
+            exports: HashMap::new(),
+            name: None,
+            interface: Some(&mut interface),
+        },
+    )
+    .0;
+    let contracts = interface
+        .functions
+        .into_iter()
+        .filter_map(|(id, shape)| {
+            if let Shape::Function(parameters, result, _) = shape {
+                let result = if let Shape::Typed(ty) = *result {
+                    Some(ty)
+                } else {
+                    None
+                };
+                Some((id, (parameters, result)))
+            } else {
+                None
+            }
+        })
+        .collect();
+    (references, contracts)
+}
+pub(crate) fn resolved_interface(
+    parsed: &mut Parse<'_>,
+    exports: ModuleInterfaces,
+    module: Option<&str>,
+) -> ModuleInterface {
+    let mut interface = ModuleInterface::default();
+    inspect_inner(
+        parsed,
+        crate::InputLimits::conservative().max_diagnostics,
+        true,
+        HashMap::new(),
+        false,
+        false,
+        ModuleContext {
+            exports,
+            name: module,
+            interface: Some(&mut interface),
+        },
+    );
+    interface.diagnostics = parsed.diagnostics.clone();
+    interface
+}
+pub(crate) fn check_strict(parsed: &mut Parse<'_>) {
+    check_strict_modules(parsed, HashMap::new(), None);
+}
+pub(crate) fn check_strict_modules(
+    parsed: &mut Parse<'_>,
+    exports: ModuleInterfaces,
+    module: Option<&str>,
+) {
+    let mut interface = ModuleInterface::default();
+    inspect_inner(
+        parsed,
+        crate::InputLimits::conservative().max_diagnostics,
+        true,
+        HashMap::new(),
+        false,
+        false,
+        ModuleContext {
+            exports,
+            name: module,
+            interface: Some(&mut interface),
+        },
+    );
+    for (id, shape) in interface.functions {
+        if let Shape::Function(parameters, result, _) = shape
+            && (parameters.iter().any(Option::is_none) || !result.has_contract())
+        {
+            parsed.valid = false;
+            parsed.diagnostics.push(Diagnostic::new(Span::new(id,id+1),"dynamic-contract","Function contract cannot be inferred completely; annotate dynamic parameters and return type"));
+        }
+    }
+}
+#[derive(Default)]
+struct ModuleContext<'a> {
+    exports: ModuleInterfaces,
+    name: Option<&'a str>,
+    interface: Option<&'a mut ModuleInterface>,
 }
 fn inspect_inner(
     parsed: &mut Parse<'_>,
@@ -90,24 +262,42 @@ fn inspect_inner(
     host_functions: HashMap<String, Rc<HostFunction>>,
     recover_trailing_member: bool,
     collect_members: bool,
+    context: ModuleContext<'_>,
 ) -> (
     Vec<NameReference>,
     Vec<LexicalBinding>,
     Vec<MemberCompletion>,
 ) {
+    let ModuleContext {
+        exports: module_exports,
+        name: module,
+        interface,
+    } = context;
     // Only the editor may inspect a missing final member name. Other syntax errors
     // still suppress metadata, and execution continues to reject this source.
     if !parsed.is_valid() && !recover_trailing_member {
         return (Vec::new(), Vec::new(), Vec::new());
     }
     let mut checker = Checker {
+        module: module.map(str::to_owned),
+        type_names: HashMap::new(),
+        imports: std::collections::HashSet::new(),
+        binding_modules: HashMap::new(),
+        module_exports,
+        exports: std::collections::HashSet::new(),
         scopes: vec![HashMap::new()],
         scope_spans: vec![Span::new(0, parsed.source.len() + 1)],
         bindings: Vec::new(),
         binding_types: HashMap::new(),
         binding_shapes: HashMap::new(),
+        expression_shapes: HashMap::new(),
         record_fields: HashMap::new(),
         return_types: Vec::new(),
+        inferred_returns: Vec::new(),
+        function_shapes: HashMap::new(),
+        suspending_functions: std::collections::HashSet::new(),
+        user_types: HashMap::new(),
+        constructor_aliases: HashMap::new(),
         function_results: HashMap::new(),
         function_parameters: HashMap::new(),
         builtin_aliases: HashMap::new(),
@@ -121,6 +311,37 @@ fn inspect_inner(
         limit,
     };
     checker.statements(&parsed.module.items);
+    if let Some(interface) = interface {
+        interface.types = checker.user_types.clone();
+        for (&id, parameters) in &checker.function_parameters {
+            let result = checker
+                .function_shapes
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    checker
+                        .function_results
+                        .get(&id)
+                        .cloned()
+                        .map_or(Shape::Unknown, Shape::Typed)
+                });
+            interface.functions.insert(
+                id,
+                Shape::Function(
+                    parameters.clone(),
+                    Box::new(result),
+                    checker.suspending_functions.contains(&id),
+                ),
+            );
+        }
+        for name in &checker.exports {
+            if let Some(binding) = checker.scopes[0].get(name.as_str()) {
+                let shape = checker.binding_shape(binding);
+                interface.fields.insert(name.clone(), shape);
+                interface.symbols.insert(name.clone(), binding.1);
+            }
+        }
+    }
     for binding in &mut checker.bindings {
         if let Some(shape) = checker.binding_shapes.get(&binding.definition.start) {
             shape.member_paths("", &mut binding.member_paths);
@@ -140,6 +361,10 @@ fn inspect_inner(
                 .collect();
         }
     }
+    checker
+        .references
+        .sort_by_key(|reference| reference.usage.start);
+    checker.references.dedup();
     parsed.valid &= checker.valid;
     parsed.diagnostics.extend(checker.diagnostics);
     (
@@ -166,7 +391,97 @@ type Binding = (
     Option<Rc<HostFunction>>,
 );
 
+pub(crate) type ModuleInterfaces = HashMap<String, Rc<ModuleInterface>>;
+#[derive(Clone, Default)]
+pub(crate) struct ModuleInterface {
+    fields: std::collections::BTreeMap<String, Shape>,
+    types: HashMap<String, Rc<UserDefinition>>,
+    functions: HashMap<usize, Shape>,
+    symbols: HashMap<String, Span>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+}
+impl ModuleInterface {
+    pub(crate) fn contracts(&self) -> HashMap<usize, FunctionContract> {
+        self.functions
+            .iter()
+            .filter_map(|(&id, shape)| {
+                if let Shape::Function(parameters, result, _) = shape {
+                    Some((
+                        id,
+                        (
+                            parameters.clone(),
+                            if let Shape::Typed(t) = result.as_ref() {
+                                Some(t.clone())
+                            } else {
+                                None
+                            },
+                        ),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+}
+/// Build interfaces in dependency order; the runtime separately diagnoses missing imports/cycles.
+pub(crate) fn module_interfaces(modules: &[(&str, &crate::Program<'_>)]) -> ModuleInterfaces {
+    let mut output = HashMap::new();
+    let registered: std::collections::HashSet<_> = modules.iter().map(|(name, _)| *name).collect();
+    for _ in 0..modules.len() {
+        let mut progress = false;
+        for (name, program) in modules {
+            if output.contains_key(*name)
+                || program
+                    .import_refs()
+                    .iter()
+                    .any(|i| registered.contains(i.text) && !output.contains_key(i.text))
+            {
+                continue;
+            }
+            let mut parsed = program.parsed_clone();
+            let mut interface = ModuleInterface::default();
+            inspect_inner(
+                &mut parsed,
+                crate::InputLimits::conservative().max_diagnostics,
+                true,
+                HashMap::new(),
+                false,
+                false,
+                ModuleContext {
+                    exports: output.clone(),
+                    name: Some(name),
+                    interface: Some(&mut interface),
+                },
+            );
+            interface.diagnostics = parsed.diagnostics.clone();
+            output.insert(name.to_string(), Rc::new(interface));
+            progress = true;
+        }
+        if !progress {
+            break;
+        }
+    }
+    output
+}
+#[derive(Clone)]
+struct UserDefinition {
+    span: Span,
+    module: Option<String>,
+    field_spans: HashMap<String, Span>,
+    variant_spans: HashMap<String, Span>,
+    fields: Option<std::collections::BTreeMap<String, ValueType>>,
+    variants: std::collections::BTreeMap<String, Vec<ValueType>>,
+}
 struct Checker<'s> {
+    module: Option<String>,
+    type_names: HashMap<String, String>,
+    imports: std::collections::HashSet<String>,
+    binding_modules: HashMap<usize, String>,
+    module_exports: ModuleInterfaces,
+    exports: std::collections::HashSet<String>,
+    user_types: HashMap<String, Rc<UserDefinition>>,
+    constructor_aliases: HashMap<usize, (String, Option<String>)>,
     member_completions: Vec<MemberCompletion>,
     collect_members: bool,
     host_functions: HashMap<String, Rc<HostFunction>>,
@@ -176,8 +491,12 @@ struct Checker<'s> {
     bindings: Vec<LexicalBinding>,
     binding_types: HashMap<usize, ValueType>,
     binding_shapes: HashMap<usize, Shape>,
+    expression_shapes: HashMap<(usize, usize), Shape>,
     record_fields: HashMap<usize, Vec<String>>,
     return_types: Vec<Option<ValueType>>,
+    inferred_returns: Vec<Vec<Shape>>,
+    function_shapes: HashMap<usize, Shape>,
+    suspending_functions: std::collections::HashSet<usize>,
     function_results: HashMap<usize, ValueType>,
     function_parameters: HashMap<usize, Vec<Option<ValueType>>>,
     builtin_aliases: HashMap<usize, crate::Builtin>,
@@ -341,14 +660,256 @@ impl<'s> Checker<'s> {
             );
         } else {
             scope.insert(name.text, (constant, name.span, None, None));
-            self.bindings.push(LexicalBinding {
-                name: name.text.to_owned(),
-                definition: name.span,
-                visible: Span::new(start, self.scope_spans.last().unwrap().end),
-                depth: self.scopes.len() - 1,
-                members: Vec::new(),
-                member_paths: std::collections::BTreeMap::new(),
-            });
+            if self.collect_members {
+                self.bindings.push(LexicalBinding {
+                    name: name.text.to_owned(),
+                    definition: name.span,
+                    visible: Span::new(start, self.scope_spans.last().unwrap().end),
+                    depth: self.scopes.len() - 1,
+                    members: Vec::new(),
+                    member_paths: std::collections::BTreeMap::new(),
+                });
+            }
+        }
+    }
+    fn identity(&self, name: &str) -> String {
+        format!("{}::{}", self.module.as_deref().unwrap_or("<entry>"), name)
+    }
+    fn resolve_type(&self, name: &str) -> Option<String> {
+        let normalized = name.split('.').map(str::trim).collect::<Vec<_>>().join(".");
+        let name = normalized.as_str();
+        self.type_names.get(name).cloned().or_else(|| {
+            let (module, ty) = name.split_once('.')?;
+            // Standalone compilation defers imported contracts to graph validation.
+            (self.imports.contains(module) && !self.module_exports.contains_key(module))
+                .then(|| format!("{module}::{ty}"))
+        })
+    }
+    fn binding_shape(&self, binding: &Binding) -> Shape {
+        let id = binding.1.start;
+        if let Some((name, variant)) = self.constructor_aliases.get(&id) {
+            return Shape::Constructor(name.clone(), variant.clone());
+        }
+        if let Some(parameters) = self.function_parameters.get(&id) {
+            return Shape::Function(
+                parameters.clone(),
+                Box::new(self.function_shapes.get(&id).cloned().unwrap_or_else(|| {
+                    self.function_results
+                        .get(&id)
+                        .cloned()
+                        .map_or(Shape::Unknown, Shape::Typed)
+                })),
+                self.suspending_functions.contains(&id),
+            );
+        }
+        self.binding_shapes.get(&id).cloned().unwrap_or_else(|| {
+            self.binding_types
+                .get(&id)
+                .cloned()
+                .map_or(Shape::Unknown, Shape::Typed)
+        })
+    }
+    fn constrain(
+        &mut self,
+        expression: &Expr<'s>,
+        expected: Option<ValueType>,
+        parameters: &std::collections::HashSet<usize>,
+    ) {
+        match &expression.kind {
+            ExprKind::Name(name) => {
+                if let Some(binding) = self.scopes.iter().rev().find_map(|s| s.get(name.text))
+                    && parameters.contains(&binding.1.start)
+                    && let Some(expected) = expected
+                {
+                    let id = binding.1.start;
+                    if let Some(actual) = self.binding_types.get(&id) {
+                        if actual != &expected {
+                            self.error(
+                                name.span,
+                                "parameter-type",
+                                "Parameter has incompatible type requirements; add an annotation",
+                            );
+                        }
+                    } else {
+                        self.binding_types.insert(id, expected);
+                    }
+                }
+            }
+            ExprKind::Binary {
+                left,
+                right,
+                operator,
+            } => {
+                let l = self.shape(left);
+                let r = self.shape(right);
+                let boolean = matches!(*operator, "and" | "or" | "&&" | "||");
+                let comparable = matches!(*operator, "+" | "-" | "%" | "<" | ">" | "<=" | ">=");
+                let context = if boolean {
+                    Some(ValueType::Bool)
+                } else if matches!(*operator, "+" | "-" | "*" | "/" | "%") {
+                    expected
+                } else {
+                    None
+                };
+                let inferred = |shape: &Shape| {
+                    if let Shape::Typed(ty @ (ValueType::Number | ValueType::String)) = shape {
+                        Some(ty.clone())
+                    } else {
+                        None
+                    }
+                };
+                let mut lc = context
+                    .clone()
+                    .or_else(|| comparable.then(|| inferred(&r)).flatten());
+                let mut rc = context.or_else(|| comparable.then(|| inferred(&l)).flatten());
+                if matches!(*operator, "*" | "/") {
+                    if matches!(l, Shape::Typed(ValueType::Vector(_) | ValueType::Angle)) {
+                        rc = Some(ValueType::Number);
+                    }
+                    if *operator == "*"
+                        && matches!(r, Shape::Typed(ValueType::Vector(_) | ValueType::Angle))
+                    {
+                        lc = Some(ValueType::Number);
+                    }
+                }
+                self.constrain(left, lc, parameters);
+                self.constrain(right, rc, parameters);
+            }
+            ExprKind::Unary { operator, value } => self.constrain(
+                value,
+                if matches!(*operator, "not" | "!") {
+                    Some(ValueType::Bool)
+                } else {
+                    expected
+                },
+                parameters,
+            ),
+            ExprKind::If {
+                condition,
+                then_value,
+                else_value,
+            } => {
+                self.constrain(condition, Some(ValueType::Bool), parameters);
+                self.constrain(then_value, expected.clone(), parameters);
+                self.constrain(else_value, expected, parameters);
+            }
+            ExprKind::Call { callee, arguments } => {
+                let types = self.known_user_parameters(callee).or_else(|| {
+                    self.known_host(callee)
+                        .map(|h| h.parameters.iter().cloned().map(Some).collect())
+                });
+                for (i, arg) in arguments.iter().enumerate() {
+                    self.constrain(
+                        arg,
+                        types.as_ref().and_then(|t| t.get(i)).cloned().flatten(),
+                        parameters,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    fn constrain_body(
+        &mut self,
+        statements: &[Stmt<'s>],
+        expected: Option<ValueType>,
+        parameters: &std::collections::HashSet<usize>,
+    ) {
+        self.scopes.push(HashMap::new());
+        for statement in statements {
+            match &statement.kind {
+                StmtKind::Return(Some(value)) => {
+                    self.constrain(value, expected.clone(), parameters)
+                }
+                StmtKind::Expr(value) | StmtKind::Yield(value) => {
+                    self.constrain(value, None, parameters)
+                }
+                StmtKind::Declaration {
+                    name,
+                    constant,
+                    value,
+                    ty,
+                } => {
+                    let ty = ty.as_ref().and_then(|t| {
+                        ValueType::annotation_with(t, &|n| self.resolve_type(n)).ok()
+                    });
+                    self.constrain(value, ty.clone(), parameters);
+                    let shape = self.shape(value);
+                    self.scopes
+                        .last_mut()
+                        .unwrap()
+                        .insert(name.text, (*constant, name.span, None, None));
+                    if let Some(ty) = ty.or_else(|| {
+                        if let Shape::Typed(t) = &shape {
+                            Some(t.clone())
+                        } else {
+                            None
+                        }
+                    }) {
+                        self.binding_types.insert(name.span.start, ty);
+                    }
+                    if *constant {
+                        self.binding_shapes.insert(name.span.start, shape);
+                    }
+                }
+                StmtKind::If {
+                    condition,
+                    then_block,
+                    else_block,
+                } => {
+                    self.constrain(condition, Some(ValueType::Bool), parameters);
+                    self.constrain_body(&then_block.stmts, expected.clone(), parameters);
+                    if let Some(block) = else_block {
+                        self.constrain_body(&block.stmts, expected.clone(), parameters);
+                    }
+                }
+                StmtKind::While { condition, body } => {
+                    self.constrain(condition, Some(ValueType::Bool), parameters);
+                    self.constrain_body(&body.stmts, expected.clone(), parameters);
+                }
+                StmtKind::For { binding, body, .. } => {
+                    self.scopes.push(HashMap::from([(
+                        binding.text,
+                        (true, binding.span, None, None),
+                    )]));
+                    self.constrain_body(&body.stmts, expected.clone(), parameters);
+                    self.scopes.pop();
+                }
+                _ => {}
+            }
+        }
+        self.scopes.pop();
+    }
+    fn return_candidates(&self, statements: &[Stmt<'s>], output: &mut Vec<Shape>) {
+        for statement in statements {
+            match &statement.kind {
+                StmtKind::Return(value) => output.push(
+                    value
+                        .as_ref()
+                        .map_or(Shape::Typed(ValueType::Null), |v| self.shape(v)),
+                ),
+                StmtKind::If {
+                    then_block,
+                    else_block,
+                    ..
+                } => {
+                    self.return_candidates(&then_block.stmts, output);
+                    if let Some(block) = else_block {
+                        self.return_candidates(&block.stmts, output);
+                    }
+                }
+                StmtKind::While { body, .. } | StmtKind::For { body, .. } => {
+                    self.return_candidates(&body.stmts, output)
+                }
+                _ => {}
+            }
+        }
+    }
+    fn require_contract(&mut self, shape: &Shape, span: Span) {
+        if let Shape::Function(parameters, result, _) = shape
+            && (parameters.iter().any(Option::is_none) || !result.has_contract())
+        {
+            self.error(span, "dynamic-contract", "Function contract cannot be inferred completely; annotate dynamic parameters and return type");
         }
     }
     fn statements(&mut self, statements: &[Stmt<'s>]) {
@@ -363,9 +924,250 @@ impl<'s> Checker<'s> {
         self.scopes.pop();
         self.scope_spans.pop();
     }
+    fn contains_yield(statements: &[Stmt<'s>]) -> bool {
+        statements.iter().any(|statement| match &statement.kind {
+            StmtKind::Yield(_) => true,
+            StmtKind::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                Self::contains_yield(&then_block.stmts)
+                    || else_block
+                        .as_ref()
+                        .is_some_and(|block| Self::contains_yield(&block.stmts))
+            }
+            StmtKind::While { body, .. } | StmtKind::For { body, .. } => {
+                Self::contains_yield(&body.stmts)
+            }
+            _ => false,
+        })
+    }
+    fn known_suspending(&self, value: &Expr<'s>) -> bool {
+        if let Shape::Function(_, _, suspends) = self.shape(value) {
+            return suspends;
+        }
+        if let ExprKind::Name(name) = &value.kind {
+            self.scopes
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name.text))
+                .is_some_and(|binding| self.suspending_functions.contains(&binding.1.start))
+        } else {
+            false
+        }
+    }
+    fn declare_user_type(&mut self, name: &Name<'s>) {
+        if self.scopes.len() != 1 {
+            self.error(
+                name.span,
+                "nested-type",
+                "User types must be declared at module scope",
+            );
+        }
+        let reserved = crate::builtin_catalog()
+            .iter()
+            .any(|(n, _)| *n == name.text)
+            || matches!(name.text, "Option" | "Result" | "list" | "tuple")
+            || ValueType::annotation(&crate::Type {
+                name: name.clone(),
+                arguments: Vec::new(),
+            })
+            .is_ok();
+        if reserved {
+            self.error(
+                name.span,
+                "reserved-type",
+                "Type name is reserved by the language",
+            );
+        }
+        self.declare(name, true, name.span.end);
+        let identity = self.identity(name.text);
+        self.type_names
+            .insert(name.text.to_owned(), identity.clone());
+        self.user_types.insert(
+            identity,
+            Rc::new(UserDefinition {
+                span: name.span,
+                module: self.module.clone(),
+                field_spans: HashMap::new(),
+                variant_spans: HashMap::new(),
+                fields: None,
+                variants: Default::default(),
+            }),
+        );
+    }
+    fn user_constructor(&self, expression: &Expr<'s>) -> Option<(String, Option<String>)> {
+        if let Shape::Constructor(name, variant) = self.shape(expression) {
+            Some((name, variant))
+        } else {
+            None
+        }
+    }
+    fn struct_fields(&self, shape: &Shape) -> Option<std::collections::BTreeMap<String, Shape>> {
+        let Shape::Typed(ValueType::User(name)) = shape else {
+            return None;
+        };
+        Some(
+            self.user_types
+                .get(name)?
+                .fields
+                .as_ref()?
+                .iter()
+                .map(|(name, ty)| (name.clone(), Shape::Typed(ty.clone())))
+                .collect(),
+        )
+    }
     fn statement(&mut self, statement: &Stmt<'s>) {
         match &statement.kind {
-            StmtKind::Import(name) => self.declare(name, true, statement.span.end),
+            StmtKind::Struct { name, fields } => {
+                self.declare_user_type(name);
+                let field_spans = fields
+                    .iter()
+                    .map(|(n, _)| (n.text.to_owned(), n.span))
+                    .collect();
+                if self.collect_members {
+                    for (field, _) in fields {
+                        self.references.push(NameReference {
+                            usage: field.span,
+                            definition: Some(field.span),
+                            definition_module: None,
+                        });
+                    }
+                }
+                let fields = fields
+                    .iter()
+                    .filter_map(|(name, ty)| {
+                        self.checked_annotation(ty)
+                            .map(|ty| (name.text.to_owned(), ty))
+                    })
+                    .collect();
+                if let Some(definition) = self.user_types.get_mut(&self.identity(name.text)) {
+                    let definition = Rc::make_mut(definition);
+                    definition.fields = Some(fields);
+                    definition.field_spans = field_spans;
+                }
+                self.constructor_aliases
+                    .insert(name.span.start, (self.identity(name.text), None));
+                self.function_results
+                    .insert(name.span.start, ValueType::User(self.identity(name.text)));
+            }
+            StmtKind::Enum { name, variants } => {
+                self.declare_user_type(name);
+                let variant_spans = variants
+                    .iter()
+                    .map(|(n, _)| (n.text.to_owned(), n.span))
+                    .collect();
+                if self.collect_members {
+                    for (variant, _) in variants {
+                        self.references.push(NameReference {
+                            usage: variant.span,
+                            definition: Some(variant.span),
+                            definition_module: None,
+                        });
+                    }
+                }
+                let mut shapes = std::collections::BTreeMap::new();
+                let mut contracts = std::collections::BTreeMap::new();
+                for (variant, types) in variants {
+                    let types = types
+                        .iter()
+                        .filter_map(|ty| self.checked_annotation(ty))
+                        .collect();
+                    contracts.insert(variant.text.to_owned(), types);
+                    shapes.insert(
+                        variant.text.to_owned(),
+                        Shape::Constructor(self.identity(name.text), Some(variant.text.to_owned())),
+                    );
+                }
+                if let Some(definition) = self.user_types.get_mut(&self.identity(name.text)) {
+                    let definition = Rc::make_mut(definition);
+                    definition.variants = contracts;
+                    definition.variant_spans = variant_spans;
+                }
+                self.record_fields
+                    .insert(name.span.start, shapes.keys().cloned().collect());
+                self.binding_shapes
+                    .insert(name.span.start, Shape::Record(shapes));
+            }
+            StmtKind::Export(names) => {
+                if self.scopes.len() != 1 {
+                    self.error(
+                        statement.span,
+                        "nested-export",
+                        "Exports must be declared at module scope",
+                    );
+                }
+                for name in names {
+                    if !self.exports.insert(name.text.to_owned()) {
+                        self.error(
+                            name.span,
+                            "duplicate-export",
+                            "Name is exported more than once",
+                        );
+                    }
+                    let definition = self
+                        .scopes
+                        .iter()
+                        .rev()
+                        .find_map(|scope| scope.get(name.text))
+                        .map(|binding| binding.1);
+                    if definition.is_none() {
+                        self.error(
+                            name.span,
+                            "unknown-export",
+                            "Export must refer to an existing module binding",
+                        );
+                    }
+                    if self.module.is_some()
+                        && let Some(binding) = self.scopes[0].get(name.text)
+                    {
+                        self.require_contract(&self.binding_shape(binding), name.span);
+                    }
+                    self.references.push(NameReference {
+                        definition_module: None,
+                        usage: name.span,
+                        definition,
+                    });
+                }
+            }
+            StmtKind::Import(name) => {
+                self.declare(name, true, statement.span.end);
+                self.imports.insert(name.text.to_owned());
+                self.binding_modules
+                    .insert(name.span.start, name.text.to_owned());
+                if let Some(interface) = self
+                    .module_exports
+                    .get(name.text)
+                    .filter(|i| !i.fields.is_empty())
+                    .cloned()
+                {
+                    for (id, definition) in &interface.types {
+                        self.user_types.insert(id.clone(), definition.clone());
+                    }
+                    for (field, shape) in &interface.fields {
+                        let id = match shape {
+                            Shape::Constructor(id, _) => Some(id.clone()),
+                            Shape::Record(fields) => fields.values().find_map(|s| {
+                                if let Shape::Constructor(id, _) = s {
+                                    Some(id.clone())
+                                } else {
+                                    None
+                                }
+                            }),
+                            _ => None,
+                        };
+                        if let Some(id) = id {
+                            self.type_names
+                                .insert(format!("{}.{}", name.text, field), id);
+                        }
+                    }
+                    self.record_fields
+                        .insert(name.span.start, interface.fields.keys().cloned().collect());
+                    self.binding_shapes
+                        .insert(name.span.start, Shape::Record(interface.fields.clone()));
+                }
+            }
             StmtKind::Destructure { pattern, value } => {
                 self.expr(value);
                 if self.calls {
@@ -382,7 +1184,13 @@ impl<'s> Checker<'s> {
                             self.record_fields
                                 .insert(binding.1.start, fields.keys().cloned().collect());
                         }
-                        if matches!(shape, Shape::Record(_) | Shape::Tuple(_) | Shape::List(_)) {
+                        if matches!(
+                            shape,
+                            Shape::Record(_)
+                                | Shape::Tuple(_)
+                                | Shape::List(_)
+                                | Shape::Alternatives(_)
+                        ) {
                             self.binding_shapes.insert(binding.1.start, shape);
                         }
                         if let Some(builtin) = builtin {
@@ -390,6 +1198,9 @@ impl<'s> Checker<'s> {
                         }
                         if let Some(parameters) = parameters {
                             self.function_parameters.insert(binding.1.start, parameters);
+                        }
+                        if result != Shape::Unknown {
+                            self.function_shapes.insert(binding.1.start, result.clone());
                         }
                         if let Shape::Typed(result) = result {
                             self.function_results.insert(binding.1.start, result);
@@ -406,6 +1217,9 @@ impl<'s> Checker<'s> {
                 body,
                 result,
             } => {
+                if Self::contains_yield(&body.stmts) {
+                    self.suspending_functions.insert(name.span.start);
+                }
                 let result_type = result.as_ref().and_then(|ty| self.checked_annotation(ty));
                 if self.calls
                     && let Some(expected) = &result_type
@@ -421,14 +1235,14 @@ impl<'s> Checker<'s> {
                 if let Some(ty) = &result_type {
                     self.function_results.insert(name.span.start, ty.clone());
                 }
-                self.return_types.push(result_type);
+                self.return_types.push(result_type.clone());
+                self.inferred_returns.push(Vec::new());
                 let parameter_types = parameters
                     .iter()
                     .map(|parameter| {
-                        parameter
-                            .ty
-                            .as_ref()
-                            .and_then(|ty| ValueType::annotation(ty).ok())
+                        parameter.ty.as_ref().and_then(|ty| {
+                            ValueType::annotation_with(ty, &|name| self.resolve_type(name)).ok()
+                        })
                     })
                     .collect();
                 self.function_parameters
@@ -453,7 +1267,85 @@ impl<'s> Checker<'s> {
                         self.pattern_type(&parameter.pattern, &ty);
                     }
                 }
+                let parameter_ids: std::collections::HashSet<_> = self
+                    .scopes
+                    .last()
+                    .unwrap()
+                    .values()
+                    .map(|b| b.1.start)
+                    .collect();
+                let mut seed = result_type.clone();
+                for _ in 0..4 {
+                    let previous_seed = seed.clone();
+                    let previous_parameters: Vec<_> = parameter_ids
+                        .iter()
+                        .map(|id| self.binding_types.get(id).cloned())
+                        .collect();
+                    self.constrain_body(&body.stmts, seed.clone(), &parameter_ids);
+                    let mut candidates = Vec::new();
+                    self.return_candidates(&body.stmts, &mut candidates);
+                    let known: Vec<_> = candidates
+                        .iter()
+                        .filter_map(|s| {
+                            if let Shape::Typed(t) = s {
+                                Some(t.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    if seed.is_none() && !known.is_empty() && known.iter().all(|t| t == &known[0]) {
+                        seed = Some(known[0].clone());
+                        self.function_results
+                            .insert(name.span.start, known[0].clone());
+                    }
+                    let inferred = parameters
+                        .iter()
+                        .map(|p| {
+                            p.ty.as_ref()
+                                .and_then(|t| {
+                                    ValueType::annotation_with(t, &|n| self.resolve_type(n)).ok()
+                                })
+                                .or_else(|| {
+                                    if let ExprKind::Name(n) = &p.pattern.kind {
+                                        self.scopes
+                                            .last()
+                                            .unwrap()
+                                            .get(n.text)
+                                            .and_then(|b| self.binding_types.get(&b.1.start))
+                                            .cloned()
+                                    } else {
+                                        None
+                                    }
+                                })
+                        })
+                        .collect();
+                    self.function_parameters.insert(name.span.start, inferred);
+                    if seed == previous_seed
+                        && parameter_ids
+                            .iter()
+                            .zip(&previous_parameters)
+                            .all(|(id, previous)| self.binding_types.get(id) == previous.as_ref())
+                    {
+                        break;
+                    }
+                }
                 self.statements(&body.stmts);
+                let mut returns = self.inferred_returns.pop().unwrap();
+                if result_type.is_none() {
+                    if BlockExits::inspect(&body.stmts).next {
+                        returns.push(Shape::Typed(ValueType::Null));
+                    }
+                    let inferred = if returns.iter().all(|shape| Some(shape) == returns.first()) {
+                        returns.first().cloned().unwrap_or(Shape::Unknown)
+                    } else {
+                        Shape::Alternatives(returns)
+                    };
+                    if let Shape::Typed(ty) = &inferred {
+                        self.function_results.insert(name.span.start, ty.clone());
+                    }
+                    self.function_shapes.insert(name.span.start, inferred);
+                }
                 self.return_types.pop();
                 self.scopes.pop();
                 self.scope_spans.pop();
@@ -465,6 +1357,7 @@ impl<'s> Checker<'s> {
                 ty,
             } => {
                 self.expr(value);
+                let imported_module = self.expression_module(value);
                 let annotation = ty.as_ref().and_then(|ty| self.checked_annotation(ty));
                 if self.calls
                     && let Some(expected) = &annotation
@@ -487,14 +1380,10 @@ impl<'s> Checker<'s> {
                     None
                 };
                 // Inspect the initializer before introducing its binding (shadowing).
-                let known_type = if *constant {
-                    annotation.or_else(|| match self.shape(value) {
-                        Shape::Typed(ty) => Some(ty),
-                        _ => None,
-                    })
-                } else {
-                    None
-                };
+                let known_type = annotation.or_else(|| match self.shape(value) {
+                    Shape::Typed(ty) => Some(ty),
+                    _ => None,
+                });
                 let callable_result = if *constant {
                     self.call_result_shape(value)
                 } else {
@@ -515,15 +1404,31 @@ impl<'s> Checker<'s> {
                 } else {
                     None
                 };
+                let suspending = *constant && self.known_suspending(value);
+                if *constant && let Some(module) = imported_module {
+                    self.binding_modules.insert(name.span.start, module);
+                }
+                let constructor = if *constant {
+                    self.user_constructor(value)
+                } else {
+                    None
+                };
                 let binding_shape = if *constant {
                     self.shape(value)
                 } else {
                     Shape::Unknown
                 };
                 self.declare(name, *constant, statement.span.end);
+                if suspending {
+                    self.suspending_functions.insert(name.span.start);
+                }
+                if let Some(constructor) = constructor {
+                    self.constructor_aliases
+                        .insert(name.span.start, constructor);
+                }
                 if matches!(
                     binding_shape,
-                    Shape::Record(_) | Shape::Tuple(_) | Shape::List(_)
+                    Shape::Record(_) | Shape::Tuple(_) | Shape::List(_) | Shape::Alternatives(_)
                 ) {
                     self.binding_shapes.insert(name.span.start, binding_shape);
                 }
@@ -535,6 +1440,10 @@ impl<'s> Checker<'s> {
                 }
                 if let Some(parameters) = callable_parameters {
                     self.function_parameters.insert(name.span.start, parameters);
+                }
+                if callable_result != Shape::Unknown {
+                    self.function_shapes
+                        .insert(name.span.start, callable_result.clone());
                 }
                 if let Shape::Typed(ty) = callable_result {
                     self.function_results.insert(name.span.start, ty);
@@ -556,6 +1465,16 @@ impl<'s> Checker<'s> {
                     .2 = arity;
             }
             StmtKind::Return(value) => {
+                if let Some(value) = value {
+                    self.expr(value);
+                }
+                let returned = value
+                    .as_ref()
+                    .map_or(Shape::Typed(ValueType::Null), |value| self.shape(value));
+                if let Some(returns) = self.inferred_returns.last_mut() {
+                    returns.push(returned);
+                }
+
                 if self.calls
                     && let Some(Some(expected)) = self.return_types.last()
                 {
@@ -569,9 +1488,6 @@ impl<'s> Checker<'s> {
                             "Return value does not match result annotation",
                         );
                     }
-                }
-                if let Some(value) = value {
-                    self.expr(value);
                 }
             }
             StmtKind::Yield(value) | StmtKind::Expr(value) => self.expr(value),
@@ -615,7 +1531,10 @@ impl<'s> Checker<'s> {
                     self.record_fields
                         .insert(binding.span.start, fields.keys().cloned().collect());
                 }
-                if matches!(element, Shape::Record(_) | Shape::Tuple(_) | Shape::List(_)) {
+                if matches!(
+                    element,
+                    Shape::Record(_) | Shape::Tuple(_) | Shape::List(_) | Shape::Alternatives(_)
+                ) {
                     self.binding_shapes.insert(binding.span.start, element);
                 }
                 self.statements(&body.stmts);
@@ -623,6 +1542,196 @@ impl<'s> Checker<'s> {
                 self.scope_spans.pop();
             }
             StmtKind::Break | StmtKind::Continue | StmtKind::Error => {}
+        }
+    }
+    fn irrefutable(pattern: &Expr<'s>) -> bool {
+        match &pattern.kind {
+            ExprKind::Name(_) => true,
+            ExprKind::Tuple(items) => items.iter().all(Self::irrefutable),
+            ExprKind::Map(fields) => fields.iter().all(|(_, value)| Self::irrefutable(value)),
+            _ => false,
+        }
+    }
+    fn check_exhaustiveness(&mut self, value: &Expr<'s>, arms: &[crate::MatchArm<'s>]) {
+        if !self.calls {
+            return;
+        }
+        let shape = self.shape(value);
+        if let Some(fields) = self.struct_fields(&shape) {
+            let covered =
+                arms.iter()
+                    .filter(|arm| arm.guard.is_none())
+                    .any(|arm| {
+                        match &arm.pattern.kind {
+                    ExprKind::Name(_) => true,
+                    ExprKind::Map(patterns) => patterns.iter().all(|(key, pattern)| {
+                        matches!(&key.kind, ExprKind::Name(name) if fields.contains_key(name.text))
+                            && Self::irrefutable(pattern)
+                    }),
+                    _ => false,
+                }
+                    });
+            if !covered {
+                self.error(
+                    value.span,
+                    "non-exhaustive-match",
+                    "Struct match requires an irrefutable pattern or fallback",
+                );
+            }
+            return;
+        }
+        let required = match &shape {
+            Shape::Typed(ValueType::Bool) => vec!["true".to_owned(), "false".to_owned()],
+            Shape::Typed(ValueType::User(name)) => self
+                .user_types
+                .get(name)
+                .filter(|d| d.fields.is_none())
+                .map(|d| d.variants.keys().cloned().collect())
+                .unwrap_or_default(),
+            Shape::Typed(ValueType::Option(_)) => vec!["Some".into(), "None".into()],
+            Shape::Typed(ValueType::Result(_, _)) => vec!["Ok".into(), "Err".into()],
+            _ => return,
+        };
+        if required.is_empty() {
+            return;
+        }
+        let mut covered = std::collections::HashSet::new();
+        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
+            match &arm.pattern.kind {
+                ExprKind::Name(_) => return,
+                ExprKind::Bool(value) => {
+                    covered.insert(value.to_string());
+                }
+                ExprKind::Call { callee, arguments } if arguments.iter().all(Self::irrefutable) => {
+                    if let Some((name, Some(variant))) = self.user_constructor(callee) {
+                        if shape == Shape::Typed(ValueType::User(name)) {
+                            covered.insert(variant);
+                        }
+                    } else if let ExprKind::Name(name) = &callee.kind {
+                        covered.insert(name.text.to_owned());
+                    }
+                }
+                _ => {}
+            }
+        }
+        if required.iter().any(|variant| !covered.contains(variant)) {
+            self.error(value.span, "non-exhaustive-match", "Match must cover every variant; guarded or refutable payload patterns require a fallback");
+        }
+    }
+    fn match_pattern_types(&mut self, pattern: &Expr<'s>, shape: &Shape) {
+        if self.collect_members
+            && let ExprKind::Call { callee, .. } = &pattern.kind
+        {
+            self.expr(callee);
+        }
+        if self.collect_members
+            && let (Shape::Typed(ValueType::User(id)), ExprKind::Map(fields)) =
+                (shape, &pattern.kind)
+            && let Some(definition) = self.user_types.get(id)
+        {
+            for (key, _) in fields {
+                if let ExprKind::Name(field) = &key.kind
+                    && let Some(span) = definition.field_spans.get(field.text)
+                {
+                    self.references.push(NameReference {
+                        usage: field.span,
+                        definition: Some(*span),
+                        definition_module: definition
+                            .module
+                            .clone()
+                            .filter(|m| self.module.as_ref() != Some(m)),
+                    });
+                }
+            }
+        }
+        if self.calls
+            && matches!(shape, Shape::Typed(_))
+            && matches!(pattern.kind, ExprKind::Tuple(_) | ExprKind::Map(_))
+        {
+            self.check_pattern_shape(pattern, shape);
+        }
+        match &pattern.kind {
+            ExprKind::Name(_) => {
+                if let Shape::Typed(ty) = shape {
+                    self.pattern_type(pattern, ty);
+                }
+            }
+            ExprKind::Call { callee, arguments } => {
+                if let Some((name, Some(variant))) = self.user_constructor(callee) {
+                    if shape.rejects(&ValueType::User(name.clone())) {
+                        self.error(
+                            pattern.span,
+                            "pattern-type",
+                            "Pattern variant belongs to another type",
+                        );
+                    }
+                    let types = self.user_types[&name].variants[&variant].clone();
+                    if arguments.len() != types.len() {
+                        self.error(
+                            pattern.span,
+                            "pattern-arity",
+                            "Variant payload count does not match declaration",
+                        );
+                    }
+                    for (pattern, ty) in arguments.iter().zip(types) {
+                        self.match_pattern_types(pattern, &Shape::Typed(ty));
+                    }
+                } else if matches!(&callee.kind, ExprKind::Member { .. })
+                    && !self.unresolved_import(callee)
+                {
+                    self.error(
+                        callee.span,
+                        "unknown-variant",
+                        "Unknown enum variant pattern",
+                    );
+                } else if let (ExprKind::Name(name), Shape::Typed(ty)) = (&callee.kind, shape) {
+                    let payload = match (name.text, ty) {
+                        ("Some", ValueType::Option(ty))
+                        | ("Ok", ValueType::Result(ty, _))
+                        | ("Err", ValueType::Result(_, ty)) => Some(ty.as_ref().clone()),
+                        ("None", ValueType::Option(_)) => None,
+                        _ => {
+                            if self.calls {
+                                self.error(
+                                    pattern.span,
+                                    "pattern-type",
+                                    "Variant pattern does not match value type",
+                                );
+                            }
+                            None
+                        }
+                    };
+                    if let (Some(ty), Some(pattern)) = (payload, arguments.first()) {
+                        self.match_pattern_types(pattern, &Shape::Typed(ty));
+                    }
+                }
+                self.expr(callee);
+            }
+            ExprKind::Tuple(patterns) => {
+                if let Shape::Typed(ValueType::Tuple(types)) = shape {
+                    for (pattern, ty) in patterns.iter().zip(types) {
+                        self.match_pattern_types(pattern, &Shape::Typed(ty.clone()));
+                    }
+                }
+            }
+            ExprKind::Map(patterns) => {
+                if let Some(fields) = self.struct_fields(shape) {
+                    for (key, pattern) in patterns {
+                        if let ExprKind::Name(name) = &key.kind {
+                            if let Some(shape) = fields.get(name.text) {
+                                self.match_pattern_types(pattern, shape);
+                            } else if self.calls {
+                                self.error(
+                                    name.span,
+                                    "unknown-struct-field",
+                                    "Unknown struct field in pattern",
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
     fn match_bindings(&mut self, pattern: &Expr<'s>, start: usize) {
@@ -678,8 +1787,106 @@ impl<'s> Checker<'s> {
             ),
         }
     }
+    fn annotation_references(&mut self, ty: &crate::Type<'s>) {
+        if let Some(id) = self.resolve_type(ty.name.text)
+            && let Some(definition) = self.user_types.get(&id)
+        {
+            let start = ty.name.span.end - ty.name.text.rsplit('.').next().unwrap().trim().len();
+            let module = definition
+                .module
+                .clone()
+                .filter(|m| self.module.as_ref() != Some(m));
+            // A qualified annotation refers to the public alias, which may reexport
+            // a differently named nominal type from another module.
+            let public = ty.name.text.split_once('.').and_then(|(m, n)| {
+                self.module_exports
+                    .get(m.trim())
+                    .and_then(|i| i.symbols.get(n.trim()))
+                    .map(|span| (m.trim().to_owned(), *span))
+            });
+            let (span, module) =
+                public.map_or((definition.span, module), |(m, span)| (span, Some(m)));
+            self.references.push(NameReference {
+                usage: Span::new(start, ty.name.span.end),
+                definition: Some(span),
+                definition_module: module,
+            });
+        }
+        for argument in &ty.arguments {
+            self.annotation_references(argument);
+        }
+    }
+    fn unresolved_import(&self, expression: &Expr<'s>) -> bool {
+        match &expression.kind {
+            ExprKind::Name(name) => {
+                self.imports.contains(name.text) && !self.module_exports.contains_key(name.text)
+            }
+            ExprKind::Member { object, .. } => self.unresolved_import(object),
+            _ => false,
+        }
+    }
+    fn expression_module(&self, expression: &Expr<'s>) -> Option<String> {
+        let ExprKind::Name(name) = &expression.kind else {
+            return None;
+        };
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|s| s.get(name.text))
+            .and_then(|b| self.binding_modules.get(&b.1.start))
+            .cloned()
+    }
+    fn member_reference(&mut self, object: &Expr<'s>, field: &Name<'s>) {
+        if !self.collect_members {
+            return;
+        }
+        if let Some(module) = self.expression_module(object)
+            && let Some(span) = self
+                .module_exports
+                .get(&module)
+                .and_then(|i| i.symbols.get(field.text))
+        {
+            self.references.push(NameReference {
+                usage: field.span,
+                definition: Some(*span),
+                definition_module: Some(module),
+            });
+            return;
+        }
+        let shape = self.shape(object);
+        let id = match &shape {
+            Shape::Typed(ValueType::User(id)) => Some(id.clone()),
+            Shape::Record(fields) => fields.values().find_map(|s| {
+                if let Shape::Constructor(id, _) = s {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            }),
+            _ => None,
+        };
+        if let Some(id) = id
+            && let Some(definition) = self.user_types.get(&id)
+            && let Some(span) = definition
+                .field_spans
+                .get(field.text)
+                .or_else(|| definition.variant_spans.get(field.text))
+        {
+            self.references.push(NameReference {
+                usage: field.span,
+                definition: Some(*span),
+                definition_module: definition
+                    .module
+                    .clone()
+                    .filter(|m| self.module.as_ref() != Some(m)),
+            });
+        }
+    }
     fn checked_annotation(&mut self, ty: &crate::Type<'s>) -> Option<ValueType> {
-        match ValueType::annotation(ty) {
+        if self.collect_members {
+            self.annotation_references(ty);
+        }
+        match ValueType::annotation_with(ty, &|name| self.resolve_type(name)) {
             Ok(ty) => Some(ty),
             Err(error) => {
                 if self.calls {
@@ -694,6 +1901,30 @@ impl<'s> Checker<'s> {
         }
     }
     fn check_pattern_shape(&mut self, pattern: &Expr<'s>, shape: &Shape) {
+        if self.collect_members
+            && let (Shape::Typed(ValueType::User(id)), ExprKind::Map(fields)) =
+                (shape, &pattern.kind)
+            && let Some(definition) = self.user_types.get(id)
+        {
+            for (key, _) in fields {
+                if let ExprKind::Name(field) = &key.kind
+                    && let Some(span) = definition.field_spans.get(field.text)
+                {
+                    self.references.push(NameReference {
+                        usage: field.span,
+                        definition: Some(*span),
+                        definition_module: definition
+                            .module
+                            .clone()
+                            .filter(|m| self.module.as_ref() != Some(m)),
+                    });
+                }
+            }
+        }
+        if let Some(fields) = self.struct_fields(shape) {
+            self.check_pattern_shape(pattern, &Shape::Record(fields));
+            return;
+        }
         if let ExprKind::Map(patterns) = &pattern.kind {
             match shape {
                 Shape::Record(fields) => {
@@ -718,7 +1949,11 @@ impl<'s> Checker<'s> {
                         "Record pattern requires a record value",
                     );
                 }
-                Shape::Unknown | Shape::Unsupported => {}
+                Shape::Unknown
+                | Shape::Unsupported
+                | Shape::Alternatives(_)
+                | Shape::Constructor(..)
+                | Shape::Function(..) => {}
             }
             return;
         }
@@ -823,6 +2058,10 @@ impl<'s> Checker<'s> {
         shape: &Shape,
         signatures: &mut Vec<PatternSignature<'s>>,
     ) {
+        if let Some(fields) = self.struct_fields(shape) {
+            self.pattern_shape_signatures(pattern, &Shape::Record(fields), signatures);
+            return;
+        }
         match (&pattern.kind, shape) {
             (ExprKind::Name(name), _) if name.text != "_" => {
                 let ty = if let Shape::Typed(ty) = shape {
@@ -893,6 +2132,16 @@ impl<'s> Checker<'s> {
         }
     }
     fn known_arity(&self, expression: &Expr<'s>) -> Option<Vec<std::ops::RangeInclusive<usize>>> {
+        if let Shape::Function(parameters, _, _) = self.shape(expression) {
+            let n = parameters.len();
+            return Some(std::iter::once(n..=n).collect());
+        }
+        if let Some((name, variant)) = self.user_constructor(expression) {
+            let count = variant
+                .as_ref()
+                .map_or(1, |variant| self.user_types[&name].variants[variant].len());
+            return Some(std::iter::once(count..=count).collect());
+        }
         match &expression.kind {
             ExprKind::Lambda { parameters, .. } => {
                 Some(std::iter::once(parameters.len()..=parameters.len()).collect())
@@ -957,12 +2206,31 @@ impl<'s> Checker<'s> {
         self.host_functions.get(name.text).cloned()
     }
     fn known_record_fields(&self, expression: &Expr<'s>) -> Option<Vec<String>> {
-        match self.shape(expression) {
+        let shape = self.shape(expression);
+        if let Some(fields) = self.struct_fields(&shape) {
+            return Some(fields.into_keys().collect());
+        }
+        match shape {
             Shape::Record(fields) => Some(fields.into_keys().collect()),
             _ => None,
         }
     }
     fn known_user_parameters(&self, expression: &Expr<'s>) -> Option<Vec<Option<ValueType>>> {
+        if let Shape::Function(parameters, _, _) = self.shape(expression) {
+            return Some(parameters);
+        }
+        if let Some((name, variant)) = self.user_constructor(expression) {
+            return Some(variant.map_or_else(
+                || vec![None],
+                |variant| {
+                    self.user_types[&name].variants[&variant]
+                        .iter()
+                        .cloned()
+                        .map(Some)
+                        .collect()
+                },
+            ));
+        }
         let ExprKind::Name(name) = &expression.kind else {
             return None;
         };
@@ -974,6 +2242,12 @@ impl<'s> Checker<'s> {
             .cloned()
     }
     fn call_result_shape(&self, callee: &Expr<'s>) -> Shape {
+        if let Shape::Function(_, result, _) = self.shape(callee) {
+            return *result;
+        }
+        if let Some((name, _)) = self.user_constructor(callee) {
+            return Shape::Typed(ValueType::User(name));
+        }
         if let Some(builtin) = self.known_builtin(callee) {
             use crate::Builtin;
             let size = match builtin {
@@ -1017,9 +2291,14 @@ impl<'s> Checker<'s> {
                 .find_map(|scope| scope.get(name.text))
         {
             return self
-                .function_results
+                .function_shapes
                 .get(&binding.1.start)
-                .map_or(Shape::Unknown, |ty| Shape::Typed(ty.clone()));
+                .cloned()
+                .unwrap_or_else(|| {
+                    self.function_results
+                        .get(&binding.1.start)
+                        .map_or(Shape::Unknown, |ty| Shape::Typed(ty.clone()))
+                });
         }
         if let ExprKind::Name(name) = &callee.kind
             && !self
@@ -1058,22 +2337,23 @@ impl<'s> Checker<'s> {
         }
     }
     fn shape(&self, expression: &Expr<'s>) -> Shape {
+        if let Some(shape) = self
+            .expression_shapes
+            .get(&(expression.span.start, expression.span.end))
+        {
+            return shape.clone();
+        }
         match &expression.kind {
+            ExprKind::Try(value) => match self.shape(value) {
+                Shape::Typed(ValueType::Option(ty) | ValueType::Result(ty, _)) => Shape::Typed(*ty),
+                _ => Shape::Unknown,
+            },
             ExprKind::Name(name) => self
                 .scopes
                 .iter()
                 .rev()
                 .find_map(|scope| scope.get(name.text))
-                .map_or(Shape::Unknown, |binding| {
-                    self.binding_shapes
-                        .get(&binding.1.start)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            self.binding_types
-                                .get(&binding.1.start)
-                                .map_or(Shape::Unknown, |ty| Shape::Typed(ty.clone()))
-                        })
-                }),
+                .map_or(Shape::Unknown, |binding| self.binding_shape(binding)),
             ExprKind::Number(_) => Shape::Typed(ValueType::Number),
             ExprKind::String(_) => Shape::Typed(ValueType::String),
             ExprKind::Bool(_) => Shape::Typed(ValueType::Bool),
@@ -1138,6 +2418,9 @@ impl<'s> Checker<'s> {
                 result
             }
             ExprKind::Member { object, field } => {
+                if let Some(fields) = self.struct_fields(&self.shape(object)) {
+                    return fields.get(field.text).cloned().unwrap_or(Shape::Unknown);
+                }
                 if let Shape::Record(fields) = self.shape(object) {
                     return fields.get(field.text).cloned().unwrap_or(Shape::Unknown);
                 }
@@ -1240,18 +2523,21 @@ impl<'s> Checker<'s> {
                 if left == self.shape(else_value) {
                     left
                 } else {
-                    Shape::Unknown
+                    Shape::Alternatives(vec![left, self.shape(else_value)])
                 }
             }
             _ => Shape::Unknown,
         }
     }
     fn known_non_callable(&self, value: &Expr<'s>) -> bool {
-        matches!(value.kind, ExprKind::Map(_))
-            || matches!(
-                self.shape(value),
-                Shape::Typed(_) | Shape::List(_) | Shape::Tuple(_) | Shape::Record(_)
-            )
+        fn data(shape: &Shape) -> bool {
+            match shape {
+                Shape::Alternatives(shapes) => shapes.iter().any(data),
+                Shape::Typed(_) | Shape::List(_) | Shape::Tuple(_) | Shape::Record(_) => true,
+                _ => false,
+            }
+        }
+        matches!(value.kind, ExprKind::Map(_)) || data(&self.shape(value))
     }
     fn check_math_arguments(&mut self, builtin: crate::Builtin, supplied: &[(Span, Shape)]) {
         use crate::Builtin;
@@ -1360,6 +2646,16 @@ impl<'s> Checker<'s> {
         arguments: &[Expr<'s>],
         implicit: Option<(Span, Shape)>,
     ) -> Shape {
+        for argument in arguments {
+            self.expr(argument);
+        }
+        if self.calls && self.known_suspending(callee) {
+            self.error(
+                callee.span,
+                "coroutine-call",
+                "Suspending functions require spawn_coroutine instead of a synchronous call",
+            );
+        }
         if self.calls
             && let Some(builtin) = self.known_builtin(callee)
         {
@@ -1378,6 +2674,64 @@ impl<'s> Checker<'s> {
                 .chain(arguments.iter().map(|arg| self.shape(arg)))
                 .collect::<Vec<_>>(),
         );
+        if self.calls
+            && let Some((name, None)) = self.user_constructor(callee)
+        {
+            if self.collect_members
+                && let Some(Expr {
+                    kind: ExprKind::Map(fields),
+                    ..
+                }) = arguments.first()
+                && let Some(definition) = self.user_types.get(&name)
+            {
+                for (key, _) in fields {
+                    if let ExprKind::Name(field) = &key.kind
+                        && let Some(span) = definition.field_spans.get(field.text)
+                    {
+                        self.references.push(NameReference {
+                            usage: field.span,
+                            definition: Some(*span),
+                            definition_module: definition
+                                .module
+                                .clone()
+                                .filter(|m| self.module.as_ref() != Some(m)),
+                        });
+                    }
+                }
+            }
+
+            let supplied = implicit
+                .as_ref()
+                .map(|(_, shape)| shape.clone())
+                .or_else(|| arguments.first().map(|arg| self.shape(arg)));
+            if let Some(shape) = supplied {
+                if let Shape::Record(fields) = shape {
+                    let expected = self.user_types[&name].fields.clone().unwrap_or_default();
+                    if fields.keys().ne(expected.keys()) {
+                        self.error(
+                            callee.span,
+                            "struct-fields",
+                            "Struct fields must exactly match declaration",
+                        );
+                    }
+                    for (field, ty) in expected {
+                        if fields.get(&field).is_some_and(|shape| shape.rejects(&ty)) {
+                            self.error(
+                                callee.span,
+                                "struct-field-type",
+                                "Struct field type does not match declaration",
+                            );
+                        }
+                    }
+                } else if !matches!(shape, Shape::Unknown) {
+                    self.error(
+                        callee.span,
+                        "struct-fields",
+                        "Struct constructor requires a record",
+                    );
+                }
+            }
+        }
         if self.calls && self.known_non_callable(callee) {
             self.error(
                 callee.span,
@@ -1389,6 +2743,17 @@ impl<'s> Checker<'s> {
             && let Some(builtin) = self.known_builtin(callee)
         {
             for &(position, expected) in builtin.callback_arities() {
+                if let Some(index) = position.checked_sub(usize::from(implicit.is_some()))
+                    && let Some(callback) = arguments.get(index)
+                    && self.known_suspending(callback)
+                {
+                    self.error(
+                        callback.span,
+                        "coroutine-call",
+                        "Synchronous callbacks cannot suspend",
+                    );
+                }
+
                 if let Some(index) = position.checked_sub(usize::from(implicit.is_some()))
                     && let Some(callback) = arguments.get(index)
                     && self.known_non_callable(callback)
@@ -1468,9 +2833,6 @@ impl<'s> Checker<'s> {
             }
         }
         self.expr(callee);
-        for argument in arguments {
-            self.expr(argument);
-        }
         result_shape
     }
     fn condition(&mut self, expression: &Expr<'s>) {
@@ -1485,6 +2847,19 @@ impl<'s> Checker<'s> {
     }
     fn expr(&mut self, expr: &Expr<'s>) {
         match &expr.kind {
+            ExprKind::Try(value) => {
+                if self.calls {
+                    let operand = self.shape(value);
+                    let result = self.return_types.last().cloned().flatten();
+                    match (&operand, result.as_ref()) {
+                        (Shape::Typed(ValueType::Option(_)), Some(ValueType::Option(_))) => {},
+                        (Shape::Typed(ValueType::Result(_, error)), Some(ValueType::Result(_, expected))) if !disjoint(error, expected) => {},
+                        (Shape::Unknown, Some(ValueType::Option(_) | ValueType::Result(_, _))) => {},
+                        _ => self.error(expr.span, "try-type", "? requires Option or Result compatible with the enclosing function return type"),
+                    }
+                }
+                self.expr(value);
+            }
             ExprKind::If {
                 condition,
                 then_value,
@@ -1495,16 +2870,41 @@ impl<'s> Checker<'s> {
                 self.expr(else_value);
             }
             ExprKind::Lambda { parameters, body } => {
+                self.return_types.push(None);
+                self.inferred_returns.push(Vec::new());
                 self.scopes.push(HashMap::new());
                 self.scope_spans.push(body.span);
                 for parameter in parameters {
                     self.pattern(parameter, body.span.start);
                 }
                 self.expr(body);
+                self.return_types.pop();
+                self.inferred_returns.pop();
                 self.scopes.pop();
                 self.scope_spans.pop();
             }
-            ExprKind::Assign { target, value, .. } => {
+            ExprKind::Assign {
+                operator,
+                target,
+                value,
+            } => {
+                if self.calls
+                    && *operator == "="
+                    && let ExprKind::Name(name) = &target.kind
+                    && let Some(expected) = self
+                        .scopes
+                        .iter()
+                        .rev()
+                        .find_map(|scope| scope.get(name.text))
+                        .and_then(|binding| self.binding_types.get(&binding.1.start))
+                    && self.shape(value).rejects(expected)
+                {
+                    self.error(
+                        value.span,
+                        "assignment-type",
+                        "Assigned value type does not match binding type",
+                    );
+                }
                 if let ExprKind::Name(name) = &target.kind
                     && self
                         .scopes
@@ -1520,8 +2920,44 @@ impl<'s> Checker<'s> {
                         "Cannot assign to an immutable binding",
                     );
                 }
-                self.expr(target);
-                self.expr(value);
+                if *operator != "=" {
+                    let operation = match *operator {
+                        "+=" => "+",
+                        "-=" => "-",
+                        "*=" => "*",
+                        "/=" => "/",
+                        "%=" => "%",
+                        _ => "",
+                    };
+                    let binary = Expr {
+                        span: expr.span,
+                        kind: ExprKind::Binary {
+                            operator: operation,
+                            left: target.clone(),
+                            right: value.clone(),
+                        },
+                    };
+                    if self.calls
+                        && let ExprKind::Name(name) = &target.kind
+                        && let Some(expected) = self
+                            .scopes
+                            .iter()
+                            .rev()
+                            .find_map(|scope| scope.get(name.text))
+                            .and_then(|binding| self.binding_types.get(&binding.1.start))
+                        && self.shape(&binary).rejects(expected)
+                    {
+                        self.error(
+                            expr.span,
+                            "assignment-type",
+                            "Compound assignment changes binding type",
+                        );
+                    }
+                    self.expr(&binary);
+                } else {
+                    self.expr(target);
+                    self.expr(value);
+                }
             }
             ExprKind::Unary {
                 operator: "not" | "!",
@@ -1578,6 +3014,31 @@ impl<'s> Checker<'s> {
                 if self.calls && matches!(*operator, "+" | "-" | "*" | "/" | "%" | "**") {
                     let a = self.shape(left);
                     let b = self.shape(right);
+                    let specialized = |shape: &Shape| {
+                        matches!(
+                            shape,
+                            Shape::Typed(
+                                ValueType::Vector(_)
+                                    | ValueType::Matrix4
+                                    | ValueType::Quaternion
+                                    | ValueType::Angle
+                            )
+                        )
+                    };
+                    if !specialized(&a) && !specialized(&b) {
+                        let valid = !a.rejects(&ValueType::Number)
+                            && !b.rejects(&ValueType::Number)
+                            || (*operator == "+"
+                                && !a.rejects(&ValueType::String)
+                                && !b.rejects(&ValueType::String));
+                        if !valid {
+                            self.error(
+                                expr.span,
+                                "arithmetic-operands",
+                                "Arithmetic requires numbers or compatible operands",
+                            );
+                        }
+                    }
                     if let (Shape::Typed(a), Shape::Typed(b)) = (&a, &b)
                         && (matches!(a, ValueType::Vector(_)) || matches!(b, ValueType::Vector(_)))
                     {
@@ -1630,10 +3091,14 @@ impl<'s> Checker<'s> {
                 self.call(callee, arguments, None);
             }
             ExprKind::Member { object, field } => {
+                self.member_reference(object, field);
                 let check_member = self.calls && !field.text.is_empty();
                 if check_member {
                     let unsupported = match self.shape(object) {
-                        Shape::Typed(ty) => !matches!(ty, ValueType::Vector(_) | ValueType::Mesh),
+                        Shape::Typed(ty) => !matches!(
+                            ty,
+                            ValueType::Vector(_) | ValueType::Mesh | ValueType::User(_)
+                        ),
                         Shape::List(_) | Shape::Tuple(_) => true,
                         _ => false,
                     };
@@ -1646,17 +3111,22 @@ impl<'s> Checker<'s> {
                     }
                 }
                 if self.collect_members {
-                    let members = match self.shape(object) {
-                        Shape::Record(fields) => fields.into_keys().collect(),
-                        Shape::Typed(ValueType::Vector(size)) => ["x", "y", "z", "w"]
-                            .iter()
-                            .take(size)
-                            .map(|name| (*name).to_owned())
-                            .collect(),
-                        Shape::Typed(ValueType::Mesh) => {
-                            vec!["triangles".into(), "vertices".into()]
+                    let object_shape = self.shape(object);
+                    let members = if let Some(fields) = self.struct_fields(&object_shape) {
+                        fields.into_keys().collect()
+                    } else {
+                        match object_shape {
+                            Shape::Record(fields) => fields.into_keys().collect(),
+                            Shape::Typed(ValueType::Vector(size)) => ["x", "y", "z", "w"]
+                                .iter()
+                                .take(size)
+                                .map(|name| (*name).to_owned())
+                                .collect(),
+                            Shape::Typed(ValueType::Mesh) => {
+                                vec!["triangles".into(), "vertices".into()]
+                            }
+                            _ => Vec::new(),
                         }
-                        _ => Vec::new(),
                     };
                     self.member_completions.push(MemberCompletion {
                         name_span: field.span,
@@ -1737,17 +3207,29 @@ impl<'s> Checker<'s> {
             }
             ExprKind::Match { value, arms } => {
                 self.expr(value);
+                self.check_exhaustiveness(value, arms);
+                let shape = self.shape(value);
+                let mut results = Vec::new();
                 for arm in arms {
                     self.scopes.push(HashMap::new());
                     self.scope_spans.push(arm.span);
                     self.match_bindings(&arm.pattern, arm.pattern.span.end);
+                    self.match_pattern_types(&arm.pattern, &shape);
                     if let Some(guard) = &arm.guard {
                         self.condition(guard);
                     }
                     self.expr(&arm.value);
+                    results.push(self.shape(&arm.value));
                     self.scopes.pop();
                     self.scope_spans.pop();
                 }
+                let result = if results.iter().all(|shape| Some(shape) == results.first()) {
+                    results.first().cloned().unwrap_or(Shape::Unknown)
+                } else {
+                    Shape::Alternatives(results)
+                };
+                self.expression_shapes
+                    .insert((expr.span.start, expr.span.end), result);
             }
             ExprKind::Name(name) => {
                 let definition = self
@@ -1757,6 +3239,7 @@ impl<'s> Checker<'s> {
                     .find_map(|scope| scope.get(name.text))
                     .map(|binding| binding.1);
                 self.references.push(NameReference {
+                    definition_module: None,
                     usage: name.span,
                     definition,
                 });
@@ -1772,6 +3255,9 @@ impl<'s> Checker<'s> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Shape {
+    Constructor(String, Option<String>),
+    Function(Vec<Option<ValueType>>, Box<Shape>, bool),
+    Alternatives(Vec<Shape>),
     Unknown,
     Typed(ValueType),
     List(Vec<Shape>),
@@ -1781,6 +3267,14 @@ enum Shape {
     Unsupported,
 }
 impl Shape {
+    fn has_contract(&self) -> bool {
+        match self {
+            Self::Typed(_) => true,
+            Self::List(items) | Self::Tuple(items) => items.iter().all(Self::has_contract),
+            Self::Record(fields) => fields.values().all(Self::has_contract),
+            _ => false,
+        }
+    }
     fn member_paths(
         &self,
         prefix: &str,
@@ -1821,8 +3315,11 @@ impl Shape {
     }
     fn rejects(&self, expected: &ValueType) -> bool {
         match self {
+            Self::Alternatives(shapes) => shapes.iter().any(|shape| shape.rejects(expected)),
             Self::Unknown => false,
-            Self::Unsupported | Self::Record(_) => true,
+            Self::Unsupported | Self::Record(_) | Self::Constructor(..) | Self::Function(..) => {
+                true
+            }
             Self::Typed(actual) => disjoint(actual, expected),
             Self::List(items) => match expected {
                 ValueType::List(element) => items.iter().any(|item| item.rejects(element)),
