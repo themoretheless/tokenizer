@@ -1,0 +1,356 @@
+{
+  "method": "fresh processes in alternating order; correctness assertions, 10 warmups and 7 samples per process; no profiler/allocator instrumentation",
+  "bench": "runtime",
+  "operation": "prepared_run",
+  "iterations": 200,
+  "pairs": 6,
+  "binaries": {
+    "before": {
+      "path": "/private/tmp/rush-assignment-before-runtime",
+      "sha256": "6d039024b907dd37a5f5e5a5ff05d94888e84880efe61f48533c7bfab4b1a8fa"
+    },
+    "after": {
+      "path": "/private/tmp/rush-assignment-inline-runtime",
+      "sha256": "bec3294905573c7a0c8c383fddb6c59d56a9e833fba72af7c9ac5aafb2fc0ce7"
+    }
+  },
+  "records": [
+    {
+      "case": "collections",
+      "pair": 0,
+      "binary": "before",
+      "min_us": 288.842,
+      "median_us": 296.575,
+      "max_us": 308.07
+    },
+    {
+      "case": "collections",
+      "pair": 0,
+      "binary": "after",
+      "min_us": 268.974,
+      "median_us": 277.694,
+      "max_us": 360.702
+    },
+    {
+      "case": "collections",
+      "pair": 1,
+      "binary": "after",
+      "min_us": 266.906,
+      "median_us": 282.302,
+      "max_us": 293.258
+    },
+    {
+      "case": "collections",
+      "pair": 1,
+      "binary": "before",
+      "min_us": 309.523,
+      "median_us": 319.198,
+      "max_us": 325.038
+    },
+    {
+      "case": "collections",
+      "pair": 2,
+      "binary": "before",
+      "min_us": 323.548,
+      "median_us": 327.724,
+      "max_us": 329.404
+    },
+    {
+      "case": "collections",
+      "pair": 2,
+      "binary": "after",
+      "min_us": 274.191,
+      "median_us": 284.933,
+      "max_us": 286.623
+    },
+    {
+      "case": "collections",
+      "pair": 3,
+      "binary": "after",
+      "min_us": 260.53,
+      "median_us": 268.589,
+      "max_us": 270.735
+    },
+    {
+      "case": "collections",
+      "pair": 3,
+      "binary": "before",
+      "min_us": 286.361,
+      "median_us": 324.739,
+      "max_us": 333.996
+    },
+    {
+      "case": "collections",
+      "pair": 4,
+      "binary": "before",
+      "min_us": 273.163,
+      "median_us": 320.906,
+      "max_us": 330.087
+    },
+    {
+      "case": "collections",
+      "pair": 4,
+      "binary": "after",
+      "min_us": 263.623,
+      "median_us": 267.39,
+      "max_us": 274.148
+    },
+    {
+      "case": "collections",
+      "pair": 5,
+      "binary": "after",
+      "min_us": 262.674,
+      "median_us": 270.813,
+      "max_us": 279.911
+    },
+    {
+      "case": "collections",
+      "pair": 5,
+      "binary": "before",
+      "min_us": 281.71,
+      "median_us": 291.343,
+      "max_us": 294.775
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 0,
+      "binary": "before",
+      "min_us": 262.325,
+      "median_us": 269.392,
+      "max_us": 273.767
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 0,
+      "binary": "after",
+      "min_us": 251.074,
+      "median_us": 260.497,
+      "max_us": 262.72
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 1,
+      "binary": "after",
+      "min_us": 243.396,
+      "median_us": 262.331,
+      "max_us": 269.554
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 1,
+      "binary": "before",
+      "min_us": 242.954,
+      "median_us": 251.969,
+      "max_us": 259.4
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 2,
+      "binary": "before",
+      "min_us": 246.26,
+      "median_us": 249.429,
+      "max_us": 254.183
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 2,
+      "binary": "after",
+      "min_us": 277.2,
+      "median_us": 282.969,
+      "max_us": 285.055
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 3,
+      "binary": "after",
+      "min_us": 245.927,
+      "median_us": 265.902,
+      "max_us": 278.635
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 3,
+      "binary": "before",
+      "min_us": 241.192,
+      "median_us": 243.834,
+      "max_us": 249.764
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 4,
+      "binary": "before",
+      "min_us": 254.5,
+      "median_us": 256.787,
+      "max_us": 263.576
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 4,
+      "binary": "after",
+      "min_us": 247.043,
+      "median_us": 253.369,
+      "max_us": 260.028
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 5,
+      "binary": "after",
+      "min_us": 254.838,
+      "median_us": 258.431,
+      "max_us": 269.889
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 5,
+      "binary": "before",
+      "min_us": 233.572,
+      "median_us": 243.009,
+      "max_us": 252.554
+    },
+    {
+      "case": "cells",
+      "pair": 0,
+      "binary": "before",
+      "min_us": 729.719,
+      "median_us": 733.805,
+      "max_us": 741.306
+    },
+    {
+      "case": "cells",
+      "pair": 0,
+      "binary": "after",
+      "min_us": 704.763,
+      "median_us": 710.735,
+      "max_us": 713.433
+    },
+    {
+      "case": "cells",
+      "pair": 1,
+      "binary": "after",
+      "min_us": 690.36,
+      "median_us": 695.049,
+      "max_us": 709.026
+    },
+    {
+      "case": "cells",
+      "pair": 1,
+      "binary": "before",
+      "min_us": 749.309,
+      "median_us": 753.096,
+      "max_us": 768.178
+    },
+    {
+      "case": "cells",
+      "pair": 2,
+      "binary": "before",
+      "min_us": 718.534,
+      "median_us": 725.339,
+      "max_us": 727.087
+    },
+    {
+      "case": "cells",
+      "pair": 2,
+      "binary": "after",
+      "min_us": 691.434,
+      "median_us": 692.543,
+      "max_us": 698.014
+    },
+    {
+      "case": "cells",
+      "pair": 3,
+      "binary": "after",
+      "min_us": 690.911,
+      "median_us": 699.722,
+      "max_us": 712.423
+    },
+    {
+      "case": "cells",
+      "pair": 3,
+      "binary": "before",
+      "min_us": 735.77,
+      "median_us": 738.082,
+      "max_us": 746.787
+    },
+    {
+      "case": "cells",
+      "pair": 4,
+      "binary": "before",
+      "min_us": 726.553,
+      "median_us": 733.097,
+      "max_us": 737.922
+    },
+    {
+      "case": "cells",
+      "pair": 4,
+      "binary": "after",
+      "min_us": 682.672,
+      "median_us": 687.136,
+      "max_us": 695.21
+    },
+    {
+      "case": "cells",
+      "pair": 5,
+      "binary": "after",
+      "min_us": 690.776,
+      "median_us": 695.351,
+      "max_us": 704.169
+    },
+    {
+      "case": "cells",
+      "pair": 5,
+      "binary": "before",
+      "min_us": 728.155,
+      "median_us": 732.951,
+      "max_us": 737.445
+    }
+  ],
+  "summary": {
+    "collections": {
+      "before_median_us": 320.052,
+      "after_median_us": 274.25350000000003,
+      "speedup": 1.166993310933133,
+      "before_process_range_us": [
+        291.343,
+        327.724
+      ],
+      "after_process_range_us": [
+        267.39,
+        284.933
+      ]
+    },
+    "collections_lazy": {
+      "before_median_us": 250.699,
+      "after_median_us": 261.414,
+      "speedup": 0.9590113765903893,
+      "before_process_range_us": [
+        243.009,
+        269.392
+      ],
+      "after_process_range_us": [
+        253.369,
+        282.969
+      ]
+    },
+    "cells": {
+      "before_median_us": 733.451,
+      "after_median_us": 695.2,
+      "speedup": 1.055021576524741,
+      "before_process_range_us": [
+        725.339,
+        753.096
+      ],
+      "after_process_range_us": [
+        687.136,
+        710.735
+      ]
+    }
+  },
+  "environment": {
+    "hardware": "Apple M4 Max",
+    "os": "macOS 26.7.1 (25G313)",
+    "rustc": "1.101.0-nightly (c1070d693 2026-09-28)",
+    "target": "aarch64-apple-darwin",
+    "llvm": "23.1.1"
+  },
+  "variant": "superseded inline hint"
+}

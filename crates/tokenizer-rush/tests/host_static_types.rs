@@ -473,7 +473,6 @@ fn unknown_values_and_overlapping_contracts_are_deferred_to_runtime() {
         "numbers(flags())",
         "optional_number(maybe())",
         "double(unknown)",
-        "double(if condition { 1 } else { 'x' })",
         "numbers([unknown])",
         "mut xs=[1]\nxs=[true]\nnumbers(xs)",
     ] {
@@ -482,6 +481,8 @@ fn unknown_values_and_overlapping_contracts_are_deferred_to_runtime() {
             "{source}"
         );
     }
+    let mixed = analyze_host_calls("double(if condition { 1 } else { 'x' })", &functions());
+    assert!(mixed.diagnostics.iter().any(|d| d.code == "argument-type"));
     let source = "mut xs=[1]\nxs=[true]\nnumbers(xs)";
     let error = Program::compile(source)
         .unwrap()
@@ -660,6 +661,7 @@ fn immutable_bindings_preserve_known_types_without_leaking_across_scopes() {
     for source in [
         "let v = vec2(1,2); accept(v)",
         "let v = vec2(1,2); let w = v; w.z",
+        "mut v = vec2(1,2); v = vec3(1,2,3); accept(v)",
     ] {
         assert!(
             !analyze_host_calls(source, &functions).is_valid(),
@@ -669,7 +671,6 @@ fn immutable_bindings_preserve_known_types_without_leaking_across_scopes() {
     for source in [
         "let v = vec2(1,2); if true { let v = vec3(1,2,3); accept(v) }; v.x",
         "let v = vec3(1,2,3); if true { let v = v; accept(v) }",
-        "mut v = vec2(1,2); v = vec3(1,2,3); accept(v)",
     ] {
         assert!(
             analyze_host_calls(source, &functions).is_valid(),
@@ -691,13 +692,13 @@ fn editor_exposes_known_vector_fields_for_immutable_bindings() {
         bindings.iter().find(|b| b.name == "w").unwrap().members,
         ["x", "y"]
     );
-    assert!(
+    assert_eq!(
         bindings
             .iter()
             .find(|b| b.name == "unknown")
             .unwrap()
-            .members
-            .is_empty()
+            .members,
+        ["x", "y", "z"]
     );
 }
 
@@ -755,12 +756,7 @@ fn known_invalid_vector_operators_are_rejected_before_execution() {
                 .any(|d| d.code == "vector-operands"),
             "{source}"
         );
-        assert!(
-            Program::compile(source)
-                .unwrap()
-                .run(1000, &Default::default(), &[])
-                .is_err()
-        );
+        assert!(Program::compile(source).is_err());
     }
     for source in [
         "vec2(1,2) + vec2(3,4)",
@@ -861,12 +857,7 @@ fn declaration_annotations_check_initializers_without_guessing_unknown_results()
                 .any(|d| d.code == "annotation-type"),
             "{source}"
         );
-        assert!(
-            Program::compile(source)
-                .unwrap()
-                .run(1000, &Default::default(), &[])
-                .is_err()
-        );
+        assert!(Program::compile(source).is_err());
     }
     let source = "fn make() { return vec3(1,2,3) }; let v: vec3 = make(); v.z";
     assert!(analyze_calls(source).is_valid());
@@ -1077,12 +1068,7 @@ fn known_record_field_typos_report_precise_spans() {
             .find(|d| d.code == "unknown-record-field")
             .unwrap();
         assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "widht");
-        assert!(
-            Program::compile(source)
-                .unwrap()
-                .run(1000, &Default::default(), &[])
-                .is_err()
-        );
+        assert!(Program::compile(source).is_err());
     }
     for source in [
         "let config = {width:10}; config.width",
@@ -1111,12 +1097,7 @@ fn known_records_validate_required_destructuring_fields() {
             &source[diagnostic.span.start..diagnostic.span.end],
             "height"
         );
-        assert!(
-            Program::compile(source)
-                .unwrap()
-                .run(1000, &Default::default(), &[])
-                .is_err()
-        );
+        assert!(Program::compile(source).is_err());
     }
     for source in [
         "let {width:w} = {width:10,height:20}",
@@ -1142,12 +1123,7 @@ fn tuple_destructuring_checks_known_shapes_and_nested_lengths() {
                 .any(|d| d.code == "tuple-pattern"),
             "{source}"
         );
-        assert!(
-            Program::compile(source)
-                .unwrap()
-                .run(1000, &Default::default(), &[])
-                .is_err()
-        );
+        assert!(Program::compile(source).is_err());
     }
     assert!(analyze_calls("let ((a,b),c) = ((1,2),0)").is_valid());
     assert!(analyze_calls("fn f(value) { let (a,b) = value; return a }").is_valid());
@@ -1491,7 +1467,7 @@ fn known_data_values_cannot_be_called_or_passed_as_callbacks() {
         "fn f(callback) { return map([], callback) }",
         "let record = {f:x => x}; record.f(1)",
         "let op = if true {x => x} else {x => x+1}; op(1)",
-        "mut op = 1; op = x => x; op(1)",
+        "mut op = x => x; op = x => x+1; op(1)",
     ] {
         let analysis = analyze_calls(source);
         assert!(analysis.is_valid(), "{source}: {:?}", analysis.diagnostics);
@@ -1671,4 +1647,21 @@ fn for_bindings_infer_known_uniform_list_elements() {
     ] {
         assert!(analyze_host_calls(source, &[]).is_valid(), "{source}");
     }
+}
+
+#[test]
+fn loading_checks_registered_host_signatures_in_unexecuted_branches() {
+    let function = std::rc::Rc::new(themoretheless_tokenizer_rush::HostFunction {
+        name: "expect_number",
+        parameters: vec![themoretheless_tokenizer_rush::ValueType::Number],
+        result: themoretheless_tokenizer_rush::ValueType::Number,
+        callback: |_, _| panic!("load validation must never invoke a host callback"),
+    });
+    let program =
+        themoretheless_tokenizer_rush::Program::compile("if false { expect_number(true) }")
+            .unwrap();
+    let error = program
+        .run_with_host(100, &Default::default(), &[], &[function])
+        .unwrap_err();
+    assert!(error.message.contains("argument-type"));
 }

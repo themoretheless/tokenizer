@@ -76,3 +76,10 @@ export async function runRush(source, signal) {
     wasmUrl: new URL('wasm/tokenizer_wasm_bg.wasm', base).href,
   }, signal)
 }
+
+export async function renameRush(source, offset, replacement) {
+  await catalogWithWasm()
+  const module = await wasmModulePromise
+  if (typeof module.rename_rush !== 'function') throw new Error('Rebuild WASM to enable Rush rename')
+  return JSON.parse(module.rename_rush(source, offset, replacement))
+}

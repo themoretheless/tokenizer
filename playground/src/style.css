@@ -103,3 +103,7 @@ footer { padding-top: 20px; text-align: center; }
 .sort-reset:disabled { opacity: .4; cursor: default; }
 .matrix-empty { display: block; text-align: center; color: var(--muted); padding: 6px 0; }
 @media (max-width: 1100px) { .workspace.is-compare { grid-template-columns: 1fr; } }
+
+.rename-form { display: flex; align-items: center; gap: 8px; padding: 10px; }
+.rename-form label { display: flex; align-items: center; gap: 8px; }
+.rename-form input { font: inherit; padding: 4px 8px; }

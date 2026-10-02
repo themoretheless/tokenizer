@@ -41,6 +41,13 @@ fn run(source: &str) -> (Value<'_>, Rc<Counts>) {
     run_with_functions(source, &[])
 }
 fn run_with_functions<'s>(source: &'s str, extra: &[Rc<HostFunction>]) -> (Value<'s>, Rc<Counts>) {
+    run_with_budget(source, extra, 100_000)
+}
+fn run_with_budget<'s>(
+    source: &'s str,
+    extra: &[Rc<HostFunction>],
+    budget: usize,
+) -> (Value<'s>, Rc<Counts>) {
     let counts = Rc::new(Counts::default());
     COUNTS.with(|slot| *slot.borrow_mut() = counts.clone());
     let function = Rc::new(HostFunction {
@@ -63,7 +70,7 @@ fn run_with_functions<'s>(source: &'s str, extra: &[Rc<HostFunction>]) -> (Value
     functions.extend_from_slice(extra);
     let value = Program::compile(source)
         .unwrap()
-        .run_with_host(100_000, &CancellationToken::default(), &[], &functions)
+        .run_with_host(budget, &CancellationToken::default(), &[], &functions)
         .unwrap();
     (value, counts)
 }
@@ -138,7 +145,9 @@ fn unreachable_cycles_are_reclaimed_during_execution() {
         "mut resource = tracked(); mut sequence = range_iter(0,1); sequence = sequence | map(x => (resource,sequence)); return 0",
     ] {
         let source = format!("fn work() {{ {body} }}; for i in range_iter(0,1000) {{ work() }}; 0");
-        let (value, counts) = run(&source);
+        // GC hash-table probes consume steps and vary with allocation addresses.
+        // This stress test asserts retained resources, not an exact step count.
+        let (value, counts) = run_with_budget(&source, &[], 1_000_000);
         assert_eq!(value, Value::Number(0.0));
         assert_eq!(counts.created.get(), 1000);
         assert!(

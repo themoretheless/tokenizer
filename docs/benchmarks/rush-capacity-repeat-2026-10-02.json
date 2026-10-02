@@ -1,0 +1,247 @@
+{
+  "method": "fresh processes in alternating order; correctness assertions, 10 warmups and 7 samples per process; no profiler/allocator instrumentation",
+  "bench": "runtime",
+  "operation": "prepared_run",
+  "iterations": 300,
+  "pairs": 6,
+  "binaries": {
+    "before": {
+      "path": "/private/tmp/rush-call-after-runtime",
+      "sha256": "1419e8906d4b0909cb1312f5c4eddd73157833bfeec9c0b3a7b3176b8d4078ff"
+    },
+    "after": {
+      "path": "/private/tmp/rush-capacity-after-runtime",
+      "sha256": "31cdb451abacb46d1b761997e97594caa05b9a09d65829167e1878f13c1d29c5"
+    }
+  },
+  "records": [
+    {
+      "case": "collections",
+      "pair": 0,
+      "binary": "before",
+      "min_us": 329.667,
+      "median_us": 331.794,
+      "max_us": 335.719
+    },
+    {
+      "case": "collections",
+      "pair": 0,
+      "binary": "after",
+      "min_us": 267.88,
+      "median_us": 308.275,
+      "max_us": 310.907
+    },
+    {
+      "case": "collections",
+      "pair": 1,
+      "binary": "after",
+      "min_us": 279.292,
+      "median_us": 298.993,
+      "max_us": 303.77
+    },
+    {
+      "case": "collections",
+      "pair": 1,
+      "binary": "before",
+      "min_us": 308.256,
+      "median_us": 309.333,
+      "max_us": 311.702
+    },
+    {
+      "case": "collections",
+      "pair": 2,
+      "binary": "before",
+      "min_us": 329.95,
+      "median_us": 335.175,
+      "max_us": 344.848
+    },
+    {
+      "case": "collections",
+      "pair": 2,
+      "binary": "after",
+      "min_us": 293.388,
+      "median_us": 331.668,
+      "max_us": 338.29
+    },
+    {
+      "case": "collections",
+      "pair": 3,
+      "binary": "after",
+      "min_us": 288.485,
+      "median_us": 325.299,
+      "max_us": 331.761
+    },
+    {
+      "case": "collections",
+      "pair": 3,
+      "binary": "before",
+      "min_us": 292.936,
+      "median_us": 297.533,
+      "max_us": 298.74
+    },
+    {
+      "case": "collections",
+      "pair": 4,
+      "binary": "before",
+      "min_us": 327.626,
+      "median_us": 332.332,
+      "max_us": 334.369
+    },
+    {
+      "case": "collections",
+      "pair": 4,
+      "binary": "after",
+      "min_us": 320.135,
+      "median_us": 321.409,
+      "max_us": 329.578
+    },
+    {
+      "case": "collections",
+      "pair": 5,
+      "binary": "after",
+      "min_us": 270.679,
+      "median_us": 287.608,
+      "max_us": 289.224
+    },
+    {
+      "case": "collections",
+      "pair": 5,
+      "binary": "before",
+      "min_us": 342.145,
+      "median_us": 344.269,
+      "max_us": 351.192
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 0,
+      "binary": "before",
+      "min_us": 254.829,
+      "median_us": 258.521,
+      "max_us": 262.17
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 0,
+      "binary": "after",
+      "min_us": 270.708,
+      "median_us": 296.773,
+      "max_us": 300.84
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 1,
+      "binary": "after",
+      "min_us": 260.188,
+      "median_us": 283.47,
+      "max_us": 292.027
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 1,
+      "binary": "before",
+      "min_us": 249.525,
+      "median_us": 253.095,
+      "max_us": 257.447
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 2,
+      "binary": "before",
+      "min_us": 263.999,
+      "median_us": 268.544,
+      "max_us": 292.097
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 2,
+      "binary": "after",
+      "min_us": 270.892,
+      "median_us": 276.865,
+      "max_us": 283.211
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 3,
+      "binary": "after",
+      "min_us": 277.808,
+      "median_us": 281.272,
+      "max_us": 287.29
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 3,
+      "binary": "before",
+      "min_us": 257.141,
+      "median_us": 263.488,
+      "max_us": 266.852
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 4,
+      "binary": "before",
+      "min_us": 253.777,
+      "median_us": 258.549,
+      "max_us": 263.623
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 4,
+      "binary": "after",
+      "min_us": 274.948,
+      "median_us": 288.466,
+      "max_us": 298.254
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 5,
+      "binary": "after",
+      "min_us": 266.071,
+      "median_us": 286.486,
+      "max_us": 290.28
+    },
+    {
+      "case": "collections_lazy",
+      "pair": 5,
+      "binary": "before",
+      "min_us": 254.969,
+      "median_us": 256.817,
+      "max_us": 260.876
+    }
+  ],
+  "summary": {
+    "collections": {
+      "before_median_us": 332.063,
+      "after_median_us": 314.842,
+      "speedup": 1.0546972767292802,
+      "before_process_range_us": [
+        297.533,
+        344.269
+      ],
+      "after_process_range_us": [
+        287.608,
+        331.668
+      ]
+    },
+    "collections_lazy": {
+      "before_median_us": 258.53499999999997,
+      "after_median_us": 284.978,
+      "speedup": 0.9072103811522292,
+      "before_process_range_us": [
+        253.095,
+        268.544
+      ],
+      "after_process_range_us": [
+        276.865,
+        296.773
+      ]
+    }
+  },
+  "environment": {
+    "hardware": "Apple M4 Max",
+    "os": "macOS 26.7.1 (25G313)",
+    "rustc": "1.101.0-nightly (c1070d693 2026-09-28)",
+    "target": "aarch64-apple-darwin",
+    "llvm": "23.1.1"
+  },
+  "decision": "rejected; runtime restored to the before version"
+}

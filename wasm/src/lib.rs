@@ -9,6 +9,12 @@ pub fn tokenize_json(source: &str, mode: &str, layer: &str) -> String {
     tokenization_json(source, mode, layer)
 }
 
+/// Checked rename edits, using the same bindings and nominal symbols as Rush diagnostics.
+#[wasm_bindgen]
+pub fn rename_rush(source: &str, offset: u32, replacement: &str) -> String {
+    themoretheless_tokenizer::web_bridge::rename_rush(source, offset as usize, replacement)
+}
+
 /// Multi-language host entry: `language` is `json`, `url`, …
 #[wasm_bindgen]
 pub fn tokenize(language: &str, source: &str, mode: &str, layer: &str) -> String {

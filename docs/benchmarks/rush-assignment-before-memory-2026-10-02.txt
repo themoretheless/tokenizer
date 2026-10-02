@@ -1,0 +1,40 @@
+   Compiling themoretheless-tokenizer-rush v0.7.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `bench` profile [optimized] target(s) in 3.30s
+     Running benches/memory.rs (target/release/build/themoretheless-tokenizer-rush/f5f46dbfc9872c77/out/memory-f5f46dbfc9872c77)
+workload	items	run	peak_extra_bytes	live_after_drop_bytes	allocation_calls
+local_cells	100	1	29516	0	1730
+local_cells	100	2	29516	0	1730
+local_cells	100	3	29516	0	1730
+call_cells	100	1	30772	0	1839
+call_cells	100	2	30772	0	1839
+call_cells	100	3	30772	0	1839
+escaped_cell	100	1	31316	0	1754
+escaped_cell	100	2	31316	0	1754
+escaped_cell	100	3	31316	0	1754
+cyclic_cells	100	1	67180	0	3226
+cyclic_cells	100	2	67180	0	3226
+cyclic_cells	100	3	67180	0	3226
+local_cells	1000	1	29516	0	17100
+local_cells	1000	2	29516	0	17100
+local_cells	1000	3	29516	0	17100
+call_cells	1000	1	30772	0	18109
+call_cells	1000	2	30772	0	18109
+call_cells	1000	3	30772	0	18109
+escaped_cell	1000	1	31316	0	17166
+escaped_cell	1000	2	31316	0	17166
+escaped_cell	1000	3	31316	0	17166
+cyclic_cells	1000	1	67180	0	31898
+cyclic_cells	1000	2	67180	0	31898
+cyclic_cells	1000	3	67180	0	31898
+local_cells	10000	1	29516	0	170805
+local_cells	10000	2	29516	0	170805
+local_cells	10000	3	29516	0	170805
+call_cells	10000	1	30772	0	180814
+call_cells	10000	2	30772	0	180814
+call_cells	10000	3	30772	0	180814
+escaped_cell	10000	1	31316	0	171294
+escaped_cell	10000	2	31316	0	171294
+escaped_cell	10000	3	31316	0	171294
+cyclic_cells	10000	1	67180	0	318742
+cyclic_cells	10000	2	67180	0	318742
+cyclic_cells	10000	3	67180	0	318742

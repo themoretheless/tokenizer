@@ -518,3 +518,42 @@ test('WASM checks transformation types and completes generated mesh members', ()
   const completed = applyCompletion(source, range, candidates[1]).source
   assert.equal(run(completed + ' | len').output, 'Number(4.0)')
 })
+
+test('WASM executes nominal data types and reports incomplete matches before execution', () => {
+  const source = 'struct Point { x:number }; enum State { Idle, Moving(Point) }; let state=State.Moving(Point({x:7})); match state { State.Idle() => 0, State.Moving(p) => p.x }'
+  assert.deepEqual(run(source), { ok: true, kind: 'text', output: 'Number(7.0)' })
+  const invalid = run('enum E { A, B }; if false { match E.A() { E.A() => 1 } }')
+  assert.equal(invalid.ok, false)
+  assert.match(invalid.error, /non-exhaustive-match/)
+  assert.match(run('struct P { x:number }; if false { P({x:true}) }').error, /struct-field-type/)
+})
+
+test('WASM question operator returns expected errors and skips later effects', () => {
+  const source = 'mut calls=0; fn f(v: Option[number]) -> Option[number] { let x=v?; calls+=1; return Some(x) }; let result=f(None()); calls'
+  assert.deepEqual(run(source), { ok: true, kind: 'text', output: 'Number(0.0)' })
+  assert.match(run('fn f(v:number) -> Option[number] { return Some(v?) }').error, /try-type/)
+})
+
+test('WASM editor exposes user fields and resolves type annotations for rename', () => {
+  const source = 'struct P { x:number, y:number }; fn f(v:P) -> P { return v }; let p=P({x:1,y:2}); p.'
+  const result = JSON.parse(wasm.tokenize('rush', source, 'default', 'semantic'))
+  const completion = completionCandidates(source, completionRange(source, source.length), result)
+  assert.deepEqual(completion.map(item => item.name), ['x', 'y'])
+  const definition = source.indexOf('P {')
+  const annotation = result.references.find(reference => reference.start === source.indexOf('P)'))
+  assert.equal(annotation.definition.start, definition)
+})
+
+test('WASM rename updates nominal fields and enum patterns without touching unrelated fields', () => {
+  const source = 'struct P { x:number }; struct Q { x:number }; let p=P({x:1}); let q=Q({x:2}); p.x + q.x'
+  const result = JSON.parse(wasm.rename_rush(source, source.indexOf('p.x') + 2, 'position'))
+  assert.equal(result.ok, true)
+  assert.equal(result.edits.length, 3)
+  let renamed = source
+  for (const edit of result.edits.toSorted((a,b) => b.start-a.start)) renamed = renamed.slice(0,edit.start)+edit.replacement+renamed.slice(edit.end)
+  assert.equal(run(renamed).output, 'Number(3.0)')
+  assert.ok(renamed.includes('q.x'))
+  const variant = 'enum State{Idle,Moving(number)}; let s=State.Idle(); match s {State.Idle()=>0,State.Moving(n)=>n}'
+  assert.equal(JSON.parse(wasm.rename_rush(variant, variant.indexOf('Idle'), 'Stopped')).edits.length, 3)
+  assert.equal(JSON.parse(wasm.rename_rush(source, source.indexOf('p.x')+2, 'if')).ok, false)
+})

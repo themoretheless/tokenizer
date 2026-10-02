@@ -565,20 +565,90 @@ fn structural_match_selects_records_and_tuples_without_binding_leaks() {
 
 #[test]
 fn member_errors_distinguish_unsupported_values_from_vector_fields() {
-    use themoretheless_tokenizer_rush::{CancellationToken, Program};
+    use themoretheless_tokenizer_rush::Program;
     for source in ["null.missing", "null.x", "true.missing", "[1].x"] {
-        let error = Program::compile(source)
-            .unwrap()
-            .run(100, &CancellationToken::default(), &[])
-            .unwrap_err();
+        let error = Program::compile(source).err().unwrap();
         assert_eq!(
-            error.message, "Value does not support member access",
+            error.message, "member-object: Value does not support member access",
             "{source}"
         );
     }
-    let error = Program::compile("vec2(1,2).missing")
-        .unwrap()
-        .run(100, &CancellationToken::default(), &[])
+    let error = Program::compile("vec2(1,2).missing").err().unwrap();
+    assert_eq!(
+        error.message,
+        "vector-component: Unknown or out-of-bounds vector component"
+    );
+}
+
+#[test]
+fn failed_calls_keep_builtin_names_and_unicode_source_coordinates() {
+    use themoretheless_tokenizer_rush::{CancellationToken, Program};
+    let source = "fn fail() {\n let text = 'я'; assert(false)\n}\nfail()";
+    let program = Program::compile(source).unwrap();
+    let error = program
+        .run(1000, &CancellationToken::default(), &[])
         .unwrap_err();
-    assert_eq!(error.message, "Unknown vector component");
+    assert_eq!(error.stack.len(), 2);
+    assert_eq!(
+        (
+            &*error.stack[0].function,
+            error.stack[0].line,
+            error.stack[0].column
+        ),
+        ("Assert", 2, 18)
+    );
+    assert_eq!(
+        (
+            &*error.stack[1].function,
+            error.stack[1].line,
+            error.stack[1].column
+        ),
+        ("fail", 4, 1)
+    );
+    assert!(error.stack.iter().all(|frame| frame.module.is_none()));
+    let location = error.location.unwrap();
+    assert_eq!((location.line, location.column), (2, 18));
+}
+
+#[test]
+fn compound_assignment_reads_left_before_effectful_right() {
+    assert_eq!(
+        evaluate("mut x=1; fn rhs(){x=10;return 2}; x+=rhs(); x", 1000).unwrap(),
+        Value::Number(3.)
+    );
+    assert_eq!(
+        evaluate("mut v=vec2(1,2); v+=vec2(3,4); v*=2; v", 1000).unwrap(),
+        Value::Vector(vec![8., 12.])
+    );
+    assert_eq!(
+        evaluate("mut text='a'; text+='б'; text", 1000).unwrap(),
+        Value::String("aб".into())
+    );
+}
+
+#[test]
+fn compound_assignment_keeps_expanded_expression_step_and_depth_limits() {
+    use themoretheless_tokenizer_rush::{CancellationToken, ExecutionLimits, Program};
+    for (compound, expanded) in [
+        ("mut x=1;x+=2;x", "mut x=1;x=x+2;x"),
+        ("mut x=7;x%=3;x", "mut x=7;x=x%3;x"),
+        ("mut x=1;x/=0;x", "mut x=1;x=x/0;x"),
+    ] {
+        let a = Program::compile(compound).unwrap();
+        let b = Program::compile(expanded).unwrap();
+        for steps in 0..40 {
+            for depth in 0..9 {
+                let mut limits = ExecutionLimits::new(steps);
+                limits.max_depth = depth;
+                let token = CancellationToken::default();
+                let a = a
+                    .run_with_limits(limits, &token, &[], &[], &[])
+                    .map_err(|e| e.message);
+                let b = b
+                    .run_with_limits(limits, &token, &[], &[], &[])
+                    .map_err(|e| e.message);
+                assert_eq!(a, b, "steps={steps}, depth={depth}, {compound}");
+            }
+        }
+    }
 }

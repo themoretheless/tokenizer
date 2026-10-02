@@ -10,6 +10,10 @@ use std::sync::{
 };
 use themoretheless_tokenizer_core::Span;
 mod cell_gc;
+mod coroutine;
+mod scheduler;
+pub use coroutine::{CoroutineId, CoroutineState};
+pub use scheduler::{CoroutineScheduler, ScheduledState, ScheduledStep, WakeRequest};
 mod instance;
 pub use instance::{OwnedScriptInstance, ScriptState, StateValue};
 mod memory;
@@ -136,6 +140,8 @@ impl<'s> Environment<'s> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value<'s> {
+    /// Nominal user data; struct payload is one record, enum payload is positional.
+    UserData(Box<UserData<'s>>),
     HostObject(crate::HostObject),
     /// Angle stored in radians, distinct from an ordinary number.
     Angle(f64),
@@ -162,6 +168,13 @@ pub enum Value<'s> {
     Function(Rc<Closure<'s>>),
     Builtin(Builtin),
     Host(Rc<HostFunction>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct UserData<'s> {
+    pub type_name: String,
+    pub variant: Option<String>,
+    pub values: Vec<Value<'s>>,
 }
 
 /// Factory for a host-owned source. Each consumption opens a fresh iterator.
@@ -418,6 +431,11 @@ pub struct Closure<'s> {
 
 #[derive(Clone, Debug, PartialEq)]
 enum FunctionBody<'s> {
+    Constructor {
+        type_name: String,
+        variant: Option<String>,
+        fields: Vec<(String, ValueType)>,
+    },
     Expression(Expr<'s>),
     Block(Block<'s>),
 }
@@ -498,9 +516,26 @@ impl ExecutionLimits {
     }
 }
 
+// Integer operands within the exact f64 range can avoid libm fmod. The
+// remainder has the dividend's sign, including zero; other operands use fmod.
+fn exact_remainder(a: f64, b: f64) -> f64 {
+    const EXACT_INTEGER: f64 = 9_007_199_254_740_991.;
+    if a.abs() <= EXACT_INTEGER
+        && b.abs() <= EXACT_INTEGER
+        && b != 0.
+        && a.trunc() == a
+        && b.trunc() == b
+    {
+        ((a as i64 % b as i64) as f64).copysign(a)
+    } else {
+        a % b
+    }
+}
+
 /// Runtime contracts for functions registered by the embedding application.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValueType {
+    User(String),
     HostObject(&'static str),
     Angle,
     Option(Box<ValueType>),
@@ -520,6 +555,17 @@ pub enum ValueType {
 }
 impl ValueType {
     pub(crate) fn annotation(ty: &crate::Type<'_>) -> Result<Self> {
+        Self::annotation_with(ty, &|_| None)
+    }
+    pub(crate) fn annotation_with(
+        ty: &crate::Type<'_>,
+        resolve: &impl Fn(&str) -> Option<String>,
+    ) -> Result<Self> {
+        if ty.arguments.is_empty()
+            && let Some(name) = resolve(ty.name.text)
+        {
+            return Ok(Self::User(name));
+        }
         let primitive = match ty.name.text {
             "angle" => Some(Self::Angle),
             "number" | "f64" | "float" => Some(Self::Number),
@@ -542,24 +588,30 @@ impl ValueType {
             return Ok(primitive);
         }
         if ty.name.text == "Option" && ty.arguments.len() == 1 {
-            return Ok(Self::Option(Box::new(Self::annotation(&ty.arguments[0])?)));
+            return Ok(Self::Option(Box::new(Self::annotation_with(
+                &ty.arguments[0],
+                resolve,
+            )?)));
         }
         if ty.name.text == "Result" && ty.arguments.len() == 2 {
             return Ok(Self::Result(
-                Box::new(Self::annotation(&ty.arguments[0])?),
-                Box::new(Self::annotation(&ty.arguments[1])?),
+                Box::new(Self::annotation_with(&ty.arguments[0], resolve)?),
+                Box::new(Self::annotation_with(&ty.arguments[1], resolve)?),
             ));
         }
         if ty.name.text == "tuple" {
             return Ok(Self::Tuple(
                 ty.arguments
                     .iter()
-                    .map(Self::annotation)
+                    .map(|ty| Self::annotation_with(ty, resolve))
                     .collect::<Result<Vec<_>>>()?,
             ));
         }
         if ty.name.text == "list" && ty.arguments.len() == 1 {
-            return Ok(Self::List(Box::new(Self::annotation(&ty.arguments[0])?)));
+            return Ok(Self::List(Box::new(Self::annotation_with(
+                &ty.arguments[0],
+                resolve,
+            )?)));
         }
         Err(RuntimeError {
             stack: Vec::new(),
@@ -569,8 +621,24 @@ impl ValueType {
             message: format!("Unsupported type annotation: {}", ty.name.text),
         })
     }
+    fn inferred(value: &Value<'_>) -> Option<Self> {
+        Some(match value {
+            Value::Number(_) => Self::Number,
+            Value::Bool(_) => Self::Bool,
+            Value::String(_) => Self::String,
+            Value::Angle(_) => Self::Angle,
+            Value::Vector(v) => Self::Vector(v.len()),
+            Value::Matrix(_) => Self::Matrix4,
+            Value::Quaternion(_) => Self::Quaternion,
+            Value::Mesh(_) => Self::Mesh,
+            Value::Polygon(_) => Self::Polygon,
+            Value::UserData(data) => Self::User(data.type_name.clone()),
+            _ => return None,
+        })
+    }
     pub fn accepts(&self, value: &Value<'_>) -> bool {
         match (self, value) {
+            (Self::User(name), Value::UserData(data)) => name == &data.type_name,
             (Self::HostObject(name), Value::HostObject(object)) => {
                 *name == object.type_name() && object.is_alive()
             }
@@ -720,8 +788,14 @@ impl<'a, 's> ScriptInstance<'a, 's> {
 
 /// An analyzed program that can be evaluated repeatedly without reparsing.
 pub struct Program<'s> {
+    imports: Vec<Name<'s>>,
+    contracts: Rc<HashMap<usize, crate::analysis::FunctionContract>>,
     parsed: crate::Parse<'s>,
     references: Rc<Vec<CaptureReference<'s>>>,
+}
+struct PreparedModules {
+    interfaces: crate::analysis::ModuleInterfaces,
+    root_contracts: Rc<HashMap<usize, crate::analysis::FunctionContract>>,
 }
 #[derive(Clone, Debug, PartialEq)]
 struct CaptureReference<'s> {
@@ -730,10 +804,28 @@ struct CaptureReference<'s> {
     definition: Option<Span>,
 }
 impl<'s> Program<'s> {
+    /// Explicit public interface. None preserves the legacy returned-record interface.
+    pub fn exports(&self) -> Option<Vec<Name<'s>>> {
+        let mut found = false;
+        let mut names = Vec::new();
+        for statement in &self.parsed.module.items {
+            if let StmtKind::Export(exports) = &statement.kind {
+                found = true;
+                names.extend(exports.iter().cloned());
+            }
+        }
+        found.then_some(names)
+    }
     /// All syntactic imports, including imports inside function and branch bodies.
     pub fn imports(&self) -> Vec<Name<'s>> {
+        self.imports.clone()
+    }
+    pub(crate) fn import_refs(&self) -> &[Name<'s>] {
+        &self.imports
+    }
+    fn collect_imports(statements: &[Stmt<'s>]) -> Vec<Name<'s>> {
         let mut imports = Vec::new();
-        let mut pending = vec![self.parsed.module.items.as_slice()];
+        let mut pending = vec![statements];
         while let Some(statements) = pending.pop() {
             for statement in statements {
                 match &statement.kind {
@@ -759,6 +851,15 @@ impl<'s> Program<'s> {
     }
     /// Validate the reachable module graph without running any module code.
     pub fn validate_modules(&self, modules: &[(&str, &Program<'_>)]) -> Result<()> {
+        self.prepare_modules(modules).map(|_| ())
+    }
+    fn prepare_modules(&self, modules: &[(&str, &Program<'_>)]) -> Result<PreparedModules> {
+        if modules.is_empty() && self.imports.is_empty() {
+            return Ok(PreparedModules {
+                interfaces: HashMap::new(),
+                root_contracts: self.contracts.clone(),
+            });
+        }
         let mut registry = HashMap::new();
         for (name, program) in modules {
             if registry.insert(*name, *program).is_some() {
@@ -773,8 +874,8 @@ impl<'s> Program<'s> {
         }
         let mut done = std::collections::HashSet::new();
         let mut active = std::collections::HashSet::new();
-        let mut pending: Vec<(Option<&str>, Vec<Name<'_>>, usize)> =
-            vec![(None, self.imports(), 0)];
+        let mut pending: Vec<(Option<&str>, &[Name<'_>], usize)> =
+            vec![(None, self.import_refs(), 0)];
         while let Some((module, imports, index)) = pending.last_mut() {
             if *index == imports.len() {
                 if let Some(name) = module {
@@ -809,13 +910,99 @@ impl<'s> Program<'s> {
             }
             active.insert(import.text);
             let name = import.text;
-            pending.push((Some(name), program.imports(), 0));
+            pending.push((Some(name), program.import_refs(), 0));
+        }
+        let reachable: Vec<_> = modules
+            .iter()
+            .copied()
+            .filter(|(name, _)| done.contains(name))
+            .collect();
+        let interfaces = crate::analysis::module_interfaces(&reachable);
+        let root = if self.imports.is_empty() {
+            None
+        } else {
+            Some(crate::analysis::resolved_interface(
+                &mut self.parsed.clone(),
+                interfaces.clone(),
+                None,
+            ))
+        };
+        for (name, source, diagnostics) in std::iter::once((
+            None,
+            self.parsed.source,
+            root.as_ref()
+                .map(|i| i.diagnostics.as_slice())
+                .unwrap_or(&[]),
+        ))
+        .chain(reachable.iter().map(|(name, program)| {
+            (
+                Some(*name),
+                program.parsed.source,
+                interfaces[*name].diagnostics.as_slice(),
+            )
+        })) {
+            if let Some(d) = diagnostics.first() {
+                return Err(RuntimeError {
+                    stack: Vec::new(),
+                    location: None,
+                    module: name.map(str::to_owned),
+                    span: d.span,
+                    message: format!("{}: {}", d.code, d.message),
+                }
+                .locate(source));
+            }
+        }
+        Ok(PreparedModules {
+            root_contracts: root.map_or_else(|| self.contracts.clone(), |i| Rc::new(i.contracts())),
+            interfaces,
+        })
+    }
+
+    /// Require complete named-function contracts with the registered module interfaces available.
+    pub fn validate_strict_modules(&self, modules: &[(&str, &Program<'_>)]) -> Result<()> {
+        self.validate_modules(modules)?;
+        let interfaces = crate::analysis::module_interfaces(modules);
+        for (name, program) in
+            std::iter::once((None, self)).chain(modules.iter().map(|(n, p)| (Some(*n), *p)))
+        {
+            let mut parsed = program.parsed.clone();
+            crate::analysis::check_strict_modules(&mut parsed, interfaces.clone(), name);
+            if let Some(d) = parsed.diagnostics.first() {
+                return Err(RuntimeError {
+                    stack: Vec::new(),
+                    location: None,
+                    module: name.map(str::to_owned),
+                    span: d.span,
+                    message: format!("{}: {}", d.code, d.message),
+                }
+                .locate(parsed.source));
+            }
         }
         Ok(())
     }
-
+    /// Compile with complete contracts for every named function. Ambiguous dynamic boundaries require annotations.
+    pub fn compile_strict(source: &'s str) -> Result<Self> {
+        let program = Self::compile(source)?;
+        let mut parsed = program.parsed.clone();
+        crate::analysis::check_strict(&mut parsed);
+        if let Some(d) = parsed.diagnostics.first() {
+            return Err(RuntimeError {
+                stack: Vec::new(),
+                location: None,
+                module: None,
+                span: d.span,
+                message: format!("{}: {}", d.code, d.message),
+            }
+            .locate(source));
+        }
+        Ok(program)
+    }
+    pub(crate) fn parsed_clone(&self) -> crate::Parse<'s> {
+        self.parsed.clone()
+    }
     pub fn compile(source: &'s str) -> Result<Self> {
-        let (parsed, references) = crate::analyze_references(source);
+        let mut parsed = crate::parse(source);
+        let (references, contracts) = crate::analysis::compile_analysis(&mut parsed);
         if !parsed.is_valid() {
             let diagnostic = parsed.diagnostics.first();
             return Err(RuntimeError {
@@ -827,7 +1014,8 @@ impl<'s> Program<'s> {
                     || "Invalid Rush program".into(),
                     |d| format!("{}: {}", d.code, d.message),
                 ),
-            });
+            }
+            .locate(source));
         }
         let mut references: Vec<_> = references
             .into_iter()
@@ -839,8 +1027,10 @@ impl<'s> Program<'s> {
             .collect();
         references.sort_by_key(|reference| reference.usage.start);
         Ok(Self {
+            imports: Self::collect_imports(&parsed.module.items),
             parsed,
             references: Rc::new(references),
+            contracts: Rc::new(contracts),
         })
     }
     /// Numeric inputs permit parameter/time updates without changing the source.
@@ -927,6 +1117,42 @@ impl<'s> Program<'s> {
         contextual: &[HostRegistration],
         modules: &[(&'s str, &Program<'s>)],
     ) -> Result<ScriptInstance<'a, 's>> {
+        let prepared = self.prepare_modules(modules)?;
+        if !functions.is_empty() || !contextual.is_empty() {
+            let hosts: HashMap<_, _> = functions
+                .iter()
+                .cloned()
+                .chain(
+                    contextual
+                        .iter()
+                        .map(|registration| registration.function.clone()),
+                )
+                .map(|function| (function.name.to_owned(), function))
+                .collect();
+            for (name, program) in std::iter::once((None, self)).chain(
+                modules
+                    .iter()
+                    .map(|(name, program)| (Some(*name), *program)),
+            ) {
+                let mut parsed = program.parsed.clone();
+                crate::analysis::check_host_calls(
+                    &mut parsed,
+                    crate::InputLimits::conservative().max_diagnostics,
+                    true,
+                    hosts.clone(),
+                );
+                if let Some(diagnostic) = parsed.diagnostics.first() {
+                    return Err(RuntimeError {
+                        module: name.map(str::to_owned),
+                        span: diagnostic.span,
+                        message: format!("{}: {}", diagnostic.code, diagnostic.message),
+                        stack: Vec::new(),
+                        location: None,
+                    }
+                    .locate(parsed.source));
+                }
+            }
+        }
         if limits.max_depth > 64 {
             return Err(RuntimeError {
                 stack: Vec::new(),
@@ -936,9 +1162,13 @@ impl<'s> Program<'s> {
                 message: "Maximum evaluation depth cannot exceed 64".into(),
             });
         }
+        let root_contracts = prepared.root_contracts;
         let memory = memory::Budget::new(usize::MAX);
         let mut runtime = Runtime {
             module: None,
+            early_return: None,
+            coroutines: HashMap::new(),
+            user_types: HashMap::new(),
             modules: HashMap::new(),
             module_cache: memory::Slots::new(&memory, 0)
                 .expect("empty module cache requires no allocation"),
@@ -946,6 +1176,7 @@ impl<'s> Program<'s> {
                 .expect("empty module stack requires no allocation"),
             module_globals: Environment::new(&memory),
             memory: memory.clone(),
+            contracts: HashMap::from([(None, root_contracts)]),
             references: HashMap::from([(None, self.references.clone())]),
             current_references: self.references.clone(),
             cells: memory::Slots::new(&memory, 0)
@@ -1016,11 +1247,19 @@ impl<'s> Program<'s> {
             {
                 return runtime.error(self.parsed.module.span, "Duplicate module registration");
             }
+            runtime.contracts.insert(
+                Some(*name),
+                prepared
+                    .interfaces
+                    .get(*name)
+                    .map_or_else(|| program.contracts.clone(), |i| Rc::new(i.contracts())),
+            );
             runtime
                 .references
                 .insert(Some(*name), program.references.clone());
         }
-        let (initial_value, _) = runtime.statements(&self.parsed.module.items, &mut environment)?;
+        let (initial_value, _) =
+            runtime.module_statements(&self.parsed.module.items, &mut environment)?;
         runtime.instance_roots = Some(
             environment
                 .try_clone()
@@ -1052,12 +1291,16 @@ enum Flow {
 
 struct Runtime<'a, 's> {
     module: Option<&'s str>,
+    early_return: Option<Value<'s>>,
+    coroutines: HashMap<CoroutineId, coroutine::Coroutine<'s>>,
+    user_types: HashMap<(Option<&'s str>, &'s str), String>,
     modules: HashMap<&'s str, crate::Module<'s>>,
     module_cache: memory::Slots<(&'s str, Value<'s>)>,
     loading: memory::Slots<&'s str>,
     module_globals: Environment<'s>,
     memory: memory::Budget,
     references: HashMap<Option<&'s str>, Rc<Vec<CaptureReference<'s>>>>,
+    contracts: HashMap<Option<&'s str>, Rc<HashMap<usize, crate::analysis::FunctionContract>>>,
     current_references: Rc<Vec<CaptureReference<'s>>>,
     cells: memory::Slots<(Value<'s>, Option<ValueType>)>,
     released_cells: Rc<RefCell<memory::Slots<usize>>>,
@@ -1202,6 +1445,11 @@ impl<'s> Runtime<'_, 's> {
             }
             // Option/Result payloads have fixed arity, not collection length.
             // Their nested data still needs validation.
+            Value::UserData(data) => {
+                for item in &data.values {
+                    self.host_value_size(item, span, depth + 1)?;
+                }
+            }
             Value::Variant(_, items) => {
                 for item in items {
                     self.host_value_size(item, span, depth + 1)?;
@@ -1241,8 +1489,61 @@ impl<'s> Runtime<'_, 's> {
         }
         Ok(())
     }
+    fn runtime_contract(&self, ty: &ValueType) -> ValueType {
+        match ty {
+            ValueType::User(name) if name.starts_with("<entry>::") => ValueType::User(format!(
+                "{}::{}",
+                self.module.unwrap_or("<entry>"),
+                &name[9..]
+            )),
+            ValueType::List(t) => ValueType::List(Box::new(self.runtime_contract(t))),
+            ValueType::Option(t) => ValueType::Option(Box::new(self.runtime_contract(t))),
+            ValueType::Result(t, e) => ValueType::Result(
+                Box::new(self.runtime_contract(t)),
+                Box::new(self.runtime_contract(e)),
+            ),
+            ValueType::Tuple(items) => {
+                ValueType::Tuple(items.iter().map(|t| self.runtime_contract(t)).collect())
+            }
+            other => other.clone(),
+        }
+    }
     fn annotation(&self, ty: &crate::Type<'_>) -> Result<ValueType> {
-        ValueType::annotation(ty).map_err(|mut error| {
+        ValueType::annotation_with(ty, &|name| {
+            self.user_types
+                .get(&(self.module, name))
+                .cloned()
+                .or_else(|| {
+                    let (module, ty) = name.split_once('.')?;
+                    let module = module.trim();
+                    let ty = ty.trim();
+                    let index = self
+                        .module_cache
+                        .binary_search_by_key(&module, |(name, _)| *name)
+                        .ok()?;
+                    let Value::Record(exports) = &self.module_cache[index].1 else {
+                        return None;
+                    };
+                    let value = exports.get(ty)?;
+                    let constructor = match value {
+                        Value::Function(function) => Some(function),
+                        Value::Record(variants) => variants.values().find_map(|v| {
+                            if let Value::Function(f) = v {
+                                Some(f)
+                            } else {
+                                None
+                            }
+                        }),
+                        _ => None,
+                    }?;
+                    if let FunctionBody::Constructor { type_name, .. } = &constructor.body {
+                        Some(type_name.clone())
+                    } else {
+                        None
+                    }
+                })
+        })
+        .map_err(|mut error| {
             error.module = self.module.map(str::to_owned);
             error
         })
@@ -1420,6 +1721,16 @@ impl<'s> Runtime<'_, 's> {
                 ) => {
                     return self.error(span, "Functions and lazy sequences cannot be compared");
                 }
+                (Value::UserData(a), Value::UserData(b)) => {
+                    if a.type_name != b.type_name
+                        || a.variant != b.variant
+                        || a.values.len() != b.values.len()
+                    {
+                        return Ok(false);
+                    }
+                    self.charge(a.values.len(), span)?;
+                    pending.extend(a.values.iter().zip(&b.values));
+                }
                 (Value::Variant(a, left), Value::Variant(b, right)) => {
                     if a != b || left.len() != right.len() {
                         return Ok(false);
@@ -1506,8 +1817,15 @@ impl<'s> Runtime<'_, 's> {
                 Ok(true)
             }
             ExprKind::Map(patterns) => {
-                let Value::Record(fields) = value else {
-                    return Ok(false);
+                let fields = match value {
+                    Value::Record(fields) => fields,
+                    Value::UserData(data) if data.variant.is_none() => {
+                        let Some(Value::Record(fields)) = data.values.first() else {
+                            return Ok(false);
+                        };
+                        fields
+                    }
+                    _ => return Ok(false),
                 };
                 for (key, pattern) in patterns {
                     let ExprKind::Name(name) = &key.kind else {
@@ -1523,13 +1841,30 @@ impl<'s> Runtime<'_, 's> {
                 Ok(true)
             }
             ExprKind::Call { callee, arguments } => {
-                let ExprKind::Name(name) = &callee.kind else {
-                    return Ok(false);
+                let values = match (&callee.kind, value) {
+                    (ExprKind::Name(name), Value::Variant(tag, values)) if name.text == *tag => {
+                        values
+                    }
+                    (_, Value::UserData(data)) => {
+                        let Value::Function(constructor) = self.expr(callee, local)? else {
+                            return Ok(false);
+                        };
+                        let FunctionBody::Constructor {
+                            type_name: expected,
+                            variant: tag,
+                            ..
+                        } = &constructor.body
+                        else {
+                            return Ok(false);
+                        };
+                        if expected != &data.type_name || tag != &data.variant {
+                            return Ok(false);
+                        }
+                        &data.values
+                    }
+                    _ => return Ok(false),
                 };
-                let Value::Variant(tag, values) = value else {
-                    return Ok(false);
-                };
-                if name.text != *tag || arguments.len() != values.len() {
+                if arguments.len() != values.len() {
                     return Ok(false);
                 }
                 for (pattern, value) in arguments.iter().zip(values) {
@@ -1552,6 +1887,12 @@ impl<'s> Runtime<'_, 's> {
         bindings: &mut Environment<'s>,
     ) -> Result<()> {
         self.check(pattern.span)?;
+        if let (ExprKind::Map(_), Value::UserData(data)) = (&pattern.kind, value)
+            && data.variant.is_none()
+            && let Some(record @ Value::Record(_)) = data.values.first()
+        {
+            return self.bind_pattern(pattern, record, bindings);
+        }
         match (&pattern.kind, value) {
             (ExprKind::Name(name), _) => {
                 if name.text != "_" {
@@ -1582,6 +1923,55 @@ impl<'s> Runtime<'_, 's> {
             _ => self.error(pattern.span, "Value does not match binding pattern"),
         }
     }
+    fn module_statements(
+        &mut self,
+        statements: &[Stmt<'s>],
+        environment: &mut Environment<'s>,
+    ) -> Result<(Value<'s>, Flow)> {
+        let result = self.statements(statements, environment)?;
+        let exports: Vec<_> = statements
+            .iter()
+            .filter_map(|statement| {
+                if let StmtKind::Export(names) = &statement.kind {
+                    Some(names)
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect();
+        if exports.is_empty() {
+            return Ok(result);
+        }
+        self.collection_growth(
+            0,
+            exports.len(),
+            statements.first().map_or(Span::new(0, 0), |s| s.span),
+        )?;
+        let mut values = BTreeMap::new();
+        for name in exports {
+            self.string_growth(0, name.text.len(), name.span)?;
+            let value = self.expr(
+                &Expr {
+                    span: name.span,
+                    kind: ExprKind::Name(name.clone()),
+                },
+                environment,
+            )?;
+            values.insert(name.text.to_owned(), value);
+        }
+        Ok((Value::Record(values), Flow::Next))
+    }
+    fn scoped_module(
+        &mut self,
+        statements: &[Stmt<'s>],
+        mut environment: Environment<'s>,
+    ) -> Result<(Value<'s>, Flow)> {
+        let result = self.module_statements(statements, &mut environment);
+        drop(environment);
+        self.reclaim_cells();
+        result
+    }
     fn scoped_statements(
         &mut self,
         statements: &[Stmt<'s>],
@@ -1591,6 +1981,54 @@ impl<'s> Runtime<'_, 's> {
         drop(environment);
         self.reclaim_cells();
         result
+    }
+    fn declare_type(
+        &mut self,
+        statement: &Stmt<'s>,
+        environment: &mut Environment<'s>,
+    ) -> Result<()> {
+        match &statement.kind {
+            StmtKind::Struct { name, fields } => {
+                let id = format!("{}::{}", self.module.unwrap_or("<entry>"), name.text);
+                self.user_types.insert((self.module, name.text), id.clone());
+                let fields = fields
+                    .iter()
+                    .map(|(name, ty)| Ok((name.text.to_owned(), self.annotation(ty)?)))
+                    .collect::<Result<Vec<_>>>()?;
+                let constructor = self.constructor(name, id, None, fields, Vec::new())?;
+                environment
+                    .insert(name.text, constructor)
+                    .map_err(|e| self.environment_error(name.span, e))?;
+            }
+            StmtKind::Enum { name, variants } => {
+                let id = format!("{}::{}", self.module.unwrap_or("<entry>"), name.text);
+                self.user_types.insert((self.module, name.text), id.clone());
+                let mut constructors = BTreeMap::new();
+                self.collection_growth(0, variants.len(), name.span)?;
+                for (variant, types) in variants {
+                    self.string_growth(0, variant.text.len(), variant.span)?;
+                    let types = types
+                        .iter()
+                        .map(|ty| self.annotation(ty))
+                        .collect::<Result<Vec<_>>>()?;
+                    constructors.insert(
+                        variant.text.to_owned(),
+                        self.constructor(
+                            variant,
+                            id.clone(),
+                            Some(variant.text.to_owned()),
+                            Vec::new(),
+                            types,
+                        )?,
+                    );
+                }
+                environment
+                    .insert(name.text, Value::Record(constructors))
+                    .map_err(|e| self.environment_error(name.span, e))?;
+            }
+            _ => unreachable!("type declaration"),
+        }
+        Ok(())
     }
     fn statements(
         &mut self,
@@ -1605,6 +2043,11 @@ impl<'s> Runtime<'_, 's> {
             }
             self.remaining -= 1;
             match &statement.kind {
+                StmtKind::Struct { .. } | StmtKind::Enum { .. } => {
+                    self.declare_type(statement, environment)?;
+                    value = Value::Null;
+                }
+                StmtKind::Export(_) => value = Value::Null,
                 StmtKind::Import(name) => {
                     value = Value::Null;
                     if let Ok(index) = self
@@ -1661,7 +2104,7 @@ impl<'s> Runtime<'_, 's> {
                         &mut self.current_references,
                         self.references[&Some(name.text)].clone(),
                     );
-                    let result = self.scoped_statements(&module.items, module_environment);
+                    let result = self.scoped_module(&module.items, module_environment);
                     self.module = previous_module;
                     self.current_references = previous_references;
                     self.depth -= 1;
@@ -1712,7 +2155,11 @@ impl<'s> Runtime<'_, 's> {
                             .insert(name.text, value.clone())
                             .map_err(|e| self.environment_error(name.span, e))?;
                     } else {
-                        let cell = self.allocate_cell(value.clone(), contract, expression.span)?;
+                        let cell = self.allocate_cell(
+                            value.clone(),
+                            contract.or_else(|| ValueType::inferred(&value)),
+                            expression.span,
+                        )?;
                         environment
                             .insert_binding(name.text, Binding::Cell(cell))
                             .map_err(|e| self.environment_error(name.span, e))?;
@@ -1728,9 +2175,35 @@ impl<'s> Runtime<'_, 's> {
                         parameters: parameters.iter().map(|p| p.pattern.clone()).collect(),
                         parameter_types: parameters
                             .iter()
-                            .map(|p| p.ty.as_ref().map(|ty| self.annotation(ty)).transpose())
+                            .enumerate()
+                            .map(|(i, p)| {
+                                p.ty.as_ref()
+                                    .map(|ty| self.annotation(ty))
+                                    .transpose()
+                                    .map(|ty| {
+                                        ty.or_else(|| {
+                                            self.contracts
+                                                .get(&self.module)
+                                                .and_then(|m| m.get(&name.span.start))
+                                                .and_then(|c| c.0.get(i))
+                                                .cloned()
+                                                .flatten()
+                                                .map(|ty| self.runtime_contract(&ty))
+                                        })
+                                    })
+                            })
                             .collect::<Result<Vec<_>>>()?,
-                        result_type: result.as_ref().map(|ty| self.annotation(ty)).transpose()?,
+                        result_type: result
+                            .as_ref()
+                            .map(|ty| self.annotation(ty))
+                            .transpose()?
+                            .or_else(|| {
+                                self.contracts
+                                    .get(&self.module)
+                                    .and_then(|m| m.get(&name.span.start))
+                                    .and_then(|c| c.1.as_ref())
+                                    .map(|ty| self.runtime_contract(ty))
+                            }),
                         name: Some(name.text),
                         module: self.module,
                         body: FunctionBody::Block(body.clone()),
@@ -1863,6 +2336,15 @@ impl<'s> Runtime<'_, 's> {
     fn inner(&mut self, expression: &Expr<'s>, environment: &Environment<'s>) -> Result<Value<'s>> {
         let span = expression.span;
         match &expression.kind {
+            ExprKind::Try(value) => match self.expr(value, environment)? {
+                Value::Variant("Some" | "Ok", mut items) if items.len() == 1 => Ok(items.remove(0)),
+                value @ Value::Variant("None" | "Err", _) => {
+                    self.early_return = Some(value);
+                    self.error(span, "Internal early return")
+                }
+                _ => self.error(span, "? requires Option or Result"),
+            },
+
             ExprKind::String(text) => {
                 self.charge(text.len().saturating_sub(2), span)?;
                 let mut decoded = String::new();
@@ -1946,17 +2428,7 @@ impl<'s> Runtime<'_, 's> {
                         "%=" => "%",
                         _ => return self.error(span, "Unknown assignment operator"),
                     };
-                    self.expr(
-                        &Expr {
-                            span,
-                            kind: ExprKind::Binary {
-                                operator,
-                                left: target.clone(),
-                                right: value.clone(),
-                            },
-                        },
-                        environment,
-                    )?
+                    self.binary_expression(operator, target, value, environment, span)?
                 };
                 if self.cells[index]
                     .1
@@ -2037,6 +2509,18 @@ impl<'s> Runtime<'_, 's> {
                         }
                         _ => self.error(field.span, "Unknown mesh field"),
                     };
+                }
+                if let Value::UserData(data) = &object
+                    && data.variant.is_none()
+                    && let Some(Value::Record(fields)) = data.values.first()
+                {
+                    return fields.get(field.text).cloned().ok_or_else(|| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
+                        module: self.module.map(str::to_owned),
+                        span: field.span,
+                        message: format!("Unknown struct field: {}", field.text),
+                    });
                 }
                 if let Value::Record(fields) = object {
                     return fields.get(field.text).cloned().ok_or_else(|| RuntimeError {
@@ -2173,107 +2657,132 @@ impl<'s> Runtime<'_, 's> {
                 operator,
                 left,
                 right,
-            } => {
-                let left = self.expr(left, environment)?;
-                if matches!(*operator, "and" | "&&" | "or" | "||") {
-                    let Value::Bool(left) = left else {
-                        return self.error(span, "Boolean operand required");
-                    };
-                    if left == matches!(*operator, "or" | "||") {
-                        return Ok(Value::Bool(left));
-                    }
-                    let right = self.expr(right, environment)?;
-                    return if matches!(right, Value::Bool(_)) {
-                        Ok(right)
-                    } else {
-                        self.error(span, "Boolean operand required")
-                    };
-                }
-                let right = self.expr(right, environment)?;
-                if matches!(*operator, "==" | "!=") {
-                    let equal = self.equal(&left, &right, span)?;
-                    return Ok(Value::Bool(if *operator == "==" { equal } else { !equal }));
-                }
-                if let (Value::String(a), Value::String(b), "+") = (&left, &right, *operator) {
-                    self.string_growth(a.len(), b.len(), span)?;
-                    self.charge(a.len(), span)?;
-                    self.charge(b.len(), span)?;
-                    return Ok(Value::String(format!("{a}{b}")));
-                }
-                if matches!(left, Value::Angle(_)) || matches!(right, Value::Angle(_)) {
-                    let radians = match (&left, &right, *operator) {
-                        (Value::Angle(a), Value::Angle(b), "+") => a + b,
-                        (Value::Angle(a), Value::Angle(b), "-") => a - b,
-                        (Value::Angle(a), Value::Number(b), "*")
-                        | (Value::Number(b), Value::Angle(a), "*") => a * b,
-                        (Value::Angle(a), Value::Number(b), "/") => a / b,
-                        _ => return self.error(span, "Invalid angle operands"),
-                    };
-                    if !radians.is_finite() {
-                        return self.error(span, "Non-finite angle");
-                    }
-                    return Ok(Value::Angle(radians));
-                }
-                if let (Value::Quaternion(a), Value::Quaternion(b), "*") =
-                    (&left, &right, *operator)
-                {
-                    return Ok(Value::Quaternion(Box::new(a.compose(b))));
-                }
-                if let (Value::Matrix(a), Value::Matrix(b), "*") = (&left, &right, *operator) {
-                    return a
-                        .multiply(b)
-                        .map(|matrix| Value::Matrix(Box::new(matrix)))
-                        .ok_or_else(|| RuntimeError {
-                            stack: Vec::new(),
-                            location: None,
-                            module: self.module.map(str::to_owned),
-                            span,
-                            message: "Matrix multiplication overflow".into(),
-                        });
-                }
-                if matches!(left, Value::Vector(_)) || matches!(right, Value::Vector(_)) {
-                    let components = match (&left, &right, *operator) {
-                        (Value::Vector(a), Value::Vector(b), "+" | "-") if a.len() == b.len() => a
-                            .iter()
-                            .zip(b)
-                            .map(|(a, b)| if *operator == "+" { a + b } else { a - b })
-                            .collect(),
-                        (Value::Vector(a), Value::Number(b), "*" | "/") => a
-                            .iter()
-                            .map(|a| if *operator == "*" { a * b } else { a / b })
-                            .collect(),
-                        (Value::Number(a), Value::Vector(b), "*") => {
-                            b.iter().map(|b| a * b).collect()
-                        }
-                        _ => return self.error(span, "Invalid vector operands or dimensions"),
-                    };
-                    return self.vector(components, span);
-                }
-                let (Value::Number(a), Value::Number(b)) = (left, right) else {
-                    return self.error(span, "Numeric operands required");
-                };
-                let number = match *operator {
-                    "+" => a + b,
-                    "-" => a - b,
-                    "*" => a * b,
-                    "/" => a / b,
-                    "%" => a % b,
-                    "**" => a.powf(b),
-                    "==" => return Ok(Value::Bool(a == b)),
-                    "!=" => return Ok(Value::Bool(a != b)),
-                    "<" => return Ok(Value::Bool(a < b)),
-                    ">" => return Ok(Value::Bool(a > b)),
-                    "<=" => return Ok(Value::Bool(a <= b)),
-                    ">=" => return Ok(Value::Bool(a >= b)),
-                    _ => return self.error(span, "Unsupported binary operator"),
-                };
-                if number.is_finite() {
-                    Ok(Value::Number(number))
-                } else {
-                    self.error(span, "Non-finite arithmetic result")
-                }
-            }
+            } => self.binary_inner(operator, left, right, environment, span),
             _ => self.error(span, "Expression is not executable yet"),
+        }
+    }
+    fn binary_expression(
+        &mut self,
+        operator: &str,
+        left: &Expr<'s>,
+        right: &Expr<'s>,
+        environment: &Environment<'s>,
+        span: Span,
+    ) -> Result<Value<'s>> {
+        // Preserve the step/depth of the synthetic binary expression formerly
+        // used by compound assignment, while borrowing both operands' AST.
+        self.check(span)?;
+        if self.remaining == 0 || self.depth >= self.max_depth {
+            return self.error(span, "Execution limit exceeded");
+        }
+        self.remaining -= 1;
+        self.depth += 1;
+        let result = self.binary_inner(operator, left, right, environment, span);
+        self.depth -= 1;
+        result
+    }
+    #[inline(always)]
+    fn binary_inner(
+        &mut self,
+        operator: &str,
+        left: &Expr<'s>,
+        right: &Expr<'s>,
+        environment: &Environment<'s>,
+        span: Span,
+    ) -> Result<Value<'s>> {
+        let left = self.expr(left, environment)?;
+        if matches!(operator, "and" | "&&" | "or" | "||") {
+            let Value::Bool(left) = left else {
+                return self.error(span, "Boolean operand required");
+            };
+            if left == matches!(operator, "or" | "||") {
+                return Ok(Value::Bool(left));
+            }
+            let right = self.expr(right, environment)?;
+            return if matches!(right, Value::Bool(_)) {
+                Ok(right)
+            } else {
+                self.error(span, "Boolean operand required")
+            };
+        }
+        let right = self.expr(right, environment)?;
+        if matches!(operator, "==" | "!=") {
+            let equal = self.equal(&left, &right, span)?;
+            return Ok(Value::Bool(if operator == "==" { equal } else { !equal }));
+        }
+        if let (Value::String(a), Value::String(b), "+") = (&left, &right, operator) {
+            self.string_growth(a.len(), b.len(), span)?;
+            self.charge(a.len(), span)?;
+            self.charge(b.len(), span)?;
+            return Ok(Value::String(format!("{a}{b}")));
+        }
+        if matches!(left, Value::Angle(_)) || matches!(right, Value::Angle(_)) {
+            let radians = match (&left, &right, operator) {
+                (Value::Angle(a), Value::Angle(b), "+") => a + b,
+                (Value::Angle(a), Value::Angle(b), "-") => a - b,
+                (Value::Angle(a), Value::Number(b), "*")
+                | (Value::Number(b), Value::Angle(a), "*") => a * b,
+                (Value::Angle(a), Value::Number(b), "/") => a / b,
+                _ => return self.error(span, "Invalid angle operands"),
+            };
+            if !radians.is_finite() {
+                return self.error(span, "Non-finite angle");
+            }
+            return Ok(Value::Angle(radians));
+        }
+        if let (Value::Quaternion(a), Value::Quaternion(b), "*") = (&left, &right, operator) {
+            return Ok(Value::Quaternion(Box::new(a.compose(b))));
+        }
+        if let (Value::Matrix(a), Value::Matrix(b), "*") = (&left, &right, operator) {
+            return a
+                .multiply(b)
+                .map(|matrix| Value::Matrix(Box::new(matrix)))
+                .ok_or_else(|| RuntimeError {
+                    stack: Vec::new(),
+                    location: None,
+                    module: self.module.map(str::to_owned),
+                    span,
+                    message: "Matrix multiplication overflow".into(),
+                });
+        }
+        if matches!(left, Value::Vector(_)) || matches!(right, Value::Vector(_)) {
+            let components = match (&left, &right, operator) {
+                (Value::Vector(a), Value::Vector(b), "+" | "-") if a.len() == b.len() => a
+                    .iter()
+                    .zip(b)
+                    .map(|(a, b)| if operator == "+" { a + b } else { a - b })
+                    .collect(),
+                (Value::Vector(a), Value::Number(b), "*" | "/") => a
+                    .iter()
+                    .map(|a| if operator == "*" { a * b } else { a / b })
+                    .collect(),
+                (Value::Number(a), Value::Vector(b), "*") => b.iter().map(|b| a * b).collect(),
+                _ => return self.error(span, "Invalid vector operands or dimensions"),
+            };
+            return self.vector(components, span);
+        }
+        let (Value::Number(a), Value::Number(b)) = (left, right) else {
+            return self.error(span, "Numeric operands required");
+        };
+        let number = match operator {
+            "+" => a + b,
+            "-" => a - b,
+            "*" => a * b,
+            "/" => a / b,
+            "%" => exact_remainder(a, b),
+            "**" => a.powf(b),
+            "==" => return Ok(Value::Bool(a == b)),
+            "!=" => return Ok(Value::Bool(a != b)),
+            "<" => return Ok(Value::Bool(a < b)),
+            ">" => return Ok(Value::Bool(a > b)),
+            "<=" => return Ok(Value::Bool(a <= b)),
+            ">=" => return Ok(Value::Bool(a >= b)),
+            _ => return self.error(span, "Unsupported binary operator"),
+        };
+        if number.is_finite() {
+            Ok(Value::Number(number))
+        } else {
+            self.error(span, "Non-finite arithmetic result")
         }
     }
     fn vector(&self, values: Vec<f64>, span: Span) -> Result<Value<'s>> {
@@ -2552,22 +3061,25 @@ impl<'s> Runtime<'_, 's> {
             return self.error(span, "Execution limit exceeded");
         }
         self.remaining -= 1;
-        let name = match &function {
-            Value::Function(f) => f.name.unwrap_or("<lambda>").to_owned(),
-            Value::Host(f) => f.name.to_owned(),
-            Value::Builtin(b) => format!("{b:?}"),
-            _ => "<non-callable>".to_owned(),
+        // Capture only borrowed/copyable labels on the successful path. Stack
+        // strings and source coordinates are needed only when a call fails.
+        let (name, builtin) = match &function {
+            Value::Function(f) => (f.name.unwrap_or("<lambda>"), None),
+            Value::Host(f) => (f.name, None),
+            Value::Builtin(b) => ("", Some(*b)),
+            _ => ("<non-callable>", None),
         };
-        let module = self.module.map(str::to_owned);
-        let source = self.sources.get(&self.module).copied().unwrap_or("");
-        let prefix = &source[..span.start.min(source.len())];
-        let line = prefix.bytes().filter(|b| *b == b'\n').count() + 1;
-        let column = prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1;
+        let module = self.module;
         let result = match function {
             Value::Function(function) => self.call_user(function, arguments, span),
             other => self.call_inner(other, arguments, span),
         };
         result.map_err(|mut error| {
+            let name = builtin.map_or_else(|| name.to_owned(), |b| format!("{b:?}"));
+            let source = self.sources.get(&module).copied().unwrap_or("");
+            let prefix = &source[..span.start.min(source.len())];
+            let line = prefix.bytes().filter(|b| *b == b'\n').count() + 1;
+            let column = prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1;
             if error.location.is_none()
                 && let Some((_, source)) = self
                     .sources
@@ -2578,7 +3090,7 @@ impl<'s> Runtime<'_, 's> {
             }
             error.stack.push(CallFrame {
                 function: name,
-                module,
+                module: module.map(str::to_owned),
                 span,
                 line,
                 column,
@@ -3165,6 +3677,87 @@ impl<'s> Runtime<'_, 's> {
         self.error(span, "Value is not callable")
     }
 
+    fn constructor(
+        &self,
+        name: &Name<'s>,
+        type_name: String,
+        variant: Option<String>,
+        fields: Vec<(String, ValueType)>,
+        types: Vec<ValueType>,
+    ) -> Result<Value<'s>> {
+        let count = if variant.is_none() { 1 } else { types.len() };
+        Ok(Value::Function(Rc::new(Closure {
+            module: self.module,
+            name: Some(name.text),
+            parameters: (0..count)
+                .map(|_| Expr {
+                    span: name.span,
+                    kind: ExprKind::Name(Name {
+                        text: "_",
+                        span: name.span,
+                    }),
+                })
+                .collect(),
+            parameter_types: if variant.is_none() {
+                vec![None]
+            } else {
+                types.into_iter().map(Some).collect()
+            },
+            result_type: Some(ValueType::User(type_name.clone())),
+            body: FunctionBody::Constructor {
+                type_name,
+                variant,
+                fields,
+            },
+            environment: memory::Shared::new(&self.memory, Environment::new(&self.memory))
+                .map_err(|e| self.environment_error(name.span, e))?,
+            references: Rc::new(Vec::new()),
+        })))
+    }
+    fn call_constructor(
+        &mut self,
+        function: &Closure<'s>,
+        arguments: Cow<'_, [Value<'s>]>,
+        span: Span,
+    ) -> Result<Value<'s>> {
+        if let FunctionBody::Constructor {
+            type_name,
+            variant,
+            fields,
+        } = &function.body
+        {
+            if variant.is_none() {
+                let Value::Record(supplied) = &arguments[0] else {
+                    return self.error(span, "Struct constructor requires a record");
+                };
+                if supplied.len() != fields.len()
+                    || fields
+                        .iter()
+                        .any(|(name, ty)| supplied.get(name).is_none_or(|value| !ty.accepts(value)))
+                {
+                    return self.error(span, "Struct fields do not match declaration");
+                }
+            }
+            self.collection_growth(
+                0,
+                if variant.is_none() {
+                    fields.len()
+                } else {
+                    arguments.len()
+                },
+                span,
+            )?;
+            for value in arguments.iter() {
+                self.host_value_size(value, span, 0)?;
+            }
+            return Ok(Value::UserData(Box::new(UserData {
+                type_name: type_name.clone(),
+                variant: variant.clone(),
+                values: arguments.into_owned(),
+            })));
+        }
+        unreachable!("constructor body")
+    }
     fn call_user(
         &mut self,
         function: Rc<Closure<'s>>,
@@ -3181,6 +3774,9 @@ impl<'s> Runtime<'_, 's> {
             .any(|(ty, value)| ty.as_ref().is_some_and(|ty| !ty.accepts(value)))
         {
             return self.error(span, "Argument does not match its type annotation");
+        }
+        if matches!(function.body, FunctionBody::Constructor { .. }) {
+            return self.call_constructor(&function, arguments, span);
         }
         let mut environment = Environment::child(function.environment.clone());
         if let Some(name) = function.name {
@@ -3200,6 +3796,7 @@ impl<'s> Runtime<'_, 's> {
             }
         }
         let result = match &function.body {
+            FunctionBody::Constructor { .. } => unreachable!("constructors return above"),
             FunctionBody::Expression(body) => self.expr(body, &environment),
             FunctionBody::Block(body) => {
                 if self.depth >= self.max_depth {
@@ -3220,6 +3817,15 @@ impl<'s> Runtime<'_, 's> {
                 self.depth -= 1;
                 result
             }
+        };
+        let result = if result.is_err() {
+            if let Some(value) = self.early_return.take() {
+                Ok(value)
+            } else {
+                result
+            }
+        } else {
+            result
         };
         self.module = previous_module;
         self.current_references = previous_references;
@@ -3296,4 +3902,55 @@ pub fn builtin_catalog() -> &'static [(&'static str, Builtin)] {
         ("group_by", Builtin::GroupBy),
         ("fold_by", Builtin::FoldBy),
     ]
+}
+
+#[cfg(test)]
+mod remainder_tests {
+    use super::exact_remainder;
+    #[test]
+    fn optimized_remainder_matches_ieee_bits() {
+        let edge = [
+            0.,
+            -0.,
+            1.,
+            -1.,
+            3.,
+            -3.,
+            0.25,
+            -0.25,
+            9_007_199_254_740_990.,
+            -9_007_199_254_740_990.,
+            9_007_199_254_740_991.,
+            -9_007_199_254_740_991.,
+            9_007_199_254_740_992.,
+            f64::MAX,
+            f64::MIN_POSITIVE,
+            f64::from_bits(1),
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        for a in edge {
+            for b in edge {
+                compare(a, b);
+            }
+        }
+        let mut state = 0x1234567812345678u64;
+        for _ in 0..100_000 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let a = (state as i64 % 9_007_199_254_740_991) as f64;
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let b = (state as i64 % 9_007_199_254_740_991) as f64;
+            compare(a, b);
+            compare(f64::from_bits(state), a);
+        }
+    }
+    fn compare(a: f64, b: f64) {
+        let expected = a % b;
+        let actual = exact_remainder(a, b);
+        if expected.is_nan() {
+            assert!(actual.is_nan());
+        } else {
+            assert_eq!(actual.to_bits(), expected.to_bits(), "{a} % {b}");
+        }
+    }
 }

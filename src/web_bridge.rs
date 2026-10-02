@@ -10,6 +10,42 @@ use crate::plugins::builtin_registry;
 
 use crate::plugins::analyze_host;
 
+/// Compute a validated, document-local Rush rename without executing the source.
+pub fn rename_rush(source: &str, offset: usize, replacement: &str) -> String {
+    #[cfg(feature = "rush")]
+    {
+        use themoretheless_tokenizer_rush::{Program, rename_project_symbol};
+        let edits = Program::compile(source)
+            .map_err(|e| e.message)
+            .and_then(|p| rename_project_symbol(&[("main", &p)], "main", offset, replacement));
+        match edits {
+            Ok(edits) => {
+                let mut output = String::from("{\"ok\":true,\"edits\":[");
+                for (i, edit) in edits.iter().enumerate() {
+                    if i > 0 {
+                        output.push(',');
+                    }
+                    let _ = write!(
+                        output,
+                        "{{\"start\":{},\"end\":{},\"replacement\":{}}}",
+                        edit.span.start,
+                        edit.span.end,
+                        json_string(&edit.replacement)
+                    );
+                }
+                output.push_str("]}");
+                output
+            }
+            Err(error) => format!("{{\"ok\":false,\"error\":{}}}", json_string(&error)),
+        }
+    }
+    #[cfg(not(feature = "rush"))]
+    {
+        let _ = (source, offset, replacement);
+        String::from("{\"ok\":false,\"error\":\"Rush support is disabled\"}")
+    }
+}
+
 /// Tokenizes source for the development playground and returns a JSON payload.
 ///
 /// `language` is a language id (`json`, `url`, …). `mode` is the dialect

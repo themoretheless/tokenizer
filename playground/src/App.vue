@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { LANGUAGES, defaultModeFor, groupLabelFor, groupedLanguages, languageMeta, modeLabelFor, sampleFor } from './languages.js'
 import { INVISIBLE_KINDS, kindColor, kindCounts } from './kinds.js'
 import { LANGUAGE_CASES } from '../tests/language-cases.js'
-import { runTokenizer, runRush } from './tokenizer.js'
+import { runTokenizer, runRush, renameRush } from './tokenizer.js'
 import { bytePosition, sourcePosition, utf16OffsetFromByte } from './source-position.js'
 import { completionRange as findCompletionRange, applyCompletion, completionCandidates } from './completion.js'
 import { PRESETS, depthLabel, depthOf, loadCatalog } from './catalog.js'
@@ -26,6 +26,8 @@ const mode = ref(initialMode)
 const layer = ref(initialLayer)
 const result = ref(null)
 const resultSource = ref('')
+const renameState = ref(null)
+const renameInput = ref(null)
 const completions = ref([])
 let completionRange = null
 const loading = ref(false)
@@ -432,7 +434,43 @@ function goToDefinition(offset) {
   if (reference?.definition) focusSpan(reference.definition.start, reference.definition.end)
 }
 
+async function beginRename() {
+  if (source.value !== resultSource.value) return
+  const offset = new TextEncoder().encode(source.value.slice(0, textareaEl.value.selectionStart)).length
+  const contains = span => span.start <= offset && offset < span.end
+  const reference = result.value?.references?.find(item => contains(item) && item.definition)
+  const binding = result.value?.bindings?.find(item => contains(item.definition))
+  const span = reference ?? binding?.definition
+  if (!span) { error.value = 'No resolved symbol at cursor'; return }
+  renameState.value = { snapshot: source.value, offset, name: source.value.slice(utf16OffsetFromByte(source.value, span.start), utf16OffsetFromByte(source.value, span.end)) }
+  await nextTick()
+  renameInput.value?.focus()
+  renameInput.value?.select()
+}
+
+async function submitRename() {
+  const request = renameState.value
+  if (!request || request.snapshot !== source.value) { error.value = 'Source changed; start rename again'; return }
+  try {
+    const result = await renameRush(request.snapshot, request.offset, request.name)
+    if (request.snapshot !== source.value) { error.value = 'Source changed; start rename again'; return }
+    if (!result.ok) { error.value = result.error; return }
+    let renamed = request.snapshot
+    for (const edit of [...result.edits].sort((a, b) => b.start - a.start)) {
+      const start = utf16OffsetFromByte(request.snapshot, edit.start)
+      const end = utf16OffsetFromByte(request.snapshot, edit.end)
+      renamed = renamed.slice(0, start) + edit.replacement + renamed.slice(end)
+    }
+    source.value = renamed
+    renameState.value = null
+    error.value = ''
+    await nextTick()
+    textareaEl.value?.focus()
+  } catch (cause) { error.value = cause.message }
+}
+
 function definitionAtCursor(event) {
+  if (event.key === 'F2' && language.value === 'rush') { event.preventDefault(); beginRename(); return }
   if (language.value === 'rush' && event.ctrlKey && event.code === 'Space') {
     event.preventDefault()
     completionRange = findCompletionRange(source.value, textareaEl.value.selectionStart, textareaEl.value.selectionEnd)
@@ -734,7 +772,7 @@ onBeforeUnmount(() => {
     <section v-else class="workspace" :class="{ 'is-compare': view === 'compare' }">
       <article class="panel editor-panel">
         <div class="panel-head">
-          <span>01 / INPUT <small v-if="language === 'rush'">· Ctrl+Space: names · F12: definition</small></span>
+          <span>01 / INPUT <small v-if="language === 'rush'">· Ctrl+Space: names · F12: definition · F2: rename</small></span>
           <span>{{ language }} · L{{ cursor.line }}:{{ cursor.column }}<template v-if="cursor.selected"> · {{ cursor.selected }} SEL</template> · {{ result?.sourceBytes ?? 0 }} BYTES</span>
         </div>
         <div v-if="completions.length" aria-label="Rush name suggestions" style="max-height: 140px; overflow: auto; padding: 12px">
@@ -758,6 +796,11 @@ onBeforeUnmount(() => {
             @select="updateCursor"
           />
         </div>
+        <form v-if="renameState && language === 'rush'" class="rename-form" @submit.prevent="submitRename">
+          <label>Rename <input ref="renameInput" v-model="renameState.name" aria-label="New symbol name" @keydown.esc="renameState = null" /></label>
+          <button type="submit">Apply</button>
+          <button type="button" @click="renameState = null">Cancel</button>
+        </form>
       </article>
 
       <article class="panel output-panel">

@@ -210,7 +210,7 @@ fn guarded_match_uses_bindings_and_skips_unmatched_conditions() {
         evaluate("match 1 { x if (x) => x, _ => 0 }", 100)
             .unwrap_err()
             .message
-            .contains("guard must be boolean")
+            .contains("Condition must be a boolean")
     );
     assert!(
         !analyze_names(

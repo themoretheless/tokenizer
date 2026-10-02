@@ -39,6 +39,15 @@ pub struct Stmt<'s> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StmtKind<'s> {
+    Struct {
+        name: Name<'s>,
+        fields: Vec<(Name<'s>, Type<'s>)>,
+    },
+    Enum {
+        name: Name<'s>,
+        variants: Vec<(Name<'s>, Vec<Type<'s>>)>,
+    },
+    Export(Vec<Name<'s>>),
     Import(Name<'s>),
     Destructure {
         pattern: Expr<'s>,
@@ -86,6 +95,7 @@ pub struct Expr<'s> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprKind<'s> {
+    Try(Box<Expr<'s>>),
     If {
         condition: Box<Expr<'s>>,
         then_value: Box<Expr<'s>>,

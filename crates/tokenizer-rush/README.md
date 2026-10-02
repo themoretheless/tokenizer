@@ -6,7 +6,11 @@ including in both host token layers. An optional binding analysis pass checks
 duplicate declarations and immutable bindings. The experimental evaluator below
 executes a functional subset with runtime contracts and portable graphics values.
 A compact [language contract](../../docs/rush-language-spec.md) defines executable semantics.
-General type inference and a whole-runtime memory limit remain planned.
+Complete type inference and a whole-runtime memory limit remain planned.
+`Program::compile` runs the existing static call/type analysis before execution,
+including function bodies and unselected branches. Known incompatible annotations,
+arguments, returns, conditions and operations fail at load time. Unknown host or
+dynamic values still require runtime checks.
 
 ## Basic syntax
 
@@ -60,7 +64,7 @@ legacy spellings. `Geometry`, `Row`, `T`, `print`, `where`, `select`, `count`,
 - Functions, `if` / `else if` / `else`, `while`, and `for name in expression`.
   `foreach` is retained as an alias of `for`.
 - `return [expression]` inside a function; `yield expression` inside a function
-  or loop; `break` / `continue` inside a loop.
+  or loop (suspension executes only through the coroutine API); `break` / `continue` inside a loop.
 - Names, decimal numbers, strings, `true`, `false`, `null`, lists, maps,
   calls, member access and indexing. A map uses `{key: value, ...}`.
 - Assignment to a name, member or index with `=`, `+=`, `-=`, `*=`, `/=`, `%=`.
@@ -94,8 +98,8 @@ A match contains a scrutinee and `pattern => expression` arms in braces.
 An arm value starts on the same line as `=>`; use parentheses for a multiline
 value. Separate arms by commas or newlines. Patterns are literals, binding names or
 `_`, variants, tuples and records. Guards use `if (condition)`. An unguarded
-binding/wildcard must be last. Empty matches are errors. Exhaustiveness analysis
-and block-valued arms are not implemented.
+binding/wildcard must be last. Empty matches are errors. Known enums, booleans and annotated Option/Result values require exhaustive
+unguarded coverage at compile time. Block-valued arms are not implemented.
 
 ## Rust API and compatibility
 
@@ -1246,3 +1250,76 @@ allocator overhead, temporary evaluation values and opaque allocations inside
 host contexts are excluded. The managed-allocation migration is still required
 for a hard ceiling over all runtime-owned allocations. Existing per-string,
 per-collection and execution limits remain independent.
+
+
+### User-defined data types
+
+```rush
+struct Settings { enabled: bool, speed: number }
+enum State { Idle, Moving(vec3) }
+let settings = Settings({enabled: true, speed: 3})
+let state = State.Moving(vec3(1, 2, 3))
+match state { State.Idle() => 0, State.Moving(v) => v.x * settings.speed }
+```
+
+Module-level declarations introduce nominal types; constructors validate exact
+struct fields and typed enum payloads. Type annotations compose with list, tuple,
+Option and Result. `Program::compile` checks constructors, field access and
+exhaustive matches for known finite domains, including unused functions/branches.
+Guards and refutable payload patterns need additional covering arms. Unknown
+dynamic values still retain runtime checks. See the language contract for the
+scope, module identity, editor and state-export boundaries.
+
+`?` unwraps Some/Ok or returns None/Err from the nearest named function. The
+function must declare a compatible Option/Result return type. Later effects are
+skipped, earlier mutations persist, and runtime failures/cancellation stay errors.
+For example: `fn next(v: Option[number]) -> Option[number] { return Some(v? + 1) }`.
+
+
+### Explicit modules and coroutine tasks
+
+`export name, other` creates a module's public interface; other bindings remain
+private. Imported namespaces are checked before initialization when explicit
+interfaces are registered. `analyze_editor_modules` exposes the same public
+members to editors. Legacy modules returning an export record remain supported.
+All missing imports and cycles, including unused imports, fail before execution.
+
+`spawn_coroutine`, `resume_coroutine` and `cancel_coroutine` on `ScriptInstance`
+provide cooperative suspension using `yield`. Locals and loop iterators survive
+between resumes; cancellation drops them without rolling back mutations. The
+host interprets yielded timer/event requests and schedules wakeups. Synchronous
+nested function calls cannot suspend. Owned instances expose this API through
+`with_instance`. Run the complete deterministic example:
+
+```sh
+cargo run -p themoretheless-tokenizer-rush --example coroutine_motion
+```
+
+See the language contract for cancellation, resource, budget and module typing
+boundaries. Full inference for unknown/dynamic values remains planned.
+
+
+### Module contracts, strict functions and project editing
+
+Registered explicit interfaces include function signatures and nominal type definitions.
+Qualified annotations (`model.Settings`, `list[model.Settings]`) and transitive reexports
+are checked before module initialization. Public functions require complete contracts;
+ambiguous parameters/results need annotations. Known operations, calls and returns infer
+parameter/result contracts, including self-recursion. Runtime checks inferred arguments
+before entering a function body.
+
+Use `Program::compile_strict` for one script, `validate_strict_modules` for a registered
+project, or `rush --check main.r --strict --module model=model.r`. Ordinary compilation
+retains dynamic compatibility. Generic and higher-order function contracts remain outside
+this strict mode; use explicit supported value annotations at dynamic boundaries.
+
+`analyze_editor_project`, `import_completions` and `rename_project_symbol` expose project
+navigation, module completion and checked edits spanning `.r` documents. References carry
+`definition_module`; nominal fields/variants are distinct symbols. Renames reject collisions
+and reference capture. Playground supports the same checked single-document rename via F2.
+
+`CoroutineScheduler` provides host-driven monotonic time and broadcast events through
+`Wait.After(number)` / `Wait.Event(str)` requests. Tasks run by wake time then creation
+order, once per poll. Cancellation and scheduler drop remove subscriptions and close task
+iterators. Events are unbuffered and payloads use ordinary instance handlers. See the
+language contract for exact scheduling and cancellation semantics.
