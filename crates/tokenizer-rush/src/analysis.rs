@@ -971,6 +971,7 @@ impl<'s> Checker<'s> {
             || matches!(name.text, "Option" | "Result" | "list" | "tuple")
             || ValueType::annotation(&crate::Type {
                 name: name.clone(),
+                path: vec![name.clone()],
                 arguments: Vec::new(),
             })
             .is_ok();
@@ -1788,17 +1789,21 @@ impl<'s> Checker<'s> {
         }
     }
     fn annotation_references(&mut self, ty: &crate::Type<'s>) {
-        if let Some(id) = self.resolve_type(ty.name.text)
+        let qualified = ty.qualified_name();
+        if let Some(id) = self.resolve_type(&qualified)
             && let Some(definition) = self.user_types.get(&id)
         {
-            let start = ty.name.span.end - ty.name.text.rsplit('.').next().unwrap().trim().len();
+            let start = ty
+                .path
+                .last()
+                .map_or(ty.name.span.start, |part| part.span.start);
             let module = definition
                 .module
                 .clone()
                 .filter(|m| self.module.as_ref() != Some(m));
             // A qualified annotation refers to the public alias, which may reexport
             // a differently named nominal type from another module.
-            let public = ty.name.text.split_once('.').and_then(|(m, n)| {
+            let public = qualified.split_once('.').and_then(|(m, n)| {
                 self.module_exports
                     .get(m.trim())
                     .and_then(|i| i.symbols.get(n.trim()))

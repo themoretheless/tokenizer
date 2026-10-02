@@ -10,7 +10,24 @@ pub struct Name<'s> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Type<'s> {
     pub name: Name<'s>,
+    pub path: Vec<Name<'s>>,
     pub arguments: Vec<Type<'s>>,
+}
+
+impl Type<'_> {
+    pub fn qualified_name(&self) -> std::borrow::Cow<'_, str> {
+        if self.path.len() <= 1 {
+            std::borrow::Cow::Borrowed(self.name.text)
+        } else {
+            std::borrow::Cow::Owned(
+                self.path
+                    .iter()
+                    .map(|n| n.text)
+                    .collect::<Vec<_>>()
+                    .join("."),
+            )
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,7 +45,7 @@ pub struct Module<'s> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block<'s> {
     pub span: Span,
-    pub stmts: Vec<Stmt<'s>>,
+    pub stmts: std::rc::Rc<Vec<Stmt<'s>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

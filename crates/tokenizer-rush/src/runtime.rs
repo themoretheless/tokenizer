@@ -561,12 +561,13 @@ impl ValueType {
         ty: &crate::Type<'_>,
         resolve: &impl Fn(&str) -> Option<String>,
     ) -> Result<Self> {
+        let qualified = ty.qualified_name();
         if ty.arguments.is_empty()
-            && let Some(name) = resolve(ty.name.text)
+            && let Some(name) = resolve(&qualified)
         {
             return Ok(Self::User(name));
         }
-        let primitive = match ty.name.text {
+        let primitive = match qualified.as_ref() {
             "angle" => Some(Self::Angle),
             "number" | "f64" | "float" => Some(Self::Number),
             "bool" => Some(Self::Bool),
@@ -3074,29 +3075,38 @@ impl<'s> Runtime<'_, 's> {
             Value::Function(function) => self.call_user(function, arguments, span),
             other => self.call_inner(other, arguments, span),
         };
-        result.map_err(|mut error| {
+        result.map_err(|error| {
             let name = builtin.map_or_else(|| name.to_owned(), |b| format!("{b:?}"));
-            let source = self.sources.get(&module).copied().unwrap_or("");
-            let prefix = &source[..span.start.min(source.len())];
-            let line = prefix.bytes().filter(|b| *b == b'\n').count() + 1;
-            let column = prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1;
-            if error.location.is_none()
-                && let Some((_, source)) = self
-                    .sources
-                    .iter()
-                    .find(|(module, _)| module.map(str::to_owned) == error.module)
-            {
-                error = error.locate(source);
-            }
-            error.stack.push(CallFrame {
-                function: name,
-                module: module.map(str::to_owned),
-                span,
-                line,
-                column,
-            });
-            error
+            self.call_error(error, name, module, span)
         })
+    }
+    fn call_error(
+        &self,
+        mut error: RuntimeError,
+        name: String,
+        module: Option<&'s str>,
+        span: Span,
+    ) -> RuntimeError {
+        let source = self.sources.get(&module).copied().unwrap_or("");
+        let prefix = source.get(..span.start).unwrap_or("");
+        let line = prefix.bytes().filter(|b| *b == b'\n').count() + 1;
+        let column = prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1;
+        if error.location.is_none()
+            && let Some((_, source)) = self
+                .sources
+                .iter()
+                .find(|(module, _)| module.map(str::to_owned) == error.module)
+        {
+            error = error.locate(source);
+        }
+        error.stack.push(CallFrame {
+            function: name,
+            module: module.map(str::to_owned),
+            span,
+            line,
+            column,
+        });
+        error
     }
     fn call_inner(
         &mut self,
