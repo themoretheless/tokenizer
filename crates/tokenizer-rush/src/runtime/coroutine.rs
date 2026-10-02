@@ -157,7 +157,7 @@ impl<'s> Coroutine<'s> {
                                 else_block.as_ref()
                             } {
                                 let frame = Frame::Block {
-                                    statements: Rc::new(block.stmts.clone()),
+                                    statements: block.stmts.clone(),
                                     next: 0,
                                     environment: environment
                                         .try_clone()
@@ -169,7 +169,7 @@ impl<'s> Coroutine<'s> {
                         StmtKind::While { condition, body } => {
                             let frame = Frame::While {
                                 condition: condition.clone(),
-                                body: Rc::new(body.stmts.clone()),
+                                body: body.stmts.clone(),
                                 environment: environment
                                     .try_clone()
                                     .map_err(|e| runtime.environment_error(span, e))?,
@@ -185,7 +185,7 @@ impl<'s> Coroutine<'s> {
                             let cursor = runtime.sequence_cursor(value, iterable.span)?;
                             let frame = Frame::For {
                                 binding: binding.clone(),
-                                body: Rc::new(body.stmts.clone()),
+                                body: body.stmts.clone(),
                                 cursor,
                                 environment: environment
                                     .try_clone()
@@ -268,7 +268,7 @@ impl<'a, 's> ScriptInstance<'a, 's> {
                 .bind_pattern(parameter, value, &mut environment)?;
         }
         let frames = vec![Frame::Block {
-            statements: Rc::new(body.stmts.clone()),
+            statements: body.stmts.clone(),
             next: 0,
             environment,
         }];
@@ -319,8 +319,6 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         } else {
             result
         };
-        self.runtime.module = previous_module;
-        self.runtime.current_references = previous_references;
         let result = match result {
             Ok(CoroutineState::Complete(value))
                 if task
@@ -334,6 +332,20 @@ impl<'a, 's> ScriptInstance<'a, 's> {
             }
             result => result,
         };
+        let function_span = match &task.function.body {
+            FunctionBody::Block(body) => body.span,
+            _ => self.span,
+        };
+        let result = result.map_err(|error| {
+            self.runtime.call_error(
+                error,
+                task.function.name.unwrap_or("<lambda>").to_owned(),
+                task.function.module,
+                function_span,
+            )
+        });
+        self.runtime.module = previous_module;
+        self.runtime.current_references = previous_references;
         if matches!(result, Ok(CoroutineState::Yielded(_))) {
             self.runtime.coroutines.insert(id, task);
             if let Err(error) = self.enforce_memory_limit() {
@@ -352,5 +364,51 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         let removed = self.runtime.coroutines.remove(&id).is_some();
         self.runtime.reclaim_cells();
         removed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tasks_and_nested_frames_share_program_statement_storage() {
+        let program = Program::compile("fn work() { while true { if true { yield 1 } } }").unwrap();
+        let cancellation = CancellationToken::default();
+        let limits = ExecutionLimits::new(1000);
+        let mut script = program
+            .instantiate(limits, &cancellation, &[], &[], &[], &[])
+            .unwrap();
+        let StmtKind::Function { body, .. } = &program.parsed.module.items[0].kind else {
+            panic!()
+        };
+        let StmtKind::While {
+            body: loop_body, ..
+        } = &body.stmts[0].kind
+        else {
+            panic!()
+        };
+        let StmtKind::If { then_block, .. } = &loop_body.stmts[0].kind else {
+            panic!()
+        };
+        for _ in 0..16 {
+            let id = script.spawn_coroutine("work", &[], limits).unwrap();
+            let Frame::Block { statements, .. } = &script.runtime.coroutines[&id].frames[0] else {
+                panic!()
+            };
+            assert!(Rc::ptr_eq(statements, &body.stmts));
+            for _ in 0..2 {
+                script.resume_coroutine(id, limits).unwrap();
+                let frames = &script.runtime.coroutines[&id].frames;
+                let Frame::Block { statements, .. } = frames.last().unwrap() else {
+                    panic!()
+                };
+                assert!(Rc::ptr_eq(statements, &then_block.stmts));
+                let Frame::While { body, .. } = &frames[1] else {
+                    panic!()
+                };
+                assert!(Rc::ptr_eq(body, &loop_body.stmts));
+            }
+        }
     }
 }

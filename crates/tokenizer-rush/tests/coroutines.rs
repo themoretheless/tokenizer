@@ -204,3 +204,53 @@ fn statically_known_suspending_calls_are_rejected_before_execution() {
         assert!(Program::compile(source).is_err(), "{source}");
     }
 }
+
+#[test]
+fn resumed_errors_have_source_locations_and_coroutine_frames() {
+    for nested in [false, true] {
+        let source = if nested {
+            "fn fail() -> number { return 1/0 };\nfn work() -> number {\n yield 1;\n return fail();\n}"
+        } else {
+            "fn work() -> number {\n yield 1;\n return 1/0;\n}"
+        };
+        let program = Program::compile(source).unwrap();
+        let token = CancellationToken::default();
+        let mut script = program
+            .instantiate(LIMITS, &token, &[], &[], &[], &[])
+            .unwrap();
+        let id = script.spawn_coroutine("work", &[], LIMITS).unwrap();
+        script.resume_coroutine(id, LIMITS).unwrap();
+        let error = script.resume_coroutine(id, LIMITS).unwrap_err();
+        let location = error.location.unwrap();
+        assert_eq!(location.line, if nested { 1 } else { 3 });
+        assert!(location.column > 1);
+        assert_eq!(error.stack.last().unwrap().function, "work");
+        assert_eq!(error.stack.len(), if nested { 2 } else { 1 });
+        assert!(script.resume_coroutine(id, LIMITS).is_err());
+    }
+}
+
+#[test]
+fn imported_coroutine_errors_use_library_source_and_restore_entry_context() {
+    let library =
+        Program::compile("fn work()->number {\n yield 1;\n return 1/0;\n}; export work").unwrap();
+    let program =
+        Program::compile("import model; let work=model.work; fn local()->number {return 2}")
+            .unwrap();
+    let token = CancellationToken::default();
+    let mut script = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[("model", &library)])
+        .unwrap();
+    let id = script.spawn_coroutine("work", &[], LIMITS).unwrap();
+    script.resume_coroutine(id, LIMITS).unwrap();
+    let error = script.resume_coroutine(id, LIMITS).unwrap_err();
+    assert_eq!(error.module.as_deref(), Some("model"));
+    assert_eq!(error.location.unwrap().line, 3);
+    let frame = error.stack.last().unwrap();
+    assert_eq!(frame.function, "work");
+    assert_eq!(frame.module.as_deref(), Some("model"));
+    assert_eq!(
+        script.call("local", &[], LIMITS).unwrap(),
+        Value::Number(2.)
+    );
+}

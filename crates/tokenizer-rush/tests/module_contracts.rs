@@ -240,3 +240,38 @@ fn parameter_constraint_convergence_preserves_tuple_inference() {
     );
     assert!(Program::compile("fn f((x,y)){x+y; x+1; return y}; let n:bool=f((1,2))").is_err());
 }
+
+#[test]
+fn qualified_annotations_preserve_trivia_and_resolve_the_same_type() {
+    let model = Program::compile("struct Settings {speed:number}; export Settings").unwrap();
+    for annotation in [
+        "model /* note */ . Settings",
+        "model . /* note */ Settings",
+        "model /* first */ . /* second */ Settings",
+        "model // note\n . Settings",
+    ] {
+        let source = format!(
+            "import model;
+fn read(s:{annotation})->number {{
+    return s.speed
+}}
+read(model.Settings({{speed:3}}))"
+        );
+        let formatted = format_source(&source).unwrap();
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+        for source in [&source, &formatted] {
+            let main = Program::compile(source).unwrap();
+            assert_eq!(
+                main.run_with_modules(
+                    10_000,
+                    &CancellationToken::default(),
+                    &[],
+                    &[],
+                    &[("model", &model)]
+                )
+                .unwrap(),
+                Value::Number(3.)
+            );
+        }
+    }
+}

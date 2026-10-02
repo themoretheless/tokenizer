@@ -138,7 +138,17 @@ impl<'s> Writer<'s> {
         self.text(name.text);
     }
     fn ty(&mut self, ty: &Type<'s>) {
-        self.name(&ty.name);
+        if ty.path.is_empty() {
+            self.name(&ty.name);
+        } else {
+            for (i, part) in ty.path.iter().enumerate() {
+                if i > 0 {
+                    self.before(part.span.start);
+                    self.text(".");
+                }
+                self.name(part);
+            }
+        }
         if !ty.arguments.is_empty() {
             self.text("[");
             for (i, ty) in ty.arguments.iter().enumerate() {
@@ -154,7 +164,7 @@ impl<'s> Writer<'s> {
         self.text("{");
         self.newline();
         self.indent += 1;
-        for statement in &block.stmts {
+        for statement in block.stmts.iter() {
             self.statement(statement);
         }
         self.before(block.span.end);

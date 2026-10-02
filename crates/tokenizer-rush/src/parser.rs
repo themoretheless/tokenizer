@@ -506,6 +506,7 @@ impl<'s> Parser<'s> {
                     text: "",
                     span: self.span(),
                 },
+                path: vec![],
                 arguments: vec![],
             };
         }
@@ -518,8 +519,13 @@ impl<'s> Parser<'s> {
         } else {
             self.name("type")
         };
+        let mut path = Vec::new();
         while self.eat(".") {
+            if path.is_empty() {
+                path.push(name.clone());
+            }
             let part = self.name("type");
+            path.push(part.clone());
             name.span.end = part.span.end;
             name.text = &self.source[name.span.start..name.span.end];
         }
@@ -539,7 +545,11 @@ impl<'s> Parser<'s> {
             self.expect("]");
         }
         self.depth -= 1;
-        Type { name, arguments }
+        Type {
+            name,
+            path,
+            arguments,
+        }
     }
     fn block(&mut self, parent_indent: usize) -> Block<'s> {
         let start = self.span().start;
@@ -548,7 +558,7 @@ impl<'s> Parser<'s> {
             self.expect("}");
             return Block {
                 span: Span::new(start, self.end().max(start)),
-                stmts,
+                stmts: std::rc::Rc::new(stmts),
             };
         }
         self.eat(":");
@@ -559,14 +569,14 @@ impl<'s> Parser<'s> {
             );
             return Block {
                 span: Span::new(start, start),
-                stmts: vec![],
+                stmts: std::rc::Rc::new(vec![]),
             };
         }
         let indent = self.peek().unwrap().indent;
         let stmts = self.sequence(None, Some(indent));
         Block {
             span: Span::new(start, self.end().max(start)),
-            stmts,
+            stmts: std::rc::Rc::new(stmts),
         }
     }
     fn if_stmt(&mut self, indent: usize) -> StmtKind<'s> {
@@ -581,7 +591,7 @@ impl<'s> Parser<'s> {
                     let stmt = self.statement();
                     Some(Block {
                         span: stmt.span,
-                        stmts: vec![stmt],
+                        stmts: std::rc::Rc::new(vec![stmt]),
                     })
                 } else {
                     let mut block = self.block(indent);
