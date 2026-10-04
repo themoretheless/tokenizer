@@ -1,8 +1,8 @@
 //! Full rush engine (lex → parse → AST → semantic).
 //!
-//! rush is the single language of ruos and open-scad-viewer: indentation
-//! blocks, `fn` headers, fluent chains, `foreach ... yield`, `match`,
-//! `$variables`, hash comments and shell pipe sugar.
+//! rush is the scripting language of the ruos shell: indentation blocks,
+//! `fn` headers, fluent chains, `foreach ... yield`, `match`, `$variables`,
+//! hash comments and shell pipe sugar.
 
 use themoretheless_tokenizer_core::{
     Diagnostic, FullProfile, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage,
@@ -60,8 +60,8 @@ pub static ENGINE: Host = Host;
 pub static DESCRIPTOR: LanguageDescriptor = full_descriptor(
     LanguageId::RUSH,
     "rush",
-    &["modelgraph-text", "mg"],
-    &[".r", ".mg"],
+    &["rush-shell"],
+    &[".r"],
     &["text/x-rush"],
     env!("CARGO_PKG_VERSION"),
 );
