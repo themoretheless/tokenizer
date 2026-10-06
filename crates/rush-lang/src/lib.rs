@@ -74,6 +74,33 @@ pub enum RushError {
     BadMatch,
     /// A line inside a `match` body that is not `<patterns> => <command>`.
     BadMatchArm,
+    /// `foreach` header that is not `foreach name in <source>:`.
+    BadForeach,
+}
+
+/// A captured `foreach` loop waiting for the host to run its source
+/// command and hand the resulting words back via `provide_source_words`.
+#[derive(Clone, Copy)]
+struct ForEach {
+    var: [u8; MAX_NAME],
+    var_len: u8,
+    source: [u8; MAX_LOOP_WORDS],
+    source_len: u16,
+    body: [u8; MAX_BODY],
+    body_len: u16,
+}
+
+impl ForEach {
+    const fn new() -> Self {
+        ForEach {
+            var: [0; MAX_NAME],
+            var_len: 0,
+            source: [0; MAX_LOOP_WORDS],
+            source_len: 0,
+            body: [0; MAX_BODY],
+            body_len: 0,
+        }
+    }
 }
 
 /// What the caller should do after a `step`.
@@ -221,14 +248,16 @@ struct Capture {
     buf: [u8; MAX_BODY],
     len: u16,
     is_fn: bool,
+    /// `foreach`: the body waits for host-provided source words.
+    foreach: bool,
     active: bool,
-    /// `fn`: name and params. `for`: loop variable.
+    /// `fn`: name and params. `for`/`foreach`: loop variable.
     name: [u8; MAX_NAME],
     name_len: u8,
     params: [[u8; MAX_NAME]; MAX_PARAMS],
     param_lens: [u8; MAX_PARAMS],
     param_count: u8,
-    /// `for`: expanded word list.
+    /// `for`: expanded word list. `foreach`: raw source command.
     words: [u8; MAX_LOOP_WORDS],
     words_len: u16,
 }
@@ -241,6 +270,7 @@ impl Capture {
             buf: [0; MAX_BODY],
             len: 0,
             is_fn: false,
+            foreach: false,
             active: false,
             name: [0; MAX_NAME],
             name_len: 0,
@@ -270,6 +300,7 @@ pub struct Interpreter {
     pending: [PendingFrame; MAX_CALLS],
     pending_len: usize,
     capture: Option<Capture>,
+    foreach: Option<ForEach>,
     pushback: [u8; MAX_BODY_LINE],
     pushback_len: u16,
 }
@@ -298,6 +329,7 @@ impl Interpreter {
             pending: [PendingFrame::new(); MAX_CALLS],
             pending_len: 0,
             capture: None,
+            foreach: None,
             pushback: [0; MAX_BODY_LINE],
             pushback_len: 0,
         }
@@ -342,9 +374,13 @@ impl Interpreter {
     }
 
     /// True while the interpreter still has work without new input: a chain
-    /// tail, replayed `fn`/`for` body lines, or a stashed dedent line.
+    /// tail, replayed `fn`/`for` body lines, a stashed dedent line, or a
+    /// `foreach` waiting for its source words.
     pub fn busy(&self) -> bool {
-        self.chain_pending() || self.pending_len > 0 || self.pushback_len > 0
+        self.chain_pending()
+            || self.pending_len > 0
+            || self.pushback_len > 0
+            || self.foreach.is_some()
     }
 
     /// True while a chain tail is still buffered.
@@ -359,6 +395,54 @@ impl Interpreter {
             self.finish_capture()?;
         }
         Ok(())
+    }
+
+    /// A pending `foreach`, as `(variable, source command)`: the host must
+    /// run the source, then call `provide_source_words` (or `fail_source`).
+    pub fn source_request(&self) -> Option<(&str, &str)> {
+        let each = self.foreach.as_ref()?;
+        let var = str::from_utf8(each.var.get(..usize::from(each.var_len)).unwrap_or(&[]))
+            .unwrap_or("");
+        let source = str::from_utf8(
+            each.source.get(..usize::from(each.source_len)).unwrap_or(&[]),
+        )
+        .unwrap_or("");
+        Some((var, source))
+    }
+
+    /// Host answer to `source_request`: the whitespace-separated words the
+    /// source produced. The body replays once per word, exactly like `for`.
+    pub fn provide_source_words(&mut self, words: &str) -> Result<(), RushError> {
+        let Some(each) = self.foreach.take() else {
+            return Ok(());
+        };
+        if words.len() > MAX_LOOP_WORDS {
+            return Err(RushError::LoopWordsTooLong);
+        }
+        if words.split_whitespace().next().is_none() || each.body_len == 0 {
+            return Ok(());
+        }
+        if self.pending_len >= MAX_CALLS {
+            return Err(RushError::CallTooDeep);
+        }
+        let frame = &mut self.pending[self.pending_len];
+        *frame = PendingFrame::new();
+        frame.buf = each.body;
+        frame.len = each.body_len;
+        frame.is_loop = true;
+        frame.var = each.var;
+        frame.var_len = each.var_len;
+        if let Some(slot) = frame.words.get_mut(..words.len()) {
+            slot.copy_from_slice(words.as_bytes());
+        }
+        frame.words_len = words.len() as u16;
+        self.pending_len += 1;
+        self.bind_loop_word()
+    }
+
+    /// Host could not run the source: drop the pending `foreach`.
+    pub fn fail_source(&mut self) {
+        self.foreach = None;
     }
 
     /// Feed the next physical line of the script.
@@ -385,6 +469,10 @@ impl Interpreter {
             }
             let text = str::from_utf8(scratch.get(..len).unwrap_or(&[])).unwrap_or("");
             return self.process_line(text, false);
+        }
+        // A waiting `foreach` is serviced by the host, not by input lines.
+        if self.foreach.is_some() {
+            return Ok(Step::Skip);
         }
         self.process_line(line, false)
     }
@@ -488,6 +576,9 @@ impl Interpreter {
         }
         if trimmed.starts_with("for ") || trimmed.starts_with("for\t") {
             return self.start_for_capture(trimmed, indent, active, nested);
+        }
+        if trimmed.starts_with("foreach ") || trimmed.starts_with("foreach\t") {
+            return self.start_foreach_capture(trimmed, indent, active, nested);
         }
 
         if !active {
@@ -766,6 +857,43 @@ impl Interpreter {
         Ok(Step::Skip)
     }
 
+    /// `foreach name in <source>:` — like `for`, but the word list comes
+    /// from the host running `<source>` after the body is captured.
+    fn start_foreach_capture(&mut self, trimmed: &str, indent: usize, active: bool, nested: bool) -> Result<Step<'static>, RushError> {
+        if nested {
+            return Err(RushError::NestedControl);
+        }
+        let header = trimmed[7..].trim();
+        let Some(header) = header.strip_suffix(':') else {
+            return Err(RushError::BadForeach);
+        };
+        let Some((var, source)) = header.split_once(" in ") else {
+            return Err(RushError::BadForeach);
+        };
+        let var = var.trim();
+        let source = source.trim();
+        if !is_ident(var) || var.len() > MAX_NAME || source.is_empty() {
+            return Err(RushError::BadForeach);
+        }
+        if source.len() > MAX_LOOP_WORDS {
+            return Err(RushError::LoopWordsTooLong);
+        }
+        let mut cap = Capture::new();
+        cap.indent = indent as u16;
+        cap.active = active;
+        cap.foreach = true;
+        if let Some(slot) = cap.name.get_mut(..var.len()) {
+            slot.copy_from_slice(var.as_bytes());
+        }
+        cap.name_len = var.len() as u8;
+        if let Some(slot) = cap.words.get_mut(..source.len()) {
+            slot.copy_from_slice(source.as_bytes());
+        }
+        cap.words_len = source.len() as u16;
+        self.capture = Some(cap);
+        Ok(Step::Skip)
+    }
+
     fn capture_line(&mut self, text: &str) -> Result<(), RushError> {
         let Some(cap) = self.capture.as_mut() else {
             return Ok(());
@@ -816,6 +944,19 @@ impl Interpreter {
             def.body = cap.buf;
             def.body_len = cap.len;
             self.fn_count += 1;
+            return Ok(());
+        }
+        if cap.foreach {
+            // Hand the loop to the host: it runs the source command and
+            // answers with `provide_source_words`.
+            let mut each = ForEach::new();
+            each.var = cap.name;
+            each.var_len = cap.name_len;
+            each.source = cap.words;
+            each.source_len = cap.words_len;
+            each.body = cap.buf;
+            each.body_len = cap.len;
+            self.foreach = Some(each);
             return Ok(());
         }
         // `for`: replay the body once per word.
