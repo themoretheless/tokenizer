@@ -6,6 +6,15 @@ use rush_lang::{Interpreter, RushError, Step};
 /// Run a whole script; `fail` lists 1-based command ordinals that fail.
 /// Returns the executed segments.
 fn run(script: &str, fail: &[u32]) -> (Vec<String>, Result<u32, RushError>) {
+    run_with_sources(script, fail, &[])
+}
+
+/// `sources` maps a `foreach` source command to the words it yields.
+fn run_with_sources(
+    script: &str,
+    fail: &[u32],
+    sources: &[(&str, &str)],
+) -> (Vec<String>, Result<u32, RushError>) {
     let mut interp = Interpreter::new();
     interp.seed("USER", "admin");
     interp.seed("HOME", "/");
@@ -15,6 +24,20 @@ fn run(script: &str, fail: &[u32]) -> (Vec<String>, Result<u32, RushError>) {
     let mut lines = script.lines();
     let mut ended = false;
     'outer: loop {
+        // A `foreach` waits for its source words.
+        if let Some((_, source)) = interp.source_request() {
+            let source = source.to_string();
+            match sources.iter().find(|(name, _)| *name == source) {
+                Some((_, words)) => {
+                    if let Err(error) = interp.provide_source_words(words) {
+                        outcome = Err(error);
+                        break;
+                    }
+                }
+                None => interp.fail_source(),
+            }
+            continue;
+        }
         // Replays (fn calls, loop iterations) and pending chains take
         // priority over fresh input; drain them with empty steps.
         let line = if interp.busy() {
@@ -172,6 +195,68 @@ fn for_loops_over_words() {
 fn if_inside_for_body() {
     let executed = ok("for n in 1 2:\n    if $STATUS = 0:\n        echo ok-$n\necho done\n");
     assert_eq!(executed, vec!["echo ok-$n", "echo ok-$n", "echo done"]);
+}
+
+#[test]
+fn foreach_replays_per_source_word() {
+    let script = "foreach f in ls:\n    yield file $f\necho after\n";
+    let (executed, outcome) =
+        run_with_sources(script, &[], &[("ls", "hello.txt docs demo.r")]);
+    assert_eq!(outcome.map(|_| ()), Ok(()));
+    assert_eq!(
+        executed,
+        vec![
+            "yield file $f",
+            "yield file $f",
+            "yield file $f",
+            "echo after"
+        ]
+    );
+    // The loop variable binds like a `for` variable.
+    let mut interp = Interpreter::new();
+    assert_eq!(interp.step("foreach f in ls:"), Ok(Step::Skip));
+    assert_eq!(interp.step("    echo $f"), Ok(Step::Skip));
+    interp.end_input().unwrap(); // EOF closes the capture
+    assert_eq!(interp.source_request(), Some(("f", "ls")));
+    interp.provide_source_words("a b").unwrap();
+    assert_eq!(interp.get("f"), Some("a"));
+    assert!(interp.busy());
+    // An empty source runs nothing.
+    let (executed, outcome) = run_with_sources("foreach f in ls:\n    echo $f\n", &[], &[("ls", "")]);
+    assert_eq!(outcome.map(|_| ()), Ok(()));
+    assert_eq!(executed, Vec::<String>::new());
+    // An unknown source fails soft: loop skipped, script continues.
+    let (executed, outcome) =
+        run_with_sources("foreach f in bogus:\n    echo $f\necho next\n", &[], &[]);
+    assert_eq!(outcome.map(|_| ()), Ok(()));
+    assert_eq!(executed, vec!["echo next"]);
+}
+
+#[test]
+fn foreach_errors_are_stable() {
+    let mut interp = Interpreter::new();
+    assert_eq!(interp.step("foreach f:"), Err(RushError::BadForeach));
+    assert_eq!(interp.step("foreach 1f in ls:"), Err(RushError::BadForeach));
+    assert_eq!(interp.step("foreach f in :"), Err(RushError::BadForeach));
+    // Nested control flow inside a replayed body rejects foreach too.
+    let mut interp = Interpreter::new();
+    assert_eq!(interp.step("fn bad:"), Ok(Step::Skip));
+    assert_eq!(interp.step("    foreach f in ls:"), Ok(Step::Skip));
+    assert_eq!(interp.step("bad"), Ok(Step::Skip));
+    let mut drained = Ok(());
+    for _ in 0..16 {
+        match interp.step("") {
+            Ok(_) => {}
+            Err(error) => {
+                drained = Err(error);
+                break;
+            }
+        }
+        if !interp.busy() {
+            break;
+        }
+    }
+    assert_eq!(drained, Err(RushError::NestedControl));
 }
 
 #[test]
