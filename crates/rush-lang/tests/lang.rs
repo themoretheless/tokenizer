@@ -12,22 +12,38 @@ fn run(script: &str, fail: &[u32]) -> (Vec<String>, Result<u32, RushError>) {
     interp.seed("STATUS", "0");
     let mut executed = Vec::new();
     let mut outcome = Ok(0);
-    'outer: for line in script.lines().chain(core::iter::once("")) {
-        loop {
-            match interp.step(line) {
-                Ok(Step::Skip) => break,
-                Ok(Step::Run(segment)) => {
-                    executed.push(segment.to_string());
-                    let ordinal = executed.len() as u32;
-                    interp.note_status(!fail.contains(&ordinal));
-                    if !interp.chain_pending() {
+    let mut lines = script.lines();
+    let mut ended = false;
+    'outer: loop {
+        // Replays (fn calls, loop iterations) and pending chains take
+        // priority over fresh input; drain them with empty steps.
+        let line = if interp.busy() {
+            ""
+        } else if ended {
+            break;
+        } else {
+            match lines.next() {
+                Some(line) => line,
+                None => {
+                    ended = true;
+                    if let Err(error) = interp.end_input() {
+                        outcome = Err(error);
                         break;
                     }
+                    continue;
                 }
-                Err(error) => {
-                    outcome = Err(error);
-                    break 'outer;
-                }
+            }
+        };
+        match interp.step(line) {
+            Ok(Step::Skip) => {}
+            Ok(Step::Run(segment)) => {
+                executed.push(segment.to_string());
+                let ordinal = executed.len() as u32;
+                interp.note_status(!fail.contains(&ordinal));
+            }
+            Err(error) => {
+                outcome = Err(error);
+                break 'outer;
             }
         }
     }
@@ -126,4 +142,84 @@ fn quoted_operators_do_not_split() {
         ok("echo 'a and b'\necho \"x || y\"\n"),
         vec!["echo 'a and b'", "echo \"x || y\""]
     );
+}
+
+#[test]
+fn fn_defines_and_calls_with_params() {
+    let executed = ok("fn twice word:\n    echo $word\n    echo $word again\ntwice hi\necho done\n");
+    assert_eq!(
+        executed,
+        vec!["echo $word", "echo $word again", "echo done"]
+    );
+    // The parameter is bound when the call starts (the defining capture
+    // closes on the dedent line, which is then replayed from pushback).
+    let mut interp = Interpreter::new();
+    assert_eq!(interp.step("fn say msg:"), Ok(Step::Skip));
+    assert_eq!(interp.step("    echo $msg"), Ok(Step::Skip));
+    assert_eq!(interp.step("say hello"), Ok(Step::Skip));
+    assert!(interp.busy());
+    assert_eq!(interp.step(""), Ok(Step::Skip));
+    assert_eq!(interp.get("msg"), Some("hello"));
+}
+
+#[test]
+fn for_loops_over_words() {
+    let executed = ok("for d in alpha beta:\n    echo $d\necho after\n");
+    assert_eq!(executed, vec!["echo $d", "echo $d", "echo after"]);
+}
+
+#[test]
+fn if_inside_for_body() {
+    let executed = ok("for n in 1 2:\n    if $STATUS = 0:\n        echo ok-$n\necho done\n");
+    assert_eq!(executed, vec!["echo ok-$n", "echo ok-$n", "echo done"]);
+}
+
+#[test]
+fn control_flow_errors_are_stable() {
+    let mut interp = Interpreter::new();
+    // A `for` line inside a `fn` body is captured verbatim; the nested
+    // control flow is rejected when the call replays it.
+    assert_eq!(interp.step("fn bad:"), Ok(Step::Skip));
+    assert_eq!(interp.step("    for x in a:"), Ok(Step::Skip));
+    assert_eq!(interp.step("bad"), Ok(Step::Skip));
+    let mut drained = Ok(());
+    for _ in 0..16 {
+        match interp.step("") {
+            Ok(_) => {}
+            Err(error) => {
+                drained = Err(error);
+                break;
+            }
+        }
+        if !interp.busy() {
+            break;
+        }
+    }
+    assert_eq!(drained, Err(RushError::NestedControl));
+
+    // Malformed headers.
+    let mut interp = Interpreter::new();
+    assert_eq!(interp.step("fn :"), Err(RushError::BadFnDef));
+    assert_eq!(interp.step("for x:"), Err(RushError::BadFor));
+    assert_eq!(interp.step("for 1x in a:"), Err(RushError::BadFor));
+
+    // Recursion past the call bound fails deterministically.
+    let mut interp = Interpreter::new();
+    assert_eq!(interp.step("fn recur:"), Ok(Step::Skip));
+    assert_eq!(interp.step("    recur"), Ok(Step::Skip));
+    assert_eq!(interp.step("recur"), Ok(Step::Skip));
+    let mut drained = Ok(());
+    for _ in 0..64 {
+        match interp.step("") {
+            Ok(_) => {}
+            Err(error) => {
+                drained = Err(error);
+                break;
+            }
+        }
+        if !interp.busy() {
+            break;
+        }
+    }
+    assert_eq!(drained, Err(RushError::CallTooDeep));
 }
