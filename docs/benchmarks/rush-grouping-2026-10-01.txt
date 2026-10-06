@@ -1,0 +1,16 @@
+   Compiling zmij v1.0.23
+   Compiling serde_core v1.0.229
+   Compiling serde_json v1.0.151
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.18
+   Compiling themoretheless-tokenizer-rush v0.4.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `bench` profile [optimized] target(s) in 3.01s
+     Running benches/grouping.rs (target/release/build/themoretheless-tokenizer-rush/7bce0a25e3d736c5/out/grouping-7bce0a25e3d736c5)
+Rush grouping · macos aarch64 · prepared run, 3 warmups, 7 alternating samples
+rows	groups	algorithm	min_us	median_us	max_us
+100	10	script	1070.875	1159.333	1233.292
+100	10	group_by	230.250	240.333	275.541
+1000	10	script	10505.667	10959.542	11560.833
+1000	10	group_by	2056.542	2245.375	2406.166
+1000	100	script	84692.709	86467.875	109463.084
+1000	100	group_by	2275.834	2425.708	2579.875

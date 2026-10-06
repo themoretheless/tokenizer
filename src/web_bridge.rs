@@ -2,9 +2,49 @@
 
 use std::fmt::Write as _;
 
-use themoretheless_tokenizer_core::{HostError, HostTokenization, TokenLayer};
+use themoretheless_tokenizer_core::{
+    Capability, Family, HostError, HostTokenization, TokenLayer, presets_of,
+};
+
+use crate::plugins::builtin_registry;
 
 use crate::plugins::analyze_host;
+
+/// Compute a validated, document-local Rush rename without executing the source.
+pub fn rename_rush(source: &str, offset: usize, replacement: &str) -> String {
+    #[cfg(feature = "rush")]
+    {
+        use themoretheless_tokenizer_rush::{Program, rename_project_symbol};
+        let edits = Program::compile(source)
+            .map_err(|e| e.message)
+            .and_then(|p| rename_project_symbol(&[("main", &p)], "main", offset, replacement));
+        match edits {
+            Ok(edits) => {
+                let mut output = String::from("{\"ok\":true,\"edits\":[");
+                for (i, edit) in edits.iter().enumerate() {
+                    if i > 0 {
+                        output.push(',');
+                    }
+                    let _ = write!(
+                        output,
+                        "{{\"start\":{},\"end\":{},\"replacement\":{}}}",
+                        edit.span.start,
+                        edit.span.end,
+                        json_string(&edit.replacement)
+                    );
+                }
+                output.push_str("]}");
+                output
+            }
+            Err(error) => format!("{{\"ok\":false,\"error\":{}}}", json_string(&error)),
+        }
+    }
+    #[cfg(not(feature = "rush"))]
+    {
+        let _ = (source, offset, replacement);
+        String::from("{\"ok\":false,\"error\":\"Rush support is disabled\"}")
+    }
+}
 
 /// Tokenizes source for the development playground and returns a JSON payload.
 ///
@@ -70,8 +110,229 @@ fn success_payload(
             diagnostic.span.end,
         );
     }
-    output.push_str("]}");
+    output.push(']');
+    #[cfg(feature = "rush")]
+    if language == "rush" {
+        let names = themoretheless_tokenizer_rush::analyze_names(source, &[]);
+        let calls = themoretheless_tokenizer_rush::analyze_calls(source);
+        output.push_str(",\"executionDiagnostics\":[");
+        let mut emitted = Vec::new();
+        for diagnostic in names.diagnostics.iter().chain(&calls.diagnostics) {
+            let key = (diagnostic.code, diagnostic.span);
+            if emitted.contains(&key)
+                || result
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.code.as_ref() == diagnostic.code && d.span == diagnostic.span.into())
+            {
+                continue;
+            }
+            if !emitted.is_empty() {
+                output.push(',');
+            }
+            push_diagnostic(
+                &mut output,
+                diagnostic.code,
+                diagnostic.message,
+                diagnostic.span.start,
+                diagnostic.span.end,
+            );
+            emitted.push(key);
+        }
+        output.push(']');
+        let editor = themoretheless_tokenizer_rush::analyze_editor_details(source);
+        let references = editor.references;
+        let bindings = editor.bindings;
+        output.push_str(",\"memberCompletions\":[");
+        for (index, completion) in editor.member_completions.iter().enumerate() {
+            if index > 0 {
+                output.push(',');
+            }
+            let _ = write!(
+                output,
+                "{{\"start\":{},\"end\":{},\"members\":[",
+                completion.name_span.start, completion.name_span.end
+            );
+            for (index, member) in completion.members.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(&json_string(member));
+            }
+            output.push_str("]}");
+        }
+        output.push(']');
+        output.push_str(",\"builtins\":[");
+        for (index, (name, builtin)) in themoretheless_tokenizer_rush::builtin_catalog()
+            .iter()
+            .enumerate()
+        {
+            if index != 0 {
+                output.push(',');
+            }
+            let arity = builtin.arity();
+            let _ = write!(
+                output,
+                "{{\"name\":{},\"minArgs\":{},\"maxArgs\":{}}}",
+                json_string(name),
+                arity.start(),
+                arity.end()
+            );
+        }
+        output.push(']');
+        output.push_str(",\"bindings\":[");
+        for (index, binding) in bindings.iter().enumerate() {
+            if index != 0 {
+                output.push(',');
+            }
+            let _ = write!(
+                output,
+                "{{\"name\":{},\"kind\":\"binding\",\"start\":{},\"end\":{},\"depth\":{},\"definition\":{{\"start\":{},\"end\":{}}}}}",
+                json_string(&binding.name),
+                binding.visible.start,
+                binding.visible.end,
+                binding.depth,
+                binding.definition.start,
+                binding.definition.end
+            );
+            output.pop();
+            output.push_str(",\"members\":[");
+            for (index, member) in binding.members.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(&json_string(member));
+            }
+            output.push_str("],\"memberPaths\":{");
+            for (index, (path, members)) in binding.member_paths.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(&json_string(path));
+                output.push_str(":[");
+                for (index, member) in members.iter().enumerate() {
+                    if index > 0 {
+                        output.push(',');
+                    }
+                    output.push_str(&json_string(member));
+                }
+                output.push(']');
+            }
+            output.push_str("}}");
+        }
+        output.push(']');
+        output.push_str(",\"references\":[");
+        for (index, reference) in references.iter().enumerate() {
+            if index != 0 {
+                output.push(',');
+            }
+            let _ = write!(
+                output,
+                "{{\"start\":{},\"end\":{},\"definition\":",
+                reference.usage.start, reference.usage.end
+            );
+            if let Some(definition) = reference.definition {
+                let _ = write!(
+                    output,
+                    "{{\"start\":{},\"end\":{}}}",
+                    definition.start, definition.end
+                );
+            } else {
+                output.push_str("null");
+            }
+            output.push('}');
+        }
+        output.push(']');
+    }
+    output.push('}');
     output
+}
+
+/// Registry catalog as JSON: every enabled engine with its family, curated
+/// presets, capability bits and dialects.
+///
+/// The playground picker renders from this instead of restating the Rust-side
+/// lists.
+#[must_use]
+pub fn catalog() -> String {
+    let engines = builtin_registry();
+    let mut out = String::from("{\"count\":");
+    let _ = write!(out, "{},\"engines\":[", engines.len());
+    for (index, engine) in engines.iter().enumerate() {
+        if index != 0 {
+            out.push(',');
+        }
+        let descriptor = engine.descriptor();
+        out.push_str("{\"id\":");
+        push_json_string(&mut out, descriptor.language.as_str());
+        out.push_str(",\"displayName\":");
+        push_json_string(&mut out, descriptor.display_name);
+        out.push_str(",\"family\":");
+        push_json_string(&mut out, Family::of(descriptor.language).as_str());
+        out.push_str(",\"presets\":[");
+        for (preset_index, preset) in presets_of(descriptor.language).iter().enumerate() {
+            if preset_index != 0 {
+                out.push(',');
+            }
+            push_json_string(&mut out, preset.as_str());
+        }
+        out.push_str("],\"capabilities\":[");
+        let mut first_capability = true;
+        for capability in CAPABILITY_ORDER {
+            if descriptor.capabilities.contains(capability.bits()) {
+                if !first_capability {
+                    out.push(',');
+                }
+                first_capability = false;
+                push_json_string(&mut out, capability.as_str());
+            }
+        }
+        out.push_str("],\"defaultDialect\":");
+        push_json_string(&mut out, descriptor.default_dialect.as_str());
+        out.push_str(",\"dialects\":[");
+        for (dialect_index, dialect) in descriptor.dialects.iter().enumerate() {
+            if dialect_index != 0 {
+                out.push(',');
+            }
+            out.push_str("{\"id\":");
+            push_json_string(&mut out, dialect.id.as_str());
+            out.push_str(",\"displayName\":");
+            push_json_string(&mut out, dialect.display_name);
+            out.push('}');
+        }
+        out.push_str("],\"aliases\":");
+        push_string_array(&mut out, descriptor.aliases);
+        out.push_str(",\"extensions\":");
+        push_string_array(&mut out, descriptor.extensions);
+        out.push_str(",\"mimeTypes\":");
+        push_string_array(&mut out, descriptor.mime_types);
+        out.push_str(",\"engineVersion\":");
+        push_json_string(&mut out, descriptor.engine_version);
+        out.push('}');
+    }
+    out.push_str("]}");
+    out
+}
+
+const CAPABILITY_ORDER: [Capability; 7] = [
+    Capability::Lex,
+    Capability::Parse,
+    Capability::Semantic,
+    Capability::Cst,
+    Capability::Navigate,
+    Capability::Visitor,
+    Capability::Validate,
+];
+
+fn push_string_array(out: &mut String, values: &[&'static str]) {
+    out.push('[');
+    for (index, value) in values.iter().enumerate() {
+        if index != 0 {
+            out.push(',');
+        }
+        push_json_string(out, value);
+    }
+    out.push(']');
 }
 
 fn host_error_payload(error: &HostError) -> String {
@@ -159,6 +420,108 @@ fn push_json_string(output: &mut String, value: &str) {
     output.push('"');
 }
 
+/// Execute Rush with a fixed budget for playground adapters.
+#[must_use]
+pub fn execute_rush(source: &str) -> String {
+    #[cfg(feature = "rush")]
+    {
+        use themoretheless_tokenizer_rush::{CancellationToken, ExecutionLimits, Program, Value};
+        let limits = ExecutionLimits {
+            max_collection_items: 10_000,
+            max_string_bytes: 65_536,
+            ..ExecutionLimits::new(100_000)
+        };
+        let result = Program::compile(source).and_then(|program| {
+            program.run_with_limits(limits, &CancellationToken::default(), &[], &[], &[])
+        });
+        match result {
+            Ok(value) => {
+                let (kind, output) = match value {
+                    Value::Polygon(polygon) => {
+                        match bounded_rush_output(|output| polygon.write_svg(output)) {
+                            Ok(svg) => ("svg", svg),
+                            Err("SVG output write failed") => {
+                                return rush_export_error(
+                                    "output-limit",
+                                    "SVG output byte limit exceeded",
+                                );
+                            }
+                            Err(message) => return rush_export_error("export-error", message),
+                        }
+                    }
+                    Value::Mesh(mesh) => match bounded_rush_output(|output| mesh.write_obj(output))
+                    {
+                        Ok(obj) => ("obj", obj),
+                        Err(_) => {
+                            return rush_export_error(
+                                "output-limit",
+                                "OBJ output byte limit exceeded",
+                            );
+                        }
+                    },
+                    value => match bounded_rush_output(|output| write!(output, "{value:?}")) {
+                        Ok(text) => ("text", text),
+                        Err(_) => {
+                            return rush_export_error(
+                                "output-limit",
+                                "Text output byte limit exceeded",
+                            );
+                        }
+                    },
+                };
+                format!(
+                    "{{\"ok\":true,\"kind\":{},\"output\":{}}}",
+                    json_string(kind),
+                    json_string(&output)
+                )
+            }
+            Err(error) => format!(
+                "{{\"ok\":false,\"error\":{},\"start\":{},\"end\":{}}}",
+                json_string(&error.message),
+                error.span.start,
+                error.span.end
+            ),
+        }
+    }
+    #[cfg(not(feature = "rush"))]
+    {
+        let _ = source;
+        protocol_error("unsupported-language", "Rush is not enabled in this build")
+    }
+}
+
+#[cfg(feature = "rush")]
+fn bounded_rush_output<E>(
+    write: impl FnOnce(&mut StringOutput) -> Result<(), E>,
+) -> Result<String, E> {
+    let mut output = StringOutput(String::new());
+    write(&mut output)?;
+    Ok(output.0)
+}
+
+#[cfg(feature = "rush")]
+struct StringOutput(String);
+#[cfg(feature = "rush")]
+impl std::fmt::Write for StringOutput {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        const MAX_BYTES: usize = 1_048_576;
+        if text.len() > MAX_BYTES.saturating_sub(self.0.len()) {
+            return Err(std::fmt::Error);
+        }
+        self.0.push_str(text);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "rush")]
+fn rush_export_error(code: &str, message: &str) -> String {
+    format!(
+        "{{\"ok\":false,\"code\":{},\"error\":{}}}",
+        json_string(code),
+        json_string(message)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,6 +533,15 @@ mod tests {
         assert!(output.contains("\"language\":\"json\""));
         assert!(output.contains("\"kind\":\"property\""));
         assert!(output.contains("Тбилиси"));
+    }
+
+    #[test]
+    fn catalog_reports_family_and_preset_per_engine() {
+        let output = catalog();
+        assert!(output.contains("\"id\":\"json\""));
+        assert!(output.contains("\"family\":\"format\""));
+        assert!(output.contains("\"presets\":[\"formats\"]"));
+        assert!(output.contains("\"capabilities\":[\"lex\",\"parse\",\"semantic\",\"cst\",\"navigate\",\"visitor\",\"validate\"]"));
     }
 
     #[test]

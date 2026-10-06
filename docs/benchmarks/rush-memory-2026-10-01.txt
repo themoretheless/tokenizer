@@ -1,0 +1,311 @@
+=== rush-collections-1000.log ===
+Collection input items: 1000; verified expected sum: 333666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections	prepared_run	1	813.375	853.208	942.958
+        0.01 real         0.01 user         0.00 sys
+             2670592  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                 340  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                  20  involuntary context switches
+           411831615  instructions retired
+            67124583  cycles elapsed
+             1769784  peak memory footprint
+
+=== rush-collections-1000-once.log ===
+Collection input items: 1000; verified expected sum: 333666
+Rush runtime · macos aarch64 · one verified execution, no warmup
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections	verify	1	935.416	935.416	935.416
+        0.32 real         0.00 user         0.00 sys
+             2293760  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                 317  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                  10  involuntary context switches
+            39839812  instructions retired
+            12540848  cycles elapsed
+             1392952  peak memory footprint
+
+=== rush-collections_lazy-1000.log ===
+Collection input items: 1000; verified expected sum: 333666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	prepared_run	1	830.208	885.292	909.875
+        0.01 real         0.01 user         0.00 sys
+             2359296  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                 321  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                  15  involuntary context switches
+           404976836  instructions retired
+            69058507  cycles elapsed
+             1442080  peak memory footprint
+
+=== rush-collections_lazy-1000-once.log ===
+Collection input items: 1000; verified expected sum: 333666
+Rush runtime · macos aarch64 · one verified execution, no warmup
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	verify	1	902.166	902.166	902.166
+        0.00 real         0.00 user         0.00 sys
+             2064384  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                 303  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                   7  involuntary context switches
+            36983589  instructions retired
+            10725351  cycles elapsed
+             1147168  peak memory footprint
+
+=== rush-collections-100000.log ===
+Collection input items: 100000; verified expected sum: 3333366666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections	prepared_run	1	85256.834	86783.167	89590.250
+        1.56 real         1.53 user         0.01 sys
+           151584768  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                9429  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 607  involuntary context switches
+         39520817386  instructions retired
+          6097810602  cycles elapsed
+           150864448  peak memory footprint
+
+=== rush-collections-100000-once.log ===
+Collection input items: 100000; verified expected sum: 3333366666
+Rush runtime · macos aarch64 · one verified execution, no warmup
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections	verify	1	88695.667	88695.667	88695.667
+        0.09 real         0.08 user         0.00 sys
+            12943360  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                 969  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                  45  involuntary context switches
+          2210942550  instructions retired
+           347200771  cycles elapsed
+            12058960  peak memory footprint
+
+=== rush-collections_lazy-100000.log ===
+Collection input items: 100000; verified expected sum: 3333366666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	prepared_run	1	87903.875	88776.709	91404.959
+        1.59 real         1.58 user         0.00 sys
+             2326528  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                 319  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 693  involuntary context switches
+         38824368224  instructions retired
+          6223955154  cycles elapsed
+             1409312  peak memory footprint
+
+=== rush-collections_lazy-100000-once.log ===
+Collection input items: 100000; verified expected sum: 3333366666
+Rush runtime · macos aarch64 · one verified execution, no warmup
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	verify	1	88395.042	88395.042	88395.042
+        0.09 real         0.08 user         0.00 sys
+             2064384  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                 303  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                  71  involuntary context switches
+          2181580911  instructions retired
+           349233877  cycles elapsed
+             1147168  peak memory footprint
+
+=== rush-collections-1000000.log ===
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections	prepared_run	1	853863.500	876867.084	919434.292
+       15.73 real        15.47 user         0.16 sys
+          1686421504  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              103108  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                5262  involuntary context switches
+        395230095210  instructions retired
+         61161494029  cycles elapsed
+          1686472360  peak memory footprint
+
+=== rush-collections-1000000-once.log ===
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · one verified execution, no warmup
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections	verify	1	866097.042	866097.042	866097.042
+        0.87 real         0.85 user         0.01 sys
+            96960512  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                6095  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 350  involuntary context switches
+         22006546580  instructions retired
+          3405165408  cycles elapsed
+            96108928  peak memory footprint
+
+=== rush-collections_lazy-1000000.log ===
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	prepared_run	1	880688.375	896241.917	1118431.292
+       16.56 real        15.93 user         0.06 sys
+             2326528  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                 319  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+               16592  involuntary context switches
+        388436527800  instructions retired
+         62305184810  cycles elapsed
+             1409312  peak memory footprint
+
+=== rush-collections_lazy-1000000-once.log ===
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · one verified execution, no warmup
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	verify	1	1383198.375	1383198.375	1383198.375
+        1.38 real         0.87 user         0.00 sys
+             2064384  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                 303  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                1336  involuntary context switches
+         21447295115  instructions retired
+          3433484153  cycles elapsed
+             1147168  peak memory footprint
+
+=== requested heap allocation counter ===
+   Compiling themoretheless-tokenizer-rush v0.4.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `bench` profile [optimized] target(s) in 0.28s
+     Running benches/memory.rs (target/release/build/themoretheless-tokenizer-rush/3bbee10d8fd325c9/out/memory-3bbee10d8fd325c9)
+workload	items	run	peak_extra_bytes	live_after_drop_bytes	allocation_calls
+eager	1000	1	97304	0	8739
+eager	1000	2	97304	0	8739
+eager	1000	3	97304	0	8739
+lazy	1000	1	24128	0	8713
+lazy	1000	2	24128	0	8713
+lazy	1000	3	24128	0	8713
+eager	100000	1	10501144	0	866760
+eager	100000	2	10501144	0	866760
+eager	100000	3	10501144	0	866760
+lazy	100000	1	24128	0	866713
+lazy	100000	2	24128	0	866713
+lazy	100000	3	24128	0	866713
+eager	1000000	1	83901464	0	8666769
+eager	1000000	2	83901464	0	8666769
+eager	1000000	3	83901464	0	8666769
+lazy	1000000	1	24128	0	8666713
+lazy	1000000	2	24128	0	8666713
+lazy	1000000	3	24128	0	8666713

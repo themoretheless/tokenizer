@@ -1,9 +1,9 @@
 [package]
 name = "themoretheless-tokenizer-css"
-version = "0.4.0"
+version = "0.7.0"
 edition = "2024"
 authors = ["Denis Mezhov"]
-description = "Full CSS engine (lex/parse/AST/semantic) for themoretheless-tokenizer"
+description = "Lossless CSS engine (lex/parse/diagnostics) for themoretheless-tokenizer"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/themoretheless/tokenizer"
 readme = "README.md"
@@ -16,7 +16,7 @@ name = "themoretheless_tokenizer_css"
 path = "src/lib.rs"
 
 [dependencies]
-themoretheless-tokenizer-core = { path = "../tokenizer-core", version = "0.4.0" }
+themoretheless-tokenizer-core = { path = "../tokenizer-core", version = "0.7.0" }
 
 [package.metadata.docs.rs]
 all-features = true

@@ -1,0 +1,1004 @@
+{
+  "date": "2026-10-01T08:53:11.756614+00:00",
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "method": "fresh process and engine; compile/run 1+2; first launch separate; 16 cyclic rounds; binaries read for SHA256 before launches; OS caches not flushed",
+  "commands": {
+    "Rush": [
+      "/Users/themoretheless/Documents/Sources/tokenizer/target/release/examples/startup"
+    ],
+    "CPython": [
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "-I",
+      "-S",
+      "-c",
+      "print(1+2)"
+    ],
+    "Lua": [
+      "/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/lua-runtime/target/release/rush-lua-startup"
+    ],
+    "Luau": [
+      "/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/luau-runtime/target/release/rush-luau-startup"
+    ],
+    "Rhai": [
+      "/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/rhai-runtime/target/release/startup"
+    ],
+    "Koto": [
+      "/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/koto-runtime/target/release/startup"
+    ],
+    "Wren": [
+      "/var/folders/jx/ps1h62vx3gdgly_ddwly4mqr0000gn/T/rush-startup-25pmggl0/wren-startup"
+    ],
+    "Nushell": [
+      "/private/tmp/nu-0.107.0-aarch64-apple-darwin/nu",
+      "--no-config-file",
+      "--no-history",
+      "-c",
+      "1 + 2"
+    ]
+  },
+  "executable_sha256": {
+    "Rush": "c20c3f271938bf85448162fc96443c514aa5ebec241e4ddf42a94c40a6a7d067",
+    "CPython": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634",
+    "Lua": "19d63c8298b35338bc95a8b060d5b3544c60e4261930ebb6c78d7d02f475ec26",
+    "Luau": "3d17b7a209e30e1ff61d23a0872d3b467550d3c7b2088dd1725d89a259032b0c",
+    "Rhai": "05a1109daaa7823b4482f76655cc27c2d27999e06a0d61ecbee93b5410458f77",
+    "Koto": "3ade984014ed814d8bc62a91d0dc363df9c4d3883952a2bdbac52d89d4756c74",
+    "Wren": "b04f88c4be722be7eacacadd46747ae9c92c7af2ceea5b6bc2ac96cbc9403899",
+    "Nushell": "7acd3aaf42ba54ec69991a66f5dc6e1bfea10e8d3ffae61df31079e547df220f"
+  },
+  "runs": [
+    {
+      "engine": "Rush",
+      "round": -1,
+      "milliseconds": 251.272,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": -1,
+      "milliseconds": 19.265375,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": -1,
+      "milliseconds": 224.185875,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": -1,
+      "milliseconds": 238.206791,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": -1,
+      "milliseconds": 249.440334,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": -1,
+      "milliseconds": 1070.538084,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": -1,
+      "milliseconds": 4280.761416,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": -1,
+      "milliseconds": 92.688208,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 0,
+      "milliseconds": 6.352958,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 0,
+      "milliseconds": 39.274208,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 0,
+      "milliseconds": 26.615875,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 0,
+      "milliseconds": 27.477083,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 0,
+      "milliseconds": 22.987,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 0,
+      "milliseconds": 21.509791,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 0,
+      "milliseconds": 5.720584,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 0,
+      "milliseconds": 44.8585,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 1,
+      "milliseconds": 31.846625,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 1,
+      "milliseconds": 9.687375,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 1,
+      "milliseconds": 9.085583,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 1,
+      "milliseconds": 9.380666,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 1,
+      "milliseconds": 14.244292,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 1,
+      "milliseconds": 9.347916,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 1,
+      "milliseconds": 94.1695,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 1,
+      "milliseconds": 8.264417,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 2,
+      "milliseconds": 9.711917,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 2,
+      "milliseconds": 8.023167,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 2,
+      "milliseconds": 7.509792,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 2,
+      "milliseconds": 13.80925,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 2,
+      "milliseconds": 8.309666,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 2,
+      "milliseconds": 115.696375,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 2,
+      "milliseconds": 17.504625,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 2,
+      "milliseconds": 38.919166,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 3,
+      "milliseconds": 12.888875,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 3,
+      "milliseconds": 14.020917,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 3,
+      "milliseconds": 19.330833,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 3,
+      "milliseconds": 11.256625,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 3,
+      "milliseconds": 111.920959,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 3,
+      "milliseconds": 6.357375,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 3,
+      "milliseconds": 23.507125,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 3,
+      "milliseconds": 10.471959,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 4,
+      "milliseconds": 7.902791,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 4,
+      "milliseconds": 8.798292,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 4,
+      "milliseconds": 8.667542,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 4,
+      "milliseconds": 29.250833,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 4,
+      "milliseconds": 6.37275,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 4,
+      "milliseconds": 33.381125,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 4,
+      "milliseconds": 7.3765,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 4,
+      "milliseconds": 14.216792,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 5,
+      "milliseconds": 13.041084,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 5,
+      "milliseconds": 5.230875,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 5,
+      "milliseconds": 47.514125,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 5,
+      "milliseconds": 13.354917,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 5,
+      "milliseconds": 25.195459,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 5,
+      "milliseconds": 11.076166,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 5,
+      "milliseconds": 7.13875,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 5,
+      "milliseconds": 7.005959,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 6,
+      "milliseconds": 5.725333,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 6,
+      "milliseconds": 92.651833,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 6,
+      "milliseconds": 9.03875,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 6,
+      "milliseconds": 28.610417,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 6,
+      "milliseconds": 7.753625,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 6,
+      "milliseconds": 7.149541,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 6,
+      "milliseconds": 10.655542,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 6,
+      "milliseconds": 11.181916,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 7,
+      "milliseconds": 29.291042,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 7,
+      "milliseconds": 14.299542,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 7,
+      "milliseconds": 35.282417,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 7,
+      "milliseconds": 10.500041,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 7,
+      "milliseconds": 15.23225,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 7,
+      "milliseconds": 7.837084,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 7,
+      "milliseconds": 12.605458,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 7,
+      "milliseconds": 11.31425,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 8,
+      "milliseconds": 7.984667,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 8,
+      "milliseconds": 24.095167,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 8,
+      "milliseconds": 6.556,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 8,
+      "milliseconds": 6.877042,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 8,
+      "milliseconds": 6.940875,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 8,
+      "milliseconds": 7.6755,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 8,
+      "milliseconds": 3.954959,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 8,
+      "milliseconds": 80.961917,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 9,
+      "milliseconds": 23.965375,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 9,
+      "milliseconds": 11.072417,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 9,
+      "milliseconds": 13.97375,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 9,
+      "milliseconds": 10.86225,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 9,
+      "milliseconds": 10.458709,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 9,
+      "milliseconds": 10.82125,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 9,
+      "milliseconds": 41.027959,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 9,
+      "milliseconds": 20.891333,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 10,
+      "milliseconds": 22.656792,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 10,
+      "milliseconds": 31.006208,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 10,
+      "milliseconds": 27.952708,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 10,
+      "milliseconds": 32.224125,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 10,
+      "milliseconds": 31.355583,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 10,
+      "milliseconds": 140.45625,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 10,
+      "milliseconds": 4.635542,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 10,
+      "milliseconds": 40.60925,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 11,
+      "milliseconds": 13.082291,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 11,
+      "milliseconds": 6.00875,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 11,
+      "milliseconds": 14.140542,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 11,
+      "milliseconds": 6.428333,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 11,
+      "milliseconds": 62.105458,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 11,
+      "milliseconds": 14.331917,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 11,
+      "milliseconds": 71.542334,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 11,
+      "milliseconds": 30.43075,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 12,
+      "milliseconds": 16.878916,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 12,
+      "milliseconds": 12.957166,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 12,
+      "milliseconds": 5.028667,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 12,
+      "milliseconds": 97.978208,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 12,
+      "milliseconds": 5.402083,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 12,
+      "milliseconds": 36.313667,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 12,
+      "milliseconds": 26.625,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 12,
+      "milliseconds": 14.083583,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 13,
+      "milliseconds": 8.255208,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 13,
+      "milliseconds": 10.570542,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 13,
+      "milliseconds": 107.180875,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 13,
+      "milliseconds": 8.783334,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 13,
+      "milliseconds": 36.583875,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 13,
+      "milliseconds": 10.621208,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 13,
+      "milliseconds": 11.082167,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 13,
+      "milliseconds": 9.771458,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 14,
+      "milliseconds": 7.4955,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 14,
+      "milliseconds": 108.015167,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 14,
+      "milliseconds": 8.718209,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 14,
+      "milliseconds": 33.009833,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 14,
+      "milliseconds": 12.735292,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 14,
+      "milliseconds": 11.743209,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 14,
+      "milliseconds": 5.781708,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 14,
+      "milliseconds": 11.41775,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Nushell",
+      "round": 15,
+      "milliseconds": 97.259125,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rush",
+      "round": 15,
+      "milliseconds": 13.685459,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "CPython",
+      "round": 15,
+      "milliseconds": 36.477917,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Lua",
+      "round": 15,
+      "milliseconds": 4.228583,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Luau",
+      "round": 15,
+      "milliseconds": 8.60325,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Rhai",
+      "round": 15,
+      "milliseconds": 9.861958,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Koto",
+      "round": 15,
+      "milliseconds": 11.406875,
+      "verified": true,
+      "stderr": ""
+    },
+    {
+      "engine": "Wren",
+      "round": 15,
+      "milliseconds": 7.724792,
+      "verified": true,
+      "stderr": ""
+    }
+  ]
+}

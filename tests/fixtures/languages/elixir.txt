@@ -1,0 +1,4 @@
+# demo
+defmodule M do
+  def f(x), do: x + 1
+end

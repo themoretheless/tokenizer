@@ -1,0 +1,173 @@
+{
+  "method": "four alternating rounds; three workloads; N=1000; prepared execution",
+  "runs": [
+    {
+      "case": "closure",
+      "round": 0,
+      "tracing": false,
+      "median_us": 0.822,
+      "stdout": "Trace cancellation checks enabled: False\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t100\t0.688\t0.822\t2.957\n"
+    },
+    {
+      "case": "closure",
+      "round": 0,
+      "tracing": true,
+      "median_us": 1.315,
+      "stdout": "Trace cancellation checks enabled: True\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t100\t1.244\t1.315\t2.499\n"
+    },
+    {
+      "case": "closure",
+      "round": 1,
+      "tracing": true,
+      "median_us": 1.38,
+      "stdout": "Trace cancellation checks enabled: True\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t100\t1.332\t1.380\t2.629\n"
+    },
+    {
+      "case": "closure",
+      "round": 1,
+      "tracing": false,
+      "median_us": 0.306,
+      "stdout": "Trace cancellation checks enabled: False\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t100\t0.270\t0.306\t1.472\n"
+    },
+    {
+      "case": "closure",
+      "round": 2,
+      "tracing": false,
+      "median_us": 0.776,
+      "stdout": "Trace cancellation checks enabled: False\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t100\t0.684\t0.776\t2.936\n"
+    },
+    {
+      "case": "closure",
+      "round": 2,
+      "tracing": true,
+      "median_us": 3.465,
+      "stdout": "Trace cancellation checks enabled: True\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t100\t3.356\t3.465\t6.131\n"
+    },
+    {
+      "case": "closure",
+      "round": 3,
+      "tracing": true,
+      "median_us": 2.569,
+      "stdout": "Trace cancellation checks enabled: True\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t100\t1.309\t2.569\t4.259\n"
+    },
+    {
+      "case": "closure",
+      "round": 3,
+      "tracing": false,
+      "median_us": 0.307,
+      "stdout": "Trace cancellation checks enabled: False\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t100\t0.269\t0.307\t1.557\n"
+    },
+    {
+      "case": "collections",
+      "round": 0,
+      "tracing": false,
+      "median_us": 98.944,
+      "stdout": "Trace cancellation checks enabled: False\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t100\t97.020\t98.944\t102.624\n"
+    },
+    {
+      "case": "collections",
+      "round": 0,
+      "tracing": true,
+      "median_us": 672.302,
+      "stdout": "Trace cancellation checks enabled: True\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t100\t597.945\t672.302\t771.138\n"
+    },
+    {
+      "case": "collections",
+      "round": 1,
+      "tracing": true,
+      "median_us": 629.361,
+      "stdout": "Trace cancellation checks enabled: True\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t100\t598.371\t629.361\t636.688\n"
+    },
+    {
+      "case": "collections",
+      "round": 1,
+      "tracing": false,
+      "median_us": 96.871,
+      "stdout": "Trace cancellation checks enabled: False\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t100\t96.043\t96.871\t103.101\n"
+    },
+    {
+      "case": "collections",
+      "round": 2,
+      "tracing": false,
+      "median_us": 94.072,
+      "stdout": "Trace cancellation checks enabled: False\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t100\t92.838\t94.072\t96.382\n"
+    },
+    {
+      "case": "collections",
+      "round": 2,
+      "tracing": true,
+      "median_us": 563.782,
+      "stdout": "Trace cancellation checks enabled: True\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t100\t561.536\t563.782\t568.448\n"
+    },
+    {
+      "case": "collections",
+      "round": 3,
+      "tracing": true,
+      "median_us": 576.727,
+      "stdout": "Trace cancellation checks enabled: True\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t100\t570.105\t576.727\t582.440\n"
+    },
+    {
+      "case": "collections",
+      "round": 3,
+      "tracing": false,
+      "median_us": 95.969,
+      "stdout": "Trace cancellation checks enabled: False\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t100\t94.791\t95.969\t96.840\n"
+    },
+    {
+      "case": "collections_lazy",
+      "round": 0,
+      "tracing": false,
+      "median_us": 119.37,
+      "stdout": "Trace cancellation checks enabled: False\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t100\t95.347\t119.370\t149.702\n"
+    },
+    {
+      "case": "collections_lazy",
+      "round": 0,
+      "tracing": true,
+      "median_us": 574.834,
+      "stdout": "Trace cancellation checks enabled: True\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t100\t568.689\t574.834\t707.447\n"
+    },
+    {
+      "case": "collections_lazy",
+      "round": 1,
+      "tracing": true,
+      "median_us": 583.289,
+      "stdout": "Trace cancellation checks enabled: True\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t100\t578.325\t583.289\t782.523\n"
+    },
+    {
+      "case": "collections_lazy",
+      "round": 1,
+      "tracing": false,
+      "median_us": 85.132,
+      "stdout": "Trace cancellation checks enabled: False\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t100\t84.162\t85.132\t85.797\n"
+    },
+    {
+      "case": "collections_lazy",
+      "round": 2,
+      "tracing": false,
+      "median_us": 84.987,
+      "stdout": "Trace cancellation checks enabled: False\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t100\t83.717\t84.987\t86.842\n"
+    },
+    {
+      "case": "collections_lazy",
+      "round": 2,
+      "tracing": true,
+      "median_us": 569.194,
+      "stdout": "Trace cancellation checks enabled: True\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t100\t562.097\t569.194\t576.640\n"
+    },
+    {
+      "case": "collections_lazy",
+      "round": 3,
+      "tracing": true,
+      "median_us": 561.184,
+      "stdout": "Trace cancellation checks enabled: True\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t100\t557.767\t561.184\t562.609\n"
+    },
+    {
+      "case": "collections_lazy",
+      "round": 3,
+      "tracing": false,
+      "median_us": 85.533,
+      "stdout": "Trace cancellation checks enabled: False\nCPython 3.14.7 \u00b7 macOS-26.7.1-arm64-arm-64bit-Mach-O\nCollection input items: 1000; verified expected sum: 333666\n7 samples, 10 warmup operations; floating-point elements; no execution budget\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t100\t84.160\t85.533\t87.616\n"
+    }
+  ]
+}

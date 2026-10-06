@@ -1,0 +1,5 @@
+" demo
+DATA lv TYPE i.
+IF lv = 1.
+  WRITE lv.
+ENDIF.

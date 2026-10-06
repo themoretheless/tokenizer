@@ -1,6 +1,6 @@
 [package]
 name = "themoretheless-tokenizer-rush"
-version = "0.4.0"
+version = "0.7.0"
 edition = "2024"
 authors = ["Denis Mezhov"]
 description = "Full rush engine (lex/parse/AST/semantic) for themoretheless-tokenizer"
@@ -16,7 +16,56 @@ name = "themoretheless_tokenizer_rush"
 path = "src/lib.rs"
 
 [dependencies]
-themoretheless-tokenizer-core = { path = "../tokenizer-core", version = "0.4.0" }
+self_cell = "1"
+serde = { version = "1", features = ["derive"] }
+themoretheless-tokenizer-core = { path = "../tokenizer-core", version = "0.7.0" }
 
 [package.metadata.docs.rs]
 all-features = true
+
+[[bench]]
+name = "runtime"
+harness = false
+
+[[bench]]
+name = "memory"
+harness = false
+
+[[bench]]
+name = "cancellation"
+harness = false
+
+[[bench]]
+name = "allocator"
+harness = false
+
+[dev-dependencies]
+serde_json = "1.0.151"
+
+[[bench]]
+name = "grouping"
+harness = false
+
+[[bench]]
+name = "scalar_bytecode"
+harness = false
+
+[[bench]]
+name = "scalar_memory"
+harness = false
+
+[[bench]]
+name = "scalar_closures"
+harness = false
+
+[[bench]]
+name = "loading"
+harness = false
+
+[[bench]]
+name = "coroutine"
+harness = false
+
+[[bench]]
+name = "remainder"
+harness = false

@@ -1,0 +1,83 @@
+Preparation including drop; 10 warmups per operation, 9 cyclic samples of 1000 preparations
+source	operation	sample	us_per_preparation
+x*2	parse_and_tree	0	0.335
+x*2	tree_to_instructions	0	0.056
+x*2	parse_and_instructions	0	0.420
+x*2	tree_to_instructions	1	0.057
+x*2	parse_and_instructions	1	0.412
+x*2	parse_and_tree	1	0.323
+x*2	parse_and_instructions	2	0.410
+x*2	parse_and_tree	2	0.332
+x*2	tree_to_instructions	2	0.059
+x*2	parse_and_tree	3	0.323
+x*2	tree_to_instructions	3	0.058
+x*2	parse_and_instructions	3	0.408
+x*2	tree_to_instructions	4	0.058
+x*2	parse_and_instructions	4	0.411
+x*2	parse_and_tree	4	0.326
+x*2	parse_and_instructions	5	0.430
+x*2	parse_and_tree	5	0.320
+x*2	tree_to_instructions	5	0.056
+x*2	parse_and_tree	6	0.338
+x*2	tree_to_instructions	6	0.056
+x*2	parse_and_instructions	6	0.409
+x*2	tree_to_instructions	7	0.056
+x*2	parse_and_instructions	7	0.412
+x*2	parse_and_tree	7	0.324
+x*2	parse_and_instructions	8	0.412
+x*2	parse_and_tree	8	0.334
+x*2	tree_to_instructions	8	0.056
+(if x%2==0 { x*2 } else { x })	parse_and_tree	0	1.443
+(if x%2==0 { x*2 } else { x })	tree_to_instructions	0	0.153
+(if x%2==0 { x*2 } else { x })	parse_and_instructions	0	1.636
+(if x%2==0 { x*2 } else { x })	tree_to_instructions	1	0.152
+(if x%2==0 { x*2 } else { x })	parse_and_instructions	1	1.627
+(if x%2==0 { x*2 } else { x })	parse_and_tree	1	1.456
+(if x%2==0 { x*2 } else { x })	parse_and_instructions	2	1.639
+(if x%2==0 { x*2 } else { x })	parse_and_tree	2	1.432
+(if x%2==0 { x*2 } else { x })	tree_to_instructions	2	0.151
+(if x%2==0 { x*2 } else { x })	parse_and_tree	3	1.429
+(if x%2==0 { x*2 } else { x })	tree_to_instructions	3	0.151
+(if x%2==0 { x*2 } else { x })	parse_and_instructions	3	1.655
+(if x%2==0 { x*2 } else { x })	tree_to_instructions	4	0.154
+(if x%2==0 { x*2 } else { x })	parse_and_instructions	4	1.659
+(if x%2==0 { x*2 } else { x })	parse_and_tree	4	1.429
+(if x%2==0 { x*2 } else { x })	parse_and_instructions	5	1.622
+(if x%2==0 { x*2 } else { x })	parse_and_tree	5	1.426
+(if x%2==0 { x*2 } else { x })	tree_to_instructions	5	0.148
+(if x%2==0 { x*2 } else { x })	parse_and_tree	6	1.444
+(if x%2==0 { x*2 } else { x })	tree_to_instructions	6	0.153
+(if x%2==0 { x*2 } else { x })	parse_and_instructions	6	1.667
+(if x%2==0 { x*2 } else { x })	tree_to_instructions	7	0.152
+(if x%2==0 { x*2 } else { x })	parse_and_instructions	7	1.634
+(if x%2==0 { x*2 } else { x })	parse_and_tree	7	1.423
+(if x%2==0 { x*2 } else { x })	parse_and_instructions	8	1.631
+(if x%2==0 { x*2 } else { x })	parse_and_tree	8	1.439
+(if x%2==0 { x*2 } else { x })	tree_to_instructions	8	0.150
+x%3==0 and x<15000	parse_and_tree	0	0.965
+x%3==0 and x<15000	tree_to_instructions	0	0.180
+x%3==0 and x<15000	parse_and_instructions	0	1.146
+x%3==0 and x<15000	tree_to_instructions	1	0.160
+x%3==0 and x<15000	parse_and_instructions	1	1.129
+x%3==0 and x<15000	parse_and_tree	1	0.953
+x%3==0 and x<15000	parse_and_instructions	2	1.123
+x%3==0 and x<15000	parse_and_tree	2	0.947
+x%3==0 and x<15000	tree_to_instructions	2	0.153
+x%3==0 and x<15000	parse_and_tree	3	0.960
+x%3==0 and x<15000	tree_to_instructions	3	0.154
+x%3==0 and x<15000	parse_and_instructions	3	1.136
+x%3==0 and x<15000	tree_to_instructions	4	0.157
+x%3==0 and x<15000	parse_and_instructions	4	1.148
+x%3==0 and x<15000	parse_and_tree	4	0.954
+x%3==0 and x<15000	parse_and_instructions	5	1.131
+x%3==0 and x<15000	parse_and_tree	5	0.952
+x%3==0 and x<15000	tree_to_instructions	5	0.155
+x%3==0 and x<15000	parse_and_tree	6	0.954
+x%3==0 and x<15000	tree_to_instructions	6	0.156
+x%3==0 and x<15000	parse_and_instructions	6	1.135
+x%3==0 and x<15000	tree_to_instructions	7	0.166
+x%3==0 and x<15000	parse_and_instructions	7	1.129
+x%3==0 and x<15000	parse_and_tree	7	0.962
+x%3==0 and x<15000	parse_and_instructions	8	1.124
+x%3==0 and x<15000	parse_and_tree	8	0.950
+x%3==0 and x<15000	tree_to_instructions	8	0.156

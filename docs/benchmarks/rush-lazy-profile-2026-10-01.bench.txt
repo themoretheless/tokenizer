@@ -1,0 +1,4 @@
+Collection input items: 1000; verified expected sum: 333666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	prepared_run	10000	369.803	462.380	740.449

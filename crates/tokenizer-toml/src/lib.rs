@@ -56,57 +56,69 @@ pub use themoretheless_tokenizer_core::{ColumnEncoding, LineIndex};
 use std::borrow::Cow;
 
 use themoretheless_tokenizer_core::{
-    HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan, HostToken,
-    HostTokenization, LanguageDescriptor, LanguageId, Severity, SyntaxKind as CoreSyntaxKind,
-    full_descriptor, require_default_dialect,
+    Capabilities, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan,
+    HostToken, HostTokenization, LanguageDescriptor, LanguageId, Severity, language_descriptor,
+    require_default_dialect,
 };
 
-fn core_kind(kind: SyntaxKind) -> CoreSyntaxKind {
+/// What this engine actually does, stated on its own: TOML has a hand-written
+/// recovering grammar that rejects `[s` and `key =` and stays silent on valid
+/// documents, so it advertises `VALIDATE` — which the shared fullkit parser
+/// behind the wave languages cannot claim.
+const CAPABILITIES: Capabilities = Capabilities::LEX
+    .union(Capabilities::PARSE)
+    .union(Capabilities::VALIDATE);
+
+/// Host token kind: the TOML spec's own lexical categories, so an editor (and
+/// the playground) can tell a bare key from a quoted one, or an offset date
+/// from an integer.
+fn host_kind(kind: SyntaxKind) -> &'static str {
     match kind {
-        SyntaxKind::Whitespace | SyntaxKind::Newline | SyntaxKind::Bom => {
-            CoreSyntaxKind::Whitespace
-        }
-        SyntaxKind::LineComment => CoreSyntaxKind::LineComment,
-        SyntaxKind::LeftBracket
-        | SyntaxKind::RightBracket
-        | SyntaxKind::LeftBrace
-        | SyntaxKind::RightBrace
-        | SyntaxKind::Equals
-        | SyntaxKind::Comma
-        | SyntaxKind::Dot => CoreSyntaxKind::Punctuation,
-        SyntaxKind::BareKey => CoreSyntaxKind::Identifier,
-        SyntaxKind::BasicString
-        | SyntaxKind::LiteralString
-        | SyntaxKind::MultiLineBasicString
-        | SyntaxKind::MultiLineLiteralString => CoreSyntaxKind::StringLit,
-        SyntaxKind::Integer
-        | SyntaxKind::Float
-        | SyntaxKind::HexInteger
-        | SyntaxKind::OctInteger
-        | SyntaxKind::BinInteger
-        | SyntaxKind::OffsetDateTime
-        | SyntaxKind::LocalDateTime
-        | SyntaxKind::LocalDate
-        | SyntaxKind::LocalTime => CoreSyntaxKind::NumberLit,
-        SyntaxKind::True | SyntaxKind::False | SyntaxKind::Inf | SyntaxKind::Nan => {
-            CoreSyntaxKind::Keyword
-        }
-        SyntaxKind::Error => CoreSyntaxKind::Error,
+        SyntaxKind::Whitespace => "whitespace",
+        SyntaxKind::Newline => "newline",
+        SyntaxKind::Bom => "bom",
+        SyntaxKind::LineComment => "comment",
+        SyntaxKind::LeftBracket => "left-bracket",
+        SyntaxKind::RightBracket => "right-bracket",
+        SyntaxKind::LeftBrace => "left-brace",
+        SyntaxKind::RightBrace => "right-brace",
+        SyntaxKind::Equals => "equals",
+        SyntaxKind::Comma => "comma",
+        SyntaxKind::Dot => "dot",
+        SyntaxKind::BareKey => "bare-key",
+        SyntaxKind::BasicString => "basic-string",
+        SyntaxKind::LiteralString => "literal-string",
+        SyntaxKind::MultiLineBasicString => "multi-line-basic-string",
+        SyntaxKind::MultiLineLiteralString => "multi-line-literal-string",
+        SyntaxKind::Integer => "integer",
+        SyntaxKind::Float => "float",
+        SyntaxKind::HexInteger => "hex-integer",
+        SyntaxKind::OctInteger => "octal-integer",
+        SyntaxKind::BinInteger => "binary-integer",
+        SyntaxKind::True => "true",
+        SyntaxKind::False => "false",
+        SyntaxKind::Inf => "inf",
+        SyntaxKind::Nan => "nan",
+        SyntaxKind::OffsetDateTime => "offset-date-time",
+        SyntaxKind::LocalDateTime => "local-date-time",
+        SyntaxKind::LocalDate => "local-date",
+        SyntaxKind::LocalTime => "local-time",
+        SyntaxKind::Error => "error",
     }
 }
 
 fn host_tokenization(parsed: &Parse<'_>) -> HostTokenization {
     let mut tokens = Vec::new();
     for token in parsed.lexed().tokens() {
-        let kind = if token.has_error() {
-            CoreSyntaxKind::Error
-        } else {
-            core_kind(token.kind)
-        };
+        let error = token.has_error();
         tokens.push(HostToken {
-            kind: Cow::Borrowed(kind.as_str()),
+            kind: Cow::Borrowed(if error {
+                "error"
+            } else {
+                host_kind(token.kind)
+            }),
             span: HostSpan::from(token.span),
-            error: kind == CoreSyntaxKind::Error,
+            error,
         });
     }
     let mut diagnostics = Vec::new();
@@ -132,13 +144,14 @@ pub struct Host;
 
 pub static ENGINE: Host = Host;
 
-pub static DESCRIPTOR: LanguageDescriptor = full_descriptor(
+pub static DESCRIPTOR: LanguageDescriptor = language_descriptor(
     LanguageId::TOML,
     "TOML",
     &[],
     &[".toml"],
     &["application/toml"],
     env!("CARGO_PKG_VERSION"),
+    CAPABILITIES,
 );
 
 impl HostLanguage for Host {
@@ -162,6 +175,7 @@ impl HostLanguage for Host {
         source: &str,
         opts: &HostAnalysisOptions,
     ) -> Result<HostTokenization, HostError> {
+        // SEMANTIC dropped: identical to syntax (measurement-driven capability honesty).
         self.lex(source, opts)
     }
 
@@ -219,8 +233,10 @@ mod tests {
             .iter()
             .map(|token| token.kind.as_ref())
             .collect();
-        assert!(kinds.contains(&"punctuation"));
-        assert!(kinds.contains(&"number"));
+        assert!(kinds.contains(&"bare-key"), "{kinds:?}");
+        assert!(kinds.contains(&"integer"), "{kinds:?}");
+        assert!(kinds.contains(&"left-bracket"), "{kinds:?}");
+        assert!(kinds.contains(&"newline"), "{kinds:?}");
     }
 
     #[test]

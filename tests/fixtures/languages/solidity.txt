@@ -1,0 +1,4 @@
+// demo
+contract C {
+  function f() public {}
+}

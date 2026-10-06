@@ -5,6 +5,8 @@
 //! as `themoretheless_tokenizer::json`.
 
 mod ast;
+mod host;
+mod jsonl;
 mod lexer;
 mod navigation;
 mod parser;
@@ -15,7 +17,9 @@ mod visitor;
 pub use ast::{
     Array, Boolean, Member, Null, Number, NumberError, Object, StringValue, Value, ValueKind,
 };
+pub use host::{JSON5_ENGINE, JSONL_ENGINE, Json5Host, JsonlHost};
 
+pub use jsonl::{Jsonl, Record, parse as parse_jsonl, parse_records};
 pub use lexer::{
     LexDiagnostic, LexDiagnosticKind, LexToken, Lexed, LexerOptions, NumberIssue, SyntaxKind,
     TokenFlags, lex, lex_with,

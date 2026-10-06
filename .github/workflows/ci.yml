@@ -88,3 +88,10 @@ jobs:
 
       - name: Run workspace tests
         run: cargo test --locked --workspace --all-targets --all-features
+
+      - name: Run Rush script tests
+        run: >-
+          cargo run --locked -p themoretheless-tokenizer-rush --bin rush --
+          --test crates/tokenizer-rush/examples/scripts
+          --module curves=crates/tokenizer-rush/examples/scripts/curves.r
+          --module meshes=crates/tokenizer-rush/examples/scripts/meshes.r

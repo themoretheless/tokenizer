@@ -1,0 +1,26 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running unittests src/lib.rs (/tmp/rush-managed-memory-miri/miri/aarch64-apple-darwin/debug/build/themoretheless-tokenizer-rush/bc295cd2c466c3e9/out/themoretheless_tokenizer_rush-bc295cd2c466c3e9)
+
+running 19 tests
+test runtime::memory::aggregate_limit_is_atomic_and_released_capacity_can_be_reused ... ok
+test runtime::memory::allocator_failure_during_growth_preserves_storage_and_reservation ... ok
+test runtime::memory::arithmetic_overflow_does_not_corrupt_reservations ... ok
+test runtime::memory::byte_copies_reserve_separately_and_empty_storage_needs_no_allocation ... ok
+test runtime::memory::byte_growth_accounts_for_copy_peak_and_preserves_original_on_failure ... ok
+test runtime::memory::every_failed_nested_allocation_is_released_and_retry_succeeds ... ok
+test runtime::memory::geometry_uses_the_same_budget_and_mesh_failure_releases_vertices ... ok
+test runtime::memory::managed_copy_preserves_source_on_failure_and_charges_destination_budget ... ok
+test runtime::memory::managed_data_imports_runtime_results_and_releases_all_nested_storage ... ok
+test runtime::memory::module_cache_failure_preserves_previous_exports_and_allows_retry ... ok
+test runtime::memory::module_stack_allocation_failure_leaves_instance_reusable ... ok
+test runtime::memory::popping_transfers_ownership_without_releasing_the_element_early ... ok
+test runtime::memory::runtime_cell_allocation_failure_is_recoverable_between_calls ... ok
+test runtime::memory::shared_allocation_outlives_budget_handle_until_its_last_owner_drops ... ok
+test runtime::memory::transfer_budget_and_cancellation_release_partial_data ... ok
+test runtime::memory::typed_storage_handles_alignment_zero_size_and_overflow ... ok
+test runtime::memory::typed_storage_moves_values_and_releases_nested_allocations ... ok
+test runtime::memory::typed_storage_releases_reservation_when_element_drop_unwinds ... ok
+test runtime::memory::unsupported_and_deep_data_fail_without_leaving_allocations ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 37.59s
+

@@ -1,0 +1,4 @@
+   Compiling rush-rhai-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/rhai-runtime)
+    Finished `release` profile [optimized] target(s) in 1.66s
+     Running `docs/benchmarks/rhai-runtime/target/release/host-object`
+Rhai 1.26.1: alias mutation, wrong argument type, nonfinite rejection, deleted owner and engine reuse passed

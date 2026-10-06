@@ -1,0 +1,22 @@
+   Compiling themoretheless-tokenizer-rush v0.7.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.88s
+     Running tests/cell_lifetime.rs (/tmp/rush-managed-memory-miri/miri/aarch64-apple-darwin/debug/build/themoretheless-tokenizer-rush/0112134fd79ae330/out/cell_lifetime-0112134fd79ae330)
+
+running 14 tests
+test a_self_capturing_cell_is_released_when_execution_ends ... ok
+test active_callee_and_shared_captures_are_roots_during_collection ... ok
+test closures_do_not_retain_unused_locals_or_shadowed_outer_parameters ... ok
+test collection_exhausts_the_shared_budget_and_program_can_run_again ... ok
+test dead_loop_and_call_cells_do_not_retain_all_prior_values ... ok
+test escaped_mutable_captures_survive_other_cell_reuse ... ok
+test foreign_mutable_captures_fail_without_reading_another_runs_slots ... ok
+test host_supplied_sequence_preserves_its_closures_source_metadata ... ok
+test interrupted_collection_drops_host_values_and_does_not_poison_the_program ... ok
+test nested_closure_keeps_the_outer_free_variable_it_needs ... ok
+test reachable_recursive_function_survives_collection_through_a_sequence ... ok
+test returned_value_outlives_its_reclaimed_cell ... ok
+test scope_exit_releases_values_before_the_next_host_call ... ok
+test unreachable_cycles_are_reclaimed_during_execution ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2834.12s
+

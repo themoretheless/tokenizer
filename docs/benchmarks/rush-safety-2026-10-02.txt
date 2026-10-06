@@ -1,0 +1,37 @@
+   Compiling themoretheless-tokenizer-rush v0.7.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `bench` profile [optimized] target(s) in 0.49s
+     Running benches/cancellation.rs (target/release/build/themoretheless-tokenizer-rush/41e371e9f54f3810/out/cancellation-41e371e9f54f3810)
+workload	samples	min_us	median_us	p95_us	max_us
+while	25	0.833	1.500	2.250	2.292
+eager_range	25	2313.416	3226.042	3811.917	4173.166
+lazy_rejected_filter	25	1.459	3.583	7.125	9.792
+blocking_host_20ms	25	13252.125	20838.375	23853.834	24647.250
+     Running benches/grouping.rs (target/release/build/themoretheless-tokenizer-rush/f51855f14743cbfc/out/grouping-f51855f14743cbfc)
+Rush grouping · macos aarch64 · prepared run, 3 warmups, 7 alternating samples
+rows	groups	algorithm	min_us	median_us	max_us
+100	10	script	1690.458	1700.000	2377.708
+100	10	group_by	285.583	290.333	353.958
+1000	10	script	66581.042	76468.000	225338.167
+1000	10	group_by	8113.750	9697.125	25884.833
+1000	100	script	561424.250	565509.375	570592.042
+1000	100	group_by	8992.791	9126.083	9257.958
+     Running benches/memory.rs (target/release/build/themoretheless-tokenizer-rush/f5f46dbfc9872c77/out/memory-f5f46dbfc9872c77)
+workload	items	run	peak_extra_bytes	live_after_drop_bytes	allocation_calls
+eager	1000	1	89020	0	6085
+eager	1000	2	89020	0	6085
+eager	1000	3	89020	0	6085
+lazy	1000	1	10220	0	6057
+lazy	1000	2	10220	0	6057
+lazy	1000	3	10220	0	6057
+eager	100000	1	9250940	0	600106
+eager	100000	2	9250940	0	600106
+eager	100000	3	9250940	0	600106
+lazy	100000	1	10220	0	600057
+lazy	100000	2	10220	0	600057
+lazy	100000	3	10220	0	600057
+eager	1000000	1	81951100	0	6000115
+eager	1000000	2	81951100	0	6000115
+eager	1000000	3	81951100	0	6000115
+lazy	1000000	1	10220	0	6000057
+lazy	1000000	2	10220	0	6000057
+lazy	1000000	3	10220	0	6000057

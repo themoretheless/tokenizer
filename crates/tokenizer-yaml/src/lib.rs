@@ -38,34 +38,44 @@ pub use themoretheless_tokenizer_core::Span;
 use std::borrow::Cow;
 
 use themoretheless_tokenizer_core::{
-    HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan, HostToken,
-    HostTokenization, LanguageDescriptor, LanguageId, Severity, SyntaxKind as CoreSyntaxKind,
-    full_descriptor, require_default_dialect,
+    Capabilities, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan,
+    HostToken, HostTokenization, LanguageDescriptor, LanguageId, Severity, language_descriptor,
+    require_default_dialect,
 };
 
-fn core_kind(kind: SyntaxKind) -> CoreSyntaxKind {
+/// YAML's grammar is hand-written too, so the same claim as TOML: it rejects
+/// unclosed flow collections and reports nothing on valid documents.
+const CAPABILITIES: Capabilities = Capabilities::LEX
+    .union(Capabilities::PARSE)
+    .union(Capabilities::VALIDATE);
+
+/// Host token kind: YAML's own node vocabulary, so an editor can tell a key
+/// indicator from a flow entry, or an anchor from a plain scalar.
+fn host_kind(kind: SyntaxKind) -> &'static str {
     match kind {
-        SyntaxKind::Whitespace | SyntaxKind::LineBreak | SyntaxKind::Bom => {
-            CoreSyntaxKind::Whitespace
-        }
-        SyntaxKind::Comment => CoreSyntaxKind::LineComment,
-        SyntaxKind::DocumentStart
-        | SyntaxKind::DocumentEnd
-        | SyntaxKind::BlockEntry
-        | SyntaxKind::KeyIndicator
-        | SyntaxKind::ValueIndicator
-        | SyntaxKind::FlowSequenceStart
-        | SyntaxKind::FlowSequenceEnd
-        | SyntaxKind::FlowMappingStart
-        | SyntaxKind::FlowMappingEnd
-        | SyntaxKind::FlowEntry => CoreSyntaxKind::Punctuation,
-        SyntaxKind::Directive | SyntaxKind::BlockScalarHeader => CoreSyntaxKind::Operator,
-        SyntaxKind::Anchor | SyntaxKind::Alias | SyntaxKind::Tag => CoreSyntaxKind::Identifier,
-        SyntaxKind::SingleQuotedScalar | SyntaxKind::DoubleQuotedScalar => {
-            CoreSyntaxKind::StringLit
-        }
-        SyntaxKind::PlainScalar => CoreSyntaxKind::Identifier,
-        SyntaxKind::Error => CoreSyntaxKind::Error,
+        SyntaxKind::Whitespace => "whitespace",
+        SyntaxKind::LineBreak => "line-break",
+        SyntaxKind::Bom => "bom",
+        SyntaxKind::Comment => "comment",
+        SyntaxKind::DocumentStart => "document-start",
+        SyntaxKind::DocumentEnd => "document-end",
+        SyntaxKind::Directive => "directive",
+        SyntaxKind::BlockEntry => "block-entry",
+        SyntaxKind::KeyIndicator => "key-indicator",
+        SyntaxKind::ValueIndicator => "value-indicator",
+        SyntaxKind::FlowSequenceStart => "flow-sequence-start",
+        SyntaxKind::FlowSequenceEnd => "flow-sequence-end",
+        SyntaxKind::FlowMappingStart => "flow-mapping-start",
+        SyntaxKind::FlowMappingEnd => "flow-mapping-end",
+        SyntaxKind::FlowEntry => "flow-entry",
+        SyntaxKind::Anchor => "anchor",
+        SyntaxKind::Alias => "alias",
+        SyntaxKind::Tag => "tag",
+        SyntaxKind::BlockScalarHeader => "block-scalar-header",
+        SyntaxKind::SingleQuotedScalar => "single-quoted-scalar",
+        SyntaxKind::DoubleQuotedScalar => "double-quoted-scalar",
+        SyntaxKind::PlainScalar => "plain-scalar",
+        SyntaxKind::Error => "error",
     }
 }
 
@@ -73,15 +83,15 @@ fn host_tokenization(parse: &Parse<'_>) -> HostTokenization {
     let lexed = parse.lexed();
     let mut tokens = Vec::new();
     for token in lexed.tokens() {
-        let kind = if token.has_error() {
-            CoreSyntaxKind::Error
-        } else {
-            core_kind(token.kind)
-        };
+        let error = token.has_error();
         tokens.push(HostToken {
-            kind: Cow::Borrowed(kind.as_str()),
+            kind: Cow::Borrowed(if error {
+                "error"
+            } else {
+                host_kind(token.kind)
+            }),
             span: HostSpan::from(token.span),
-            error: kind == CoreSyntaxKind::Error,
+            error,
         });
     }
     let mut diagnostics = Vec::new();
@@ -107,13 +117,14 @@ pub struct Host;
 
 pub static ENGINE: Host = Host;
 
-pub static DESCRIPTOR: LanguageDescriptor = full_descriptor(
+pub static DESCRIPTOR: LanguageDescriptor = language_descriptor(
     LanguageId::YAML,
     "YAML",
     &["yml"],
     &[".yaml", ".yml"],
     &["application/yaml", "text/yaml"],
     env!("CARGO_PKG_VERSION"),
+    CAPABILITIES,
 );
 
 impl HostLanguage for Host {
@@ -137,6 +148,7 @@ impl HostLanguage for Host {
         source: &str,
         opts: &HostAnalysisOptions,
     ) -> Result<HostTokenization, HostError> {
+        // SEMANTIC dropped: identical to syntax (measurement-driven capability honesty).
         self.lex(source, opts)
     }
 
@@ -177,7 +189,9 @@ mod tests {
             .iter()
             .map(|token| token.kind.as_ref())
             .collect();
-        assert!(kinds.contains(&"punctuation"));
+        assert!(kinds.contains(&"value-indicator"), "{kinds:?}");
+        assert!(kinds.contains(&"plain-scalar"), "{kinds:?}");
+        assert!(kinds.contains(&"line-break"), "{kinds:?}");
     }
 
     #[test]

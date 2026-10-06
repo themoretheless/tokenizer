@@ -1,0 +1,20 @@
+{
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "version": "Wren 0.4.0",
+  "executable_sha256": "703322b11094f25bf53ff27ac17751b2b64742416746b93c3d5cdac701dffd61",
+  "method": "Requested VM allocation bytes; headers, host allocations and RSS excluded. Prepared call with baseline + 256 KiB cap; NULL on rejected allocation. Each scenario uses a separate process with core dumps disabled.",
+  "runs": [
+    {
+      "mode": "unlimited",
+      "returncode": 0,
+      "stdout": "baseline=126933 peak=978213 after_free=0 result=10000\n",
+      "stderr": "call_returned result=0\n"
+    },
+    {
+      "mode": "capped",
+      "returncode": -6,
+      "stdout": "",
+      "stderr": "allocator_denied live=389069 request=32 previous=16 limit=389077\nAddressSanitizer:DEADLYSIGNAL\n=================================================================\n==14543==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000010 (pc 0x00010224aab4 bp 0x00016dbe58c0 sp 0x00016dbe5880 T0)\n==14543==The signal is caused by a WRITE memory access.\n==14543==Hint: address points to the zero page.\n==14543==WARNING: external symbolizer didn't start up correctly!\n==14543==WARNING: Can't read from symbolizer at fd 3\n==14543==WARNING: atos failed to symbolize address \"0x10224aab4\"\n==14543==WARNING: Can't read from symbolizer at fd 3\n==14543==WARNING: atos failed to symbolize address \"0x102244750\"\n==14543==WARNING: Can't read from symbolizer at fd 3\n==14543==WARNING: atos failed to symbolize address \"0x102259fe8\"\n==14543==WARNING: Can't read from symbolizer at fd 3\n==14543==WARNING: atos failed to symbolize address \"0x102256e68\"\n==14543==WARNING: Can't read from symbolizer at fd 3\n==14543==WARNING: atos failed to symbolize address \"0x102218ab8\"\n==14543==WARNING: Can't read from symbolizer at fd 3\n==14543==WARNING: atos failed to symbolize address \"0x18b4a44e0\"\n    #0 0x00010224aab4 in wrenValueBufferWrite+0x150 (/private/tmp/rush-wren-memory-limit-asan:arm64+0x100032ab4)\n    #1 0x000102244750 in prim_list_addCore+0x44 (/private/tmp/rush-wren-memory-limit-asan:arm64+0x10002c750)\n    #2 0x000102259fe8 in runInterpreter+0x2f74 (/private/tmp/rush-wren-memory-limit-asan:arm64+0x100041fe8)\n    #3 0x000102256e68 in wrenCall+0x360 (/private/tmp/rush-wren-memory-limit-asan:arm64+0x10003ee68)\n    #4 0x000102218ab8 in main+0x238 (/private/tmp/rush-wren-memory-limit-asan:arm64+0x100000ab8)\n    #5 0x00018b4a44e0 in start+0x1b4c (/usr/lib/dyld:arm64e+0x204e0)\n\n==14543==Register values:\n x[0] = 0x0000000000000010   x[1] = 0x000000016dbe57e0   x[2] = 0x0000000000000103   x[3] = 0x0000000000000103  \n x[4] = 0x0000000000000000   x[5] = 0x000000016dbe5830   x[6] = 0x40a8dc0000000000   x[7] = 0x0000000000000001  \n x[8] = 0x0000000000000002   x[9] = 0x0000000000000000  x[10] = 0x0000000000000000  x[11] = 0x00000000fffffffd  \nx[12] = 0x0000000000000000  x[13] = 0x0000000000000000  x[14] = 0x0000000000000000  x[15] = 0x0000000000000000  \nx[16] = 0x000000018b8768c4  x[17] = 0x0000000102c69088  x[18] = 0x0000000000000000  x[19] = 0x40a8dc0000000000  \nx[20] = 0x00006040000799f0  x[21] = 0x00006040000799f8  x[22] = 0x00006040000799fc  x[23] = 0x0000000000000004  \nx[24] = 0x0000007000020000  x[25] = 0x0000613000000048  x[26] = 0x00006130000000a0  x[27] = 0x0000613000000198  \nx[28] = 0x0000007000020000     fp = 0x000000016dbe58c0     lr = 0x000000010224aa40     sp = 0x000000016dbe5880  \nAddressSanitizer can not provide additional info.\n==14543==WARNING: Can't read from symbolizer at fd 3\n==14543==WARNING: atos failed to symbolize address \"0x10224aab4\"\nSUMMARY: AddressSanitizer: SEGV (/private/tmp/rush-wren-memory-limit-asan:arm64+0x100032ab4) in wrenValueBufferWrite+0x150\n==14543==ABORTING\n"
+    }
+  ]
+}

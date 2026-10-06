@@ -10,9 +10,9 @@ checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
 name = "cfg-if"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
 name = "itoa"
@@ -61,12 +61,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "self_cell"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ab42ca02749e120097e328d91d415325bdf43b1c72c4c8badf37375fe40a813"
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]
@@ -86,7 +93,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -115,9 +122,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.3"
+version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
+checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -126,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "themoretheless-tokenizer"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "serde_json",
  "themoretheless-tokenizer-abap",
@@ -140,9 +147,11 @@ dependencies = [
  "themoretheless-tokenizer-cpp",
  "themoretheless-tokenizer-csharp",
  "themoretheless-tokenizer-css",
+ "themoretheless-tokenizer-csv",
  "themoretheless-tokenizer-dart",
  "themoretheless-tokenizer-delphi",
  "themoretheless-tokenizer-dlang",
+ "themoretheless-tokenizer-edn",
  "themoretheless-tokenizer-elixir",
  "themoretheless-tokenizer-erlang",
  "themoretheless-tokenizer-fortran",
@@ -151,13 +160,17 @@ dependencies = [
  "themoretheless-tokenizer-graphql",
  "themoretheless-tokenizer-groovy",
  "themoretheless-tokenizer-haskell",
+ "themoretheless-tokenizer-hcl",
  "themoretheless-tokenizer-html",
+ "themoretheless-tokenizer-ics",
+ "themoretheless-tokenizer-ini",
  "themoretheless-tokenizer-java",
  "themoretheless-tokenizer-javascript",
  "themoretheless-tokenizer-json",
  "themoretheless-tokenizer-julia",
  "themoretheless-tokenizer-kotlin",
  "themoretheless-tokenizer-lisp",
+ "themoretheless-tokenizer-logfmt",
  "themoretheless-tokenizer-lua",
  "themoretheless-tokenizer-markdown",
  "themoretheless-tokenizer-matlab",
@@ -178,6 +191,7 @@ dependencies = [
  "themoretheless-tokenizer-scheme",
  "themoretheless-tokenizer-solidity",
  "themoretheless-tokenizer-sql",
+ "themoretheless-tokenizer-srt",
  "themoretheless-tokenizer-swift",
  "themoretheless-tokenizer-toml",
  "themoretheless-tokenizer-typescript",
@@ -192,410 +206,462 @@ dependencies = [
 
 [[package]]
 name = "themoretheless-tokenizer-abap"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-ada"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-assembly"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-bash"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-c"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-clojure"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-cobol"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-core"
-version = "0.4.0"
+version = "0.7.0"
 
 [[package]]
 name = "themoretheless-tokenizer-cpp"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-csharp"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-css"
-version = "0.4.0"
+version = "0.7.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-csv"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-dart"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-delphi"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-dlang"
-version = "0.4.0"
+version = "0.7.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-edn"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-elixir"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-erlang"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-fortran"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-fsharp"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-go"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-graphql"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-groovy"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-haskell"
-version = "0.4.0"
+version = "0.7.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-hcl"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-html"
-version = "0.4.0"
+version = "0.7.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-ics"
+version = "0.7.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-ini"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-java"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-javascript"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-json"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-julia"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-kotlin"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-lisp"
-version = "0.4.0"
+version = "0.7.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-logfmt"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-lua"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-markdown"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-matlab"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-mongo"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-nim"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-objectivec"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-ocaml"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-perl"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-php"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-powershell"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-prolog"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-python"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-r"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-ruby"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-rush"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
+ "self_cell",
+ "serde",
+ "serde_json",
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-rust"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-scala"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-scheme"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-solidity"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-sql"
-version = "0.4.0"
+version = "0.7.0"
+dependencies = [
+ "themoretheless-tokenizer-core",
+]
+
+[[package]]
+name = "themoretheless-tokenizer-srt"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-swift"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-toml"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-typescript"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-url"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-verilog"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-vhdl"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-visualbasic"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-xml"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-yaml"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
 
 [[package]]
 name = "themoretheless-tokenizer-zig"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "themoretheless-tokenizer-core",
 ]
@@ -610,9 +676,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.24"
+version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
 
 [[package]]
 name = "wasm-bindgen"

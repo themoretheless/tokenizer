@@ -1,0 +1,29 @@
+    Finished `release` profile [optimized] target(s) in 0.04s
+     Running `docs/benchmarks/rhai-runtime/target/release/cancellation`
+Rhai 1.26.1; blocking_host; 25 samples after 3 warmups; request 5ms after entry; host sleep 25ms when selected
+sample	request_to_return_us	reuse_result
+0	22489.375	3
+1	21522.667	3
+2	23445.167	3
+3	17969.083	3
+4	20511.542	3
+5	19686.583	3
+6	23744.792	3
+7	19388.750	3
+8	24126.834	3
+9	20528.125	3
+10	24119.667	3
+11	20599.541	3
+12	23742.375	3
+13	24738.459	3
+14	21536.333	3
+15	23748.000	3
+16	25500.333	3
+17	23847.292	3
+18	22718.500	3
+19	23740.583	3
+20	25926.584	3
+21	23235.583	3
+22	23641.125	3
+23	21835.625	3
+24	24232.375	3

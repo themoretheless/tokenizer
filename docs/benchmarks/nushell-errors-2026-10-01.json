@@ -1,0 +1,21 @@
+{
+  "version": "0.107.0",
+  "method": "separate CLI processes",
+  "cases": [
+    {
+      "case": "syntax",
+      "exit_code": 1,
+      "stderr": "Error: nu::parser::keyword_missing_arg\n\n  x Missing argument to `=`.\n   ,-[/private/var/folders/jx/ps1h62vx3gdgly_ddwly4mqr0000gn/T/rush-nu-errors-dw58ac6i/syntax-case.nu:1:12]\n 1 | let value =\n   :            ^\n   :            `-- missing variable value that follows =\n   `----\n\n"
+    },
+    {
+      "case": "runtime",
+      "exit_code": 1,
+      "stderr": "Error: nu::shell::incompatible_path_access\n\n  x Data cannot be accessed with a cell path\n   ,-[/private/var/folders/jx/ps1h62vx3gdgly_ddwly4mqr0000gn/T/rush-nu-errors-dw58ac6i/runtime-case.nu:2:8]\n 1 | let value = null\n 2 | $value.missing\n   :        ^^^|^^^\n   :           `-- nothing doesn't support cell paths\n   `----\n\n"
+    },
+    {
+      "case": "command",
+      "exit_code": 1,
+      "stderr": "Error: nu::shell::error\n\n  x command rejected operation\n   ,-[/private/var/folders/jx/ps1h62vx3gdgly_ddwly4mqr0000gn/T/rush-nu-errors-dw58ac6i/command-case.nu:1:1]\n 1 | error make {msg: \"command rejected operation\"}\n   : ^^^^^|^^^^\n   :      `-- originates from here\n   `----\n\n"
+    }
+  ]
+}

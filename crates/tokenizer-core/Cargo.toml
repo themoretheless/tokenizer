@@ -1,6 +1,6 @@
 [package]
 name = "themoretheless-tokenizer-core"
-version = "0.4.0"
+version = "0.7.0"
 edition = "2024"
 authors = ["Denis Mezhov"]
 description = "Shared spans, diagnostics, language ids, and host registry for themoretheless-tokenizer plugins"

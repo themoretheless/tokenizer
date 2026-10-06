@@ -1,0 +1,38 @@
+    Updating crates.io index
+     Locking 32 packages to highest Rust 1.101.0-nightly compatible versions
+ Downloading crates ...
+  Downloaded luau0-src v0.21.0+luau736
+   Compiling libc v0.2.189
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.14
+   Compiling pkg-config v0.3.34
+   Compiling cfg-if v1.0.5
+   Compiling parking_lot_core v0.9.12
+   Compiling autocfg v1.5.1
+   Compiling smallvec v1.16.2
+   Compiling scopeguard v1.2.0
+   Compiling memchr v2.8.3
+   Compiling rustc-hash v2.1.3
+   Compiling either v1.18.0
+   Compiling lock_api v0.4.14
+   Compiling num-traits v0.2.19
+   Compiling bstr v1.13.1
+   Compiling jobserver v0.1.35
+   Compiling cc v1.5.1
+   Compiling parking_lot v0.12.5
+   Compiling luau0-src v0.21.0+luau736
+   Compiling mlua-sys v0.12.0
+   Compiling mlua v0.12.1
+   Compiling rush-luau-comparison v0.1.0 (/Users/themoretheless/Documents/Sources/tokenizer/docs/benchmarks/luau-runtime)
+    Finished `release` profile [optimized] target(s) in 20.89s
+     Running `docs/benchmarks/luau-runtime/target/release/rush-luau-comparison`
+rush-luau-comparison · Luau 0.736 · mlua 0.12.1 · macos aarch64 · no execution budget; default GC
+Collection input items: 1000; verified expected sum: 333666
+7 samples, 10 warmups; VM and support-library construction excluded; local script bindings
+workload	operation	iterations/sample	min_us	median_us	max_us
+closure	compile	100	3.944	4.061	4.850
+closure	prepared_run	100	0.058	0.058	0.061
+closure	compile_and_run	100	5.682	5.710	5.990
+collections	compile	100	6.593	6.723	7.354
+collections	prepared_run	100	48.318	51.075	57.275
+collections	compile_and_run	100	57.429	62.503	62.928

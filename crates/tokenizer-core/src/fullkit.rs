@@ -1,8 +1,11 @@
 //! Full multi-language engine kit: lossless lex → recovering parse → AST → semantic.
 //!
 //! Not a substitute for a language-spec-complete compiler front-end. It provides a
-//! **uniform full pipeline** (LEX|PARSE|SEMANTIC|VALIDATE) for editor tooling across
-//! wave languages, with dialect profiles.
+//! **uniform full pipeline** (LEX|PARSE|SEMANTIC) for editor tooling across
+//! wave languages, with dialect profiles. The lexer recovers and reports what it
+//! can prove (unbalanced delimiters, unclosed literals); the parser is silent by
+//! design and only builds the AST that drives semantic kinds. `VALIDATE` is not
+//! advertised — see [`FULL_ENGINE_CAPS`].
 
 use crate::{
     Diagnostic, HostDiagnostic, HostSpan, HostToken, HostTokenization, Span, verify_lossless_spans,
@@ -85,6 +88,8 @@ pub struct FullProfile {
     pub hash_line_comment: bool,
     /// Allow `$` in identifiers.
     pub dollar_ident: bool,
+    /// Treat paired backticks as an opaque quoted span (SQL identifiers, shell commands).
+    pub backtick_strings: bool,
     /// Python-style triple quotes.
     pub triple_strings: bool,
     /// `#` comments that are not only at BOL (shell/python already hash_line).
@@ -100,6 +105,7 @@ impl Default for FullProfile {
             block_comment: Some(("/*", "*/")),
             hash_line_comment: false,
             dollar_ident: false,
+            backtick_strings: false,
             triple_strings: false,
             soft_indent_blocks: false,
         }
@@ -393,6 +399,16 @@ pub fn lex_full(source: &str, profile: &FullProfile) -> Lexed {
             push_lex(&mut out, SyntaxKind::StringLit, start, i);
             continue;
         }
+        // Paired backticks shield embedded delimiters in templates, SQL names,
+        // and shell commands. Haskell infix names keep their token structure.
+        if (profile.dollar_ident || profile.backtick_strings)
+            && b == b'`'
+            && let Some(close) = find_backtick_end(bytes, i + 1)
+        {
+            push_lex(&mut out, SyntaxKind::StringLit, i, close);
+            i = close;
+            continue;
+        }
         if b == b'"' || b == b'\'' {
             let q = b;
             let start = i;
@@ -475,7 +491,87 @@ pub fn lex_full(source: &str, profile: &FullProfile) -> Lexed {
             .unwrap_or(1);
         push_lex(&mut out, SyntaxKind::Identifier, start, i);
     }
+    check_delimiters(source, &mut out);
     out
+}
+
+/// Bracket balance over the token stream.
+///
+/// The one structural claim the shared pipeline can make for every profiled
+/// language without modeling its grammar: a `{`, `(` or `[` that is never
+/// closed, or a closer with no opener, is broken in all of them. Strings and
+/// comments are single tokens by the time this runs, so a bracket character
+/// inside one cannot reach here. The parser below reports nothing of its own
+/// (see [`Parser::expect_text`]), which leaves this pass as the recovery signal.
+fn check_delimiters(source: &str, out: &mut Lexed) {
+    // `(group, opener span)`; a mismatched closer drops its opener so one
+    // mistake does not cascade into a diagnostic per remaining token.
+    let mut stack: Vec<(usize, Span)> = Vec::new();
+    let mut found: Vec<Diagnostic> = Vec::new();
+    for token in &out.tokens {
+        if token.kind != SyntaxKind::Punctuation {
+            continue;
+        }
+        let Some(text) = token.span.slice(source) else {
+            continue;
+        };
+        let Some((group, is_open)) = delimiter_role(text) else {
+            continue;
+        };
+        if is_open {
+            stack.push((group, token.span));
+            continue;
+        }
+        if stack.last().is_some_and(|(open, _)| *open == group) {
+            stack.pop();
+        } else {
+            found.push(Diagnostic::new(
+                token.span,
+                "stray-delimiter",
+                "Closing delimiter with no matching opener",
+            ));
+            stack.pop();
+        }
+    }
+    for (_, span) in stack {
+        found.push(Diagnostic::new(
+            span,
+            "unclosed-delimiter",
+            "Delimiter opened here is never closed",
+        ));
+    }
+    found.sort_by_key(|diagnostic| diagnostic.span.start);
+    out.diagnostics.extend(found);
+}
+
+/// Which bracket group a punctuation string belongs to, and whether it opens it.
+fn delimiter_role(text: &str) -> Option<(usize, bool)> {
+    let c = text.chars().next()?;
+    if text.len() > c.len_utf8() {
+        return None;
+    }
+    if let Some(group) = OPEN_DELIMITERS.iter().position(|open| *open == c) {
+        return Some((group, true));
+    }
+    CLOSE_DELIMITERS
+        .iter()
+        .position(|close| *close == c)
+        .map(|group| (group, false))
+}
+
+const OPEN_DELIMITERS: [char; 3] = ['{', '(', '['];
+const CLOSE_DELIMITERS: [char; 3] = ['}', ')', ']'];
+
+/// End offset just past the next unescaped backtick, or `None` if there is none.
+fn find_backtick_end(bytes: &[u8], mut i: usize) -> Option<usize> {
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'`' => return Some(i + 1),
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 fn push_lex(out: &mut Lexed, kind: SyntaxKind, start: usize, end: usize) {
@@ -541,7 +637,6 @@ struct Parser<'s> {
     source: &'s str,
     tokens: Vec<LexToken>,
     pos: usize,
-    diagnostics: Vec<Diagnostic>,
     profile: FullProfile,
 }
 
@@ -557,7 +652,6 @@ impl<'s> Parser<'s> {
             source,
             tokens,
             pos: 0,
-            diagnostics: Vec::new(),
             profile,
         }
     }
@@ -591,15 +685,14 @@ impl<'s> Parser<'s> {
         }
     }
 
+    /// Consume `text` when it is next. A missing token is never reported here:
+    /// an unrecognized construct is evidence of a grammar this shared parser
+    /// does not model, not evidence that the document is broken. Provably broken
+    /// delimiters come from [`check_delimiters`], over the token stream.
     fn expect_text(&mut self, text: &str) -> Option<LexToken> {
         if self.at_text(text) {
             self.bump()
         } else {
-            let span = self.peek().map(|t| t.span).unwrap_or_else(|| {
-                Span::new(self.source.len().saturating_sub(1), self.source.len())
-            });
-            self.diagnostics
-                .push(Diagnostic::new(span, "expected-token", "Expected token"));
             None
         }
     }
@@ -1151,13 +1244,10 @@ impl<'s> Parser<'s> {
                     text: self.text_of(t),
                 }
             }
+            // Recovery, not an error: this token starts a construct the shared
+            // grammar does not model, so consume it and keep going.
             _ => {
                 let t = self.bump().unwrap();
-                self.diagnostics.push(Diagnostic::new(
-                    t.span,
-                    "unexpected-token",
-                    "Unexpected token in expression",
-                ));
                 Expr::Error { span: t.span }
             }
         }
@@ -1240,8 +1330,9 @@ pub fn parse_full<'s>(source: &'s str, profile: &FullProfile) -> Parse<'s> {
     let lexed = lex_full(source, profile);
     let mut parser = Parser::new(source, &lexed, *profile);
     let module = parser.parse_module();
-    let mut diagnostics = lexed.diagnostics.clone();
-    diagnostics.extend(parser.diagnostics);
+    // Every diagnostic in the shared pipeline comes from the lex + delimiter
+    // pass; the parser recovers silently. See [`Parser::expect_text`].
+    let diagnostics = lexed.diagnostics.clone();
     Parse {
         source,
         lexed,
@@ -1363,11 +1454,16 @@ pub fn analyze_full_host(source: &str, profile: &FullProfile) -> HostTokenizatio
     sem.to_host()
 }
 
-/// Full engine capability bits (no CST/nav/visitor yet).
+/// Full engine capability bits. `VALIDATE` is deliberately absent: what this
+/// pipeline can prove about a document is bracket balance and closed literals
+/// ([`check_delimiters`], `unclosed-string`), not that the grammar was followed.
+/// The parser therefore recovers in silence, so `s := "hi"` is accepted and
+/// `func f( {` is rejected, but `SELECT * FROM` is accepted too. An engine that
+/// rejects what its own specification forbids — the hand-written format engines
+/// — unions `VALIDATE` into its own descriptor.
 pub const FULL_ENGINE_CAPS: crate::Capabilities = crate::Capabilities::LEX
     .union(crate::Capabilities::PARSE)
-    .union(crate::Capabilities::SEMANTIC)
-    .union(crate::Capabilities::VALIDATE);
+    .union(crate::Capabilities::SEMANTIC);
 
 #[cfg(test)]
 mod tests {
@@ -1381,6 +1477,7 @@ mod tests {
             block_comment: None,
             hash_line_comment: true,
             dollar_ident: false,
+            backtick_strings: false,
             triple_strings: true,
             soft_indent_blocks: true,
         }
@@ -1412,5 +1509,58 @@ mod tests {
             p.module.items.first(),
             Some(Item::Function { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod delimiter_tests {
+    use super::*;
+
+    fn codes(source: &str) -> Vec<(&'static str, usize)> {
+        let lexed = lex_full(source, &FullProfile::default());
+        lexed
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, d.span.start))
+            .collect()
+    }
+
+    #[test]
+    fn one_mismatched_closer_does_not_cascade() {
+        // `[` closed by `)`: report the stray closer once and drop the opener, so
+        // the remaining braces stay clean instead of each losing a diagnostic.
+        assert_eq!(codes("let a = [f(x)) { }"), vec![("stray-delimiter", 13)]);
+    }
+
+    #[test]
+    fn a_template_literal_is_one_string_span() {
+        let js = FullProfile {
+            dollar_ident: true,
+            ..FullProfile::default()
+        };
+        // `x${y}` + a real newline + `z` inside one template literal.
+        let source = "const t = `x${y}\nz`;";
+        let lexed = lex_full(source, &js);
+        let strings: Vec<Span> = lexed
+            .tokens
+            .iter()
+            .filter(|t| t.kind == SyntaxKind::StringLit)
+            .map(|t| t.span)
+            .collect();
+        assert_eq!(strings, vec![Span::new(10, 19)]);
+        assert_eq!(lexed.diagnostics, Vec::new());
+        // An unmatched backtick stays punctuation instead of eating the file.
+        let open = lex_full("let t = `x;", &js);
+        assert!(!open.tokens.iter().any(|t| t.kind == SyntaxKind::StringLit));
+        assert_eq!(open.diagnostics, Vec::new());
+        // Without `$` the backtick is not a quote (haskell infix).
+        let other = lex_full("let t = `x`;", &FullProfile::default());
+        assert!(!other.tokens.iter().any(|t| t.kind == SyntaxKind::StringLit));
+    }
+
+    #[test]
+    fn brackets_inside_literals_are_not_counted() {
+        assert_eq!(codes("let s = \"{ ( ]\""), Vec::new());
+        assert_eq!(codes("// } ) ]\nlet x = 1"), Vec::new());
     }
 }

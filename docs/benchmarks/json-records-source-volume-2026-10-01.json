@@ -1,0 +1,253 @@
+{
+  "method": "Physical and nonblank lines; comments included; trailing Rust tests excluded. Dependency code, manifests, locks, generated files and benchmark runners excluded. Build category contains the custom Wren build script only. Nushell combines IO, validation and transform and supports arrays only. Shared Lua/Luau sources are counted for each adapter, not summed across engines.",
+  "engines": {
+    "Rush": {
+      "script": {
+        "files": [
+          {
+            "path": "crates/tokenizer-rush/examples/scripts/record-summary.r",
+            "sha256": "7ae823efe6d2b38a54f23f047eeaaa140627372a959bf693aac37f7f70c2b9bb",
+            "physical_lines": 5,
+            "counted_lines": 5,
+            "nonblank_lines": 5,
+            "excluded_trailing_test_lines": 0
+          }
+        ],
+        "counted_lines": 5,
+        "nonblank_lines": 5
+      },
+      "host": {
+        "files": [
+          {
+            "path": "crates/tokenizer-rush/examples/record_summary.rs",
+            "sha256": "3e95a35c681de895025eab549652ed06fc59b7e36ea5a24ef3eec389df539284",
+            "physical_lines": 290,
+            "counted_lines": 186,
+            "nonblank_lines": 184,
+            "excluded_trailing_test_lines": 104
+          }
+        ],
+        "counted_lines": 186,
+        "nonblank_lines": 184
+      }
+    },
+    "CPython": {
+      "script": {
+        "files": [
+          {
+            "path": "docs/benchmarks/python_records_transform.py",
+            "sha256": "0d99029e707b66296193f34c213f44b656f67fb6da40e05d9387fbe75c476f08",
+            "physical_lines": 13,
+            "counted_lines": 13,
+            "nonblank_lines": 11,
+            "excluded_trailing_test_lines": 0
+          }
+        ],
+        "counted_lines": 13,
+        "nonblank_lines": 11
+      },
+      "host": {
+        "files": [
+          {
+            "path": "docs/benchmarks/python_records.py",
+            "sha256": "f87cf7203dfa4b67cdb91a7202d0389d7823dc95115c93869c8995eb9848b559",
+            "physical_lines": 57,
+            "counted_lines": 57,
+            "nonblank_lines": 45,
+            "excluded_trailing_test_lines": 0
+          }
+        ],
+        "counted_lines": 57,
+        "nonblank_lines": 45
+      }
+    },
+    "Lua": {
+      "script": {
+        "files": [
+          {
+            "path": "docs/benchmarks/lua-records.lua",
+            "sha256": "44ebe3669805cf510c0c510fde5516cc19fbdbaab16d18bc6266a11967356262",
+            "physical_lines": 20,
+            "counted_lines": 20,
+            "nonblank_lines": 20,
+            "excluded_trailing_test_lines": 0
+          }
+        ],
+        "counted_lines": 20,
+        "nonblank_lines": 20
+      },
+      "host": {
+        "files": [
+          {
+            "path": "docs/benchmarks/lua-records-shared.rs",
+            "sha256": "5439526cf459e6032b9e531f5ad9d833859ec863ef76c00c751f048bd64407ac",
+            "physical_lines": 134,
+            "counted_lines": 111,
+            "nonblank_lines": 106,
+            "excluded_trailing_test_lines": 23
+          }
+        ],
+        "counted_lines": 111,
+        "nonblank_lines": 106
+      }
+    },
+    "Luau": {
+      "script": {
+        "files": [
+          {
+            "path": "docs/benchmarks/lua-records.lua",
+            "sha256": "44ebe3669805cf510c0c510fde5516cc19fbdbaab16d18bc6266a11967356262",
+            "physical_lines": 20,
+            "counted_lines": 20,
+            "nonblank_lines": 20,
+            "excluded_trailing_test_lines": 0
+          }
+        ],
+        "counted_lines": 20,
+        "nonblank_lines": 20
+      },
+      "host": {
+        "files": [
+          {
+            "path": "docs/benchmarks/lua-records-shared.rs",
+            "sha256": "5439526cf459e6032b9e531f5ad9d833859ec863ef76c00c751f048bd64407ac",
+            "physical_lines": 134,
+            "counted_lines": 111,
+            "nonblank_lines": 106,
+            "excluded_trailing_test_lines": 23
+          }
+        ],
+        "counted_lines": 111,
+        "nonblank_lines": 106
+      }
+    },
+    "Rhai": {
+      "script": {
+        "files": [
+          {
+            "path": "docs/benchmarks/rhai-runtime/records.rhai",
+            "sha256": "ccae5ec7ddd566d14d4437108a739f58bbcff52ad53e113dfc348b21e95dd9b6",
+            "physical_lines": 21,
+            "counted_lines": 21,
+            "nonblank_lines": 21,
+            "excluded_trailing_test_lines": 0
+          }
+        ],
+        "counted_lines": 21,
+        "nonblank_lines": 21
+      },
+      "host": {
+        "files": [
+          {
+            "path": "docs/benchmarks/rhai-runtime/src/bin/records.rs",
+            "sha256": "67836aca6006810aaf519786bf4bdd3c0e65507f097c261a08295b11c03dc3ec",
+            "physical_lines": 130,
+            "counted_lines": 130,
+            "nonblank_lines": 129,
+            "excluded_trailing_test_lines": 0
+          }
+        ],
+        "counted_lines": 130,
+        "nonblank_lines": 129
+      }
+    },
+    "Koto": {
+      "script": {
+        "files": [
+          {
+            "path": "docs/benchmarks/koto-runtime/records.koto",
+            "sha256": "2fa05aa977001a46d146d9ab32a5a9c64e6659bb63225bed873feeaa2540169d",
+            "physical_lines": 19,
+            "counted_lines": 19,
+            "nonblank_lines": 19,
+            "excluded_trailing_test_lines": 0
+          }
+        ],
+        "counted_lines": 19,
+        "nonblank_lines": 19
+      },
+      "host": {
+        "files": [
+          {
+            "path": "docs/benchmarks/koto-runtime/src/bin/records.rs",
+            "sha256": "4567cd7c0ced9a13e4a206ce19378ec8afb5e910f04427679d661c2b8dcac550",
+            "physical_lines": 136,
+            "counted_lines": 136,
+            "nonblank_lines": 135,
+            "excluded_trailing_test_lines": 0
+          }
+        ],
+        "counted_lines": 136,
+        "nonblank_lines": 135
+      }
+    },
+    "Wren": {
+      "script": {
+        "files": [
+          {
+            "path": "docs/benchmarks/wren-records/records.wren",
+            "sha256": "1c78f7cec72e9503c79818fe48cc93a6644a200c156cf1700c03191de2e858ff",
+            "physical_lines": 22,
+            "counted_lines": 22,
+            "nonblank_lines": 22,
+            "excluded_trailing_test_lines": 0
+          }
+        ],
+        "counted_lines": 22,
+        "nonblank_lines": 22
+      },
+      "host": {
+        "files": [
+          {
+            "path": "docs/benchmarks/wren-records/src/main.rs",
+            "sha256": "fb8f546852299089e359eb08c864bcd85e13e5b29b7138b87b34a1d3a0bbf193",
+            "physical_lines": 176,
+            "counted_lines": 176,
+            "nonblank_lines": 176,
+            "excluded_trailing_test_lines": 0
+          },
+          {
+            "path": "docs/benchmarks/wren-records/bridge.c",
+            "sha256": "3ecb7780a8de981ab5619ea5ba485b846d8e823e919fca677032b84f801d7ddd",
+            "physical_lines": 79,
+            "counted_lines": 79,
+            "nonblank_lines": 79,
+            "excluded_trailing_test_lines": 0
+          }
+        ],
+        "counted_lines": 255,
+        "nonblank_lines": 255
+      },
+      "build": {
+        "files": [
+          {
+            "path": "docs/benchmarks/wren-records/build.rs",
+            "sha256": "ad8c5d253d1f5759f86b999fa22231d435848e4c1c64eb3071bdcfd8f2146b60",
+            "physical_lines": 38,
+            "counted_lines": 38,
+            "nonblank_lines": 38,
+            "excluded_trailing_test_lines": 0
+          }
+        ],
+        "counted_lines": 38,
+        "nonblank_lines": 38
+      }
+    },
+    "Nushell": {
+      "combined_cli": {
+        "files": [
+          {
+            "path": "docs/benchmarks/nushell-records.nu",
+            "sha256": "a1f6ed5fd817e407b1c1bbdafb3ae8dc89415574858bcfe184a5500159225f0b",
+            "physical_lines": 24,
+            "counted_lines": 24,
+            "nonblank_lines": 24,
+            "excluded_trailing_test_lines": 0
+          }
+        ],
+        "counted_lines": 24,
+        "nonblank_lines": 24
+      }
+    }
+  }
+}

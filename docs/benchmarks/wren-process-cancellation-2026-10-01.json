@@ -1,0 +1,512 @@
+{
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "version": "Wren 0.4.0",
+  "executable_sha256": "b3a1e597bdf85eca46705a134a44d40176d126462408e00431452a31b6b21330",
+  "method": "SIGKILL 5ms after host entry marker; time until process reaped. 3 warmups and 25 samples per scenario; blocking host sleeps 25ms. New-process probe after each termination, no reuse or VM cleanup guarantee.",
+  "runs": [
+    {
+      "scenario": "loop",
+      "sample": -3,
+      "entry_to_request_us": 5474.083,
+      "request_to_reaped_us": 1311.542,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": -2,
+      "entry_to_request_us": 6293.833,
+      "request_to_reaped_us": 1310.667,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": -1,
+      "entry_to_request_us": 6284.167,
+      "request_to_reaped_us": 1302.083,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 0,
+      "entry_to_request_us": 6289.375,
+      "request_to_reaped_us": 1298.458,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 1,
+      "entry_to_request_us": 5789.209,
+      "request_to_reaped_us": 1211.708,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 2,
+      "entry_to_request_us": 5209.708,
+      "request_to_reaped_us": 1305.0,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 3,
+      "entry_to_request_us": 5424.667,
+      "request_to_reaped_us": 1297.416,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 4,
+      "entry_to_request_us": 6292.125,
+      "request_to_reaped_us": 1302.083,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 5,
+      "entry_to_request_us": 6061.958,
+      "request_to_reaped_us": 1303.375,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 6,
+      "entry_to_request_us": 6285.833,
+      "request_to_reaped_us": 1127.875,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 7,
+      "entry_to_request_us": 6289.792,
+      "request_to_reaped_us": 1306.25,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 8,
+      "entry_to_request_us": 6288.667,
+      "request_to_reaped_us": 1301.708,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 9,
+      "entry_to_request_us": 6291.5,
+      "request_to_reaped_us": 1310.5,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 10,
+      "entry_to_request_us": 6178.584,
+      "request_to_reaped_us": 1314.708,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 11,
+      "entry_to_request_us": 6295.583,
+      "request_to_reaped_us": 1303.709,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 12,
+      "entry_to_request_us": 5399.666,
+      "request_to_reaped_us": 1300.75,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 13,
+      "entry_to_request_us": 6289.667,
+      "request_to_reaped_us": 1305.75,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 14,
+      "entry_to_request_us": 6282.542,
+      "request_to_reaped_us": 1296.916,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 15,
+      "entry_to_request_us": 6289.5,
+      "request_to_reaped_us": 1297.041,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 16,
+      "entry_to_request_us": 6286.583,
+      "request_to_reaped_us": 1304.667,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 17,
+      "entry_to_request_us": 6291.792,
+      "request_to_reaped_us": 1313.958,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 18,
+      "entry_to_request_us": 6291.291,
+      "request_to_reaped_us": 1313.334,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 19,
+      "entry_to_request_us": 6297.583,
+      "request_to_reaped_us": 1306.542,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 20,
+      "entry_to_request_us": 6288.25,
+      "request_to_reaped_us": 1314.541,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 21,
+      "entry_to_request_us": 6288.5,
+      "request_to_reaped_us": 1300.917,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 22,
+      "entry_to_request_us": 6288.916,
+      "request_to_reaped_us": 1298.417,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 23,
+      "entry_to_request_us": 5066.875,
+      "request_to_reaped_us": 1319.25,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "loop",
+      "sample": 24,
+      "entry_to_request_us": 6288.542,
+      "request_to_reaped_us": 1305.458,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": -3,
+      "entry_to_request_us": 6292.75,
+      "request_to_reaped_us": 1301.25,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": -2,
+      "entry_to_request_us": 6296.458,
+      "request_to_reaped_us": 1312.042,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": -1,
+      "entry_to_request_us": 6294.208,
+      "request_to_reaped_us": 1303.375,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 0,
+      "entry_to_request_us": 6291.458,
+      "request_to_reaped_us": 1299.042,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 1,
+      "entry_to_request_us": 6284.083,
+      "request_to_reaped_us": 1299.584,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 2,
+      "entry_to_request_us": 6292.5,
+      "request_to_reaped_us": 1304.834,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 3,
+      "entry_to_request_us": 6295.875,
+      "request_to_reaped_us": 1066.042,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 4,
+      "entry_to_request_us": 6288.209,
+      "request_to_reaped_us": 1307.541,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 5,
+      "entry_to_request_us": 5494.542,
+      "request_to_reaped_us": 1306.125,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 6,
+      "entry_to_request_us": 6291.625,
+      "request_to_reaped_us": 1186.125,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 7,
+      "entry_to_request_us": 5150.5,
+      "request_to_reaped_us": 1300.75,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 8,
+      "entry_to_request_us": 5353.291,
+      "request_to_reaped_us": 1316.084,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 9,
+      "entry_to_request_us": 6298.5,
+      "request_to_reaped_us": 1316.875,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 10,
+      "entry_to_request_us": 6290.75,
+      "request_to_reaped_us": 1302.833,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 11,
+      "entry_to_request_us": 6288.208,
+      "request_to_reaped_us": 1306.792,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 12,
+      "entry_to_request_us": 5933.208,
+      "request_to_reaped_us": 1315.792,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 13,
+      "entry_to_request_us": 6283.167,
+      "request_to_reaped_us": 1296.833,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 14,
+      "entry_to_request_us": 6129.166,
+      "request_to_reaped_us": 1318.042,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 15,
+      "entry_to_request_us": 6294.833,
+      "request_to_reaped_us": 1305.875,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 16,
+      "entry_to_request_us": 5421.167,
+      "request_to_reaped_us": 1314.375,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 17,
+      "entry_to_request_us": 5839.542,
+      "request_to_reaped_us": 1307.208,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 18,
+      "entry_to_request_us": 6291.708,
+      "request_to_reaped_us": 1302.125,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 19,
+      "entry_to_request_us": 6284.75,
+      "request_to_reaped_us": 1303.75,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 20,
+      "entry_to_request_us": 6311.042,
+      "request_to_reaped_us": 1303.5,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 21,
+      "entry_to_request_us": 6291.375,
+      "request_to_reaped_us": 1308.708,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 22,
+      "entry_to_request_us": 6294.833,
+      "request_to_reaped_us": 1306.292,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 23,
+      "entry_to_request_us": 6225.125,
+      "request_to_reaped_us": 1304.958,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    },
+    {
+      "scenario": "blocking_host",
+      "sample": 24,
+      "entry_to_request_us": 6284.625,
+      "request_to_reaped_us": 1301.0,
+      "host_returned_before_termination": false,
+      "returncode": -9,
+      "fresh_vm_result": 3
+    }
+  ]
+}

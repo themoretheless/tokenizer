@@ -1,0 +1,148 @@
+{
+  "method": "functional parity; no timings",
+  "cases": [
+    {
+      "case": "empty",
+      "accepted": true,
+      "expected": [],
+      "rush_stderr": ""
+    },
+    {
+      "case": "unicode-order-filter",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "Б\"\n",
+          "total": 1.5
+        },
+        {
+          "group": "next",
+          "total": -4.0
+        }
+      ],
+      "rush_stderr": ""
+    },
+    {
+      "case": "inactive",
+      "accepted": true,
+      "expected": [],
+      "rush_stderr": ""
+    },
+    {
+      "case": "zero",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 0.0
+        }
+      ],
+      "rush_stderr": ""
+    },
+    {
+      "case": "not-array",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Input must be an array\"\n"
+    },
+    {
+      "case": "missing-field",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: active must be boolean\"\n"
+    },
+    {
+      "case": "boolean-amount",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: amount must be finite\"\n"
+    },
+    {
+      "case": "string-amount",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: amount must be finite\"\n"
+    },
+    {
+      "case": "inactive-invalid",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Row 0: amount must be finite\"\n"
+    },
+    {
+      "case": "overflow",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Non-finite arithmetic result\"\n"
+    },
+    {
+      "case": "row-limit",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"At most 1000 rows are allowed\"\n"
+    },
+    {
+      "case": "jsonl-empty",
+      "accepted": true,
+      "expected": [],
+      "rush_stderr": ""
+    },
+    {
+      "case": "jsonl-crlf-final-no-newline",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 2.0
+        }
+      ],
+      "rush_stderr": ""
+    },
+    {
+      "case": "jsonl-large-stream",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 10000.0
+        }
+      ],
+      "rush_stderr": ""
+    },
+    {
+      "case": "jsonl-blank-line",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 2: EOF while parsing a value at line 2 column 0\"\n"
+    },
+    {
+      "case": "jsonl-malformed-second-line",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 2: EOF while parsing an object at line 1 column 1\"\n"
+    },
+    {
+      "case": "jsonl-invalid-utf8",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 1: stream did not contain valid UTF-8\"\n"
+    },
+    {
+      "case": "jsonl-exact-byte-limit",
+      "accepted": true,
+      "expected": [
+        {
+          "group": "a",
+          "total": 1.0
+        }
+      ],
+      "rush_stderr": ""
+    },
+    {
+      "case": "jsonl-over-byte-limit",
+      "accepted": false,
+      "expected": null,
+      "rush_stderr": "Error: \"Line 1: exceeds 65536 bytes\"\n"
+    }
+  ]
+}

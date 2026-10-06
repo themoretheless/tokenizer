@@ -5,10 +5,14 @@ use std::{
     io::{self, Read},
 };
 
-use themoretheless_tokenizer::web_bridge::tokenization;
+use themoretheless_tokenizer::web_bridge::{catalog, execute_rush, tokenization};
 
 fn main() {
     let arguments: Vec<String> = env::args().skip(1).collect();
+    if arguments.iter().any(|flag| flag == "--catalog") {
+        println!("{}", catalog());
+        return;
+    }
     let language = argument_value(&arguments, "--language").unwrap_or("json");
     let mode = argument_value(&arguments, "--mode").unwrap_or("strict");
     let layer = argument_value(&arguments, "--layer").unwrap_or("semantic");
@@ -17,7 +21,11 @@ fn main() {
         eprintln!("failed to read source: {error}");
         std::process::exit(2);
     }
-    println!("{}", tokenization(language, &source, mode, layer));
+    if arguments.iter().any(|flag| flag == "--run-rush") {
+        println!("{}", execute_rush(&source));
+    } else {
+        println!("{}", tokenization(language, &source, mode, layer));
+    }
 }
 
 fn argument_value<'a>(arguments: &'a [String], name: &str) -> Option<&'a str> {

@@ -1,0 +1,51 @@
+Shared closure environments, 2026-10-01
+Runtime timing: CARGO_PROFILE_BENCH_DEBUG=1, optimized + debuginfo, macOS/aarch64
+Order: baseline, changed, changed, baseline; separate processes; no concurrent task builds/benchmarks
+RUSH_BENCH_CASE=collections_lazy RUSH_BENCH_ITEMS=1000000 RUSH_BENCH_ITERS=1 RUSH_BENCH_OPERATION=prepared_run
+before runtime SHA256: b831f37fc00b7ba27f339cdfb99e441a8161ff472ebd8a3287ff0d61c6d58e23
+after runtime SHA256: 92aeceb00de62c2bc1da7a9893cf61f2e72e99d3e91f443bb4ca8d58438edf8e
+
+before
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	prepared_run	1	810874.750	838297.791	870453.042
+after
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	prepared_run	1	345309.333	346884.666	356303.208
+after
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	prepared_run	1	341431.666	342551.375	348134.625
+before
+Collection input items: 1000000; verified expected sum: 333333666666
+Rush runtime · macos aarch64 · 7 samples, 10 warmup operations
+workload	operation	iterations/sample	min_us	median_us	max_us
+collections_lazy	prepared_run	1	799550.875	808690.834	817158.333
+
+Memory benchmark (separate execution, default bench profile):
+   Compiling themoretheless-tokenizer-rush v0.4.0 (/Users/themoretheless/Documents/Sources/tokenizer/crates/tokenizer-rush)
+    Finished `bench` profile [optimized] target(s) in 1.91s
+     Running benches/memory.rs (target/release/build/themoretheless-tokenizer-rush/3bbee10d8fd325c9/out/memory-3bbee10d8fd325c9)
+workload	items	run	peak_extra_bytes	live_after_drop_bytes	allocation_calls
+eager	1000	1	93892	0	6408
+eager	1000	2	93892	0	6408
+eager	1000	3	93892	0	6408
+lazy	1000	1	20748	0	6382
+lazy	1000	2	20748	0	6382
+lazy	1000	3	20748	0	6382
+eager	100000	1	10497732	0	633429
+eager	100000	2	10497732	0	633429
+eager	100000	3	10497732	0	633429
+lazy	100000	1	20748	0	633382
+lazy	100000	2	20748	0	633382
+lazy	100000	3	20748	0	633382
+eager	1000000	1	83898052	0	6333438
+eager	1000000	2	83898052	0	6333438
+eager	1000000	3	83898052	0	6333438
+lazy	1000000	1	20748	0	6333382
+lazy	1000000	2	20748	0	6333382
+lazy	1000000	3	20748	0	6333382

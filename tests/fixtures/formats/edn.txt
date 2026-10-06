@@ -1,0 +1,12 @@
+;; fleet config
+{:crew         #{ada grace/link "grace hopper" :team/alpha},
+ :launch       #inst "1985-04-12T23:20:50.52-04:00",
+ :id           #uuid "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
+ :sigil        #b "\u0000\u007f",
+ :retry        (16rFF -2r1010 1000N ##Inf),
+ :throttle     3/4,
+ :tuning       [3.25M 6.022e23 42 7M],
+ :separator    [\newline \space \u00e9],
+ :note         #myco/Person {:first "Lucy" :last "Mertz"},
+ #_[:scratch "dropped"],
+ :defaults     #:app{:level :info :window 80}}
