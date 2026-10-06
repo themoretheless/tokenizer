@@ -1,0 +1,16 @@
+[package]
+name = "rush-lang"
+version = "0.1.0"
+edition = "2021"
+authors = ["Denis Mezhov"]
+description = "rush language core: bounded no_std script interpreter (variables, indentation blocks, and/or chains) — the executable semantics behind tokenizer-rush"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/themoretheless/tokenizer"
+keywords = ["rush", "interpreter", "no_std", "scripting"]
+categories = ["parsing", "text-processing", "no-std"]
+
+[lib]
+name = "rush_lang"
+path = "src/lib.rs"
+
+[dependencies]

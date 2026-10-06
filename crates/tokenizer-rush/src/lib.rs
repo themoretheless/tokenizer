@@ -146,7 +146,7 @@ pub static DESCRIPTOR: LanguageDescriptor = LanguageDescriptor {
     ..full_descriptor(
         LanguageId::RUSH,
         "rush",
-        &["modelgraph-text", "mg"],
+        &["shell"],
         &[".r"],
         &["text/x-rush"],
         env!("CARGO_PKG_VERSION"),
