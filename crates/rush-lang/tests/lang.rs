@@ -175,6 +175,55 @@ fn if_inside_for_body() {
 }
 
 #[test]
+fn match_selects_the_first_matching_arm() {
+    let script = "fs = fat32\nmatch $fs:\n    \"ruofs\" => echo native\n    fat32 | exfat => echo fat-family\n    _ => echo other\necho after\n";
+    assert_eq!(ok(script), vec!["echo fat-family", "echo after"]);
+
+    // Wildcard catches an unmatched subject.
+    assert_eq!(
+        ok("match nope:\n    \"ruofs\" => echo native\n    _ => echo other\n"),
+        vec!["echo other"]
+    );
+    // No matching arm and no wildcard: nothing runs, no error.
+    assert_eq!(ok("match nope:\n    \"ruofs\" => echo native\n"), Vec::<String>::new());
+    // First match wins.
+    assert_eq!(
+        ok("match a:\n    a => echo one\n    a | _ => echo two\n"),
+        vec!["echo one"]
+    );
+}
+
+#[test]
+fn match_inside_if_and_dead_match() {
+    // A match frame under an inactive `if` consumes its arms silently.
+    let script = "if 1 = 2:\n    match $STATUS:\n        0 => echo no\necho top\n";
+    assert_eq!(ok(script), vec!["echo top"]);
+    // A match arm runs chains like any command line.
+    let (executed, _) = run("match a:\n    a => echo x and echo y\n", &[]);
+    assert_eq!(executed, vec!["echo x", "echo y"]);
+}
+
+#[test]
+fn match_errors_are_stable() {
+    let mut interp = Interpreter::new();
+    assert_eq!(interp.step("match $STATUS"), Err(RushError::BadMatch));
+    assert_eq!(interp.step("match :"), Err(RushError::BadMatch));
+
+    let mut interp = Interpreter::new();
+    assert_eq!(interp.step("match a:"), Ok(Step::Skip));
+    assert_eq!(interp.step("    echo no-arrow"), Err(RushError::BadMatchArm));
+
+    let mut interp = Interpreter::new();
+    assert_eq!(interp.step("match a:"), Ok(Step::Skip));
+    assert_eq!(interp.step("    a =>"), Err(RushError::BadMatchArm));
+
+    // `else:` does not attach to a match frame.
+    let mut interp = Interpreter::new();
+    assert_eq!(interp.step("match a:"), Ok(Step::Skip));
+    assert_eq!(interp.step("else:"), Err(RushError::ElseWithoutIf));
+}
+
+#[test]
 fn control_flow_errors_are_stable() {
     let mut interp = Interpreter::new();
     // A `for` line inside a `fn` body is captured verbatim; the nested
