@@ -70,6 +70,10 @@ pub enum RushError {
     NestedControl,
     /// A loop word list over `MAX_LOOP_WORDS` bytes after expansion.
     LoopWordsTooLong,
+    /// `match` header that is not `match <subject>:`.
+    BadMatch,
+    /// A line inside a `match` body that is not `<patterns> => <command>`.
+    BadMatchArm,
 }
 
 /// What the caller should do after a `step`.
@@ -117,6 +121,7 @@ impl Var {
 enum FrameKind {
     If,
     Else,
+    Match,
 }
 
 #[derive(Clone, Copy)]
@@ -126,6 +131,9 @@ struct Frame {
     active: bool,
     taken: bool,
     parent_active: bool,
+    /// `match` subject, expanded once at the header (unused by if/else).
+    subject: [u8; MAX_BODY_LINE],
+    subject_len: u16,
 }
 
 const EMPTY_FRAME: Frame = Frame {
@@ -134,6 +142,8 @@ const EMPTY_FRAME: Frame = Frame {
     active: false,
     taken: false,
     parent_active: true,
+    subject: [0; MAX_BODY_LINE],
+    subject_len: 0,
 };
 
 #[derive(Clone, Copy)]
@@ -431,6 +441,11 @@ impl Interpreter {
 
         let active = self.is_active();
 
+        // A body line of an open `match` frame is an arm.
+        if self.depth > 0 && self.frames[self.depth - 1].kind == FrameKind::Match {
+            return self.step_match_arm(trimmed);
+        }
+
         if let Some(condition) = trimmed
             .strip_prefix("if ")
             .or_else(|| trimmed.strip_prefix("if\t"))
@@ -450,9 +465,20 @@ impl Interpreter {
                 active: active && taken,
                 taken,
                 parent_active: active,
+                subject: [0; MAX_BODY_LINE],
+                subject_len: 0,
             };
             self.depth += 1;
             return Ok(Step::Skip);
+        }
+
+        // `match subject:` pushes an extended frame; the subject expands
+        // once and arms are single-line `patterns => command` body lines.
+        if let Some(subject) = trimmed
+            .strip_prefix("match ")
+            .or_else(|| trimmed.strip_prefix("match\t"))
+        {
+            return self.start_match(subject.trim_end(), indent, active);
         }
 
         // `fn` and `for` headers open captures even in dead branches (the
@@ -494,14 +520,70 @@ impl Interpreter {
         if frame.kind != FrameKind::If || usize::from(frame.indent) != indent {
             return Err(RushError::ElseWithoutIf);
         }
-        self.frames[top] = Frame {
-            indent: indent as u16,
-            kind: FrameKind::Else,
-            active: frame.parent_active && !frame.taken,
-            taken: true,
-            parent_active: frame.parent_active,
-        };
+        self.frames[top].kind = FrameKind::Else;
+        self.frames[top].active = frame.parent_active && !frame.taken;
+        self.frames[top].taken = true;
         Ok(Step::Skip)
+    }
+
+    /// `match subject:` — expand the subject once and push the frame.
+    fn start_match(
+        &mut self,
+        header: &str,
+        indent: usize,
+        active: bool,
+    ) -> Result<Step<'static>, RushError> {
+        let Some(expr) = header.strip_suffix(':') else {
+            return Err(RushError::BadMatch);
+        };
+        let expr = expr.trim();
+        if expr.is_empty() {
+            return Err(RushError::BadMatch);
+        }
+        if self.depth >= MAX_DEPTH {
+            return Err(RushError::TooDeep);
+        }
+        let mut frame = Frame {
+            indent: indent as u16,
+            kind: FrameKind::Match,
+            active,
+            taken: false,
+            parent_active: active,
+            subject: [0; MAX_BODY_LINE],
+            subject_len: 0,
+        };
+        if active {
+            let len = self.expand_to(expr, &mut frame.subject)?;
+            frame.subject_len = len as u16;
+        }
+        self.frames[self.depth] = frame;
+        self.depth += 1;
+        Ok(Step::Skip)
+    }
+
+    /// One `patterns => command` line inside a `match` body.
+    fn step_match_arm(&mut self, trimmed: &str) -> Result<Step<'_>, RushError> {
+        let frame = self.frames[self.depth - 1];
+        let Some((patterns, command)) = trimmed.split_once("=>") else {
+            return Err(RushError::BadMatchArm);
+        };
+        let command = command.trim();
+        if patterns.trim().is_empty() || command.is_empty() {
+            return Err(RushError::BadMatchArm);
+        }
+        if !frame.active || frame.taken {
+            return Ok(Step::Skip);
+        }
+        let subject = str::from_utf8(
+            frame.subject.get(..usize::from(frame.subject_len)).unwrap_or(&[]),
+        )
+        .unwrap_or("");
+        if !match_patterns(patterns, subject) {
+            return Ok(Step::Skip);
+        }
+        self.frames[self.depth - 1].taken = true;
+        self.begin_chain(command)?;
+        Ok(self.next_segment())
     }
 
     fn is_active(&self) -> bool {
@@ -970,6 +1052,23 @@ fn is_ident(text: &str) -> bool {
 
 fn nth_word(text: &str, index: usize) -> Option<&str> {
     text.split_whitespace().nth(index)
+}
+
+/// Does any `|`-separated alternative match the subject? `_` is the
+/// wildcard; surrounding single or double quotes are stripped.
+fn match_patterns(patterns: &str, subject: &str) -> bool {
+    patterns.split('|').any(|alt| {
+        let alt = alt.trim();
+        let alt = alt
+            .strip_prefix('"')
+            .and_then(|inner| inner.strip_suffix('"'))
+            .or_else(|| {
+                alt.strip_prefix('\'')
+                    .and_then(|inner| inner.strip_suffix('\''))
+            })
+            .unwrap_or(alt);
+        alt == "_" || alt == subject
+    })
 }
 
 fn indent_width(line: &str) -> usize {
