@@ -13,6 +13,7 @@ members = [
     "crates/tokenizer-mongo",
     "crates/tokenizer-bash",
     "crates/tokenizer-rush",
+    "crates/rush-lang",
     "crates/tokenizer-powershell",
     "crates/tokenizer-javascript",
     "crates/tokenizer-typescript",
