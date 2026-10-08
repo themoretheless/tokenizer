@@ -378,6 +378,13 @@ fn format_value_display(value: &Value<'_>, out: &mut String, depth: usize) {
                 out.push_str("<function>");
             }
         }
+        Value::BytecodeFunction(f) => {
+            if let Some(name) = f.function.name.as_deref() {
+                let _ = write!(out, "<function {}>", name);
+            } else {
+                out.push_str("<function>");
+            }
+        }
         Value::Builtin(b) => {
             let _ = write!(out, "<builtin {:?}>", b);
         }

@@ -2,14 +2,62 @@
 //!
 //! Provides high-performance, flat stack-frame execution of compiled Rush code,
 //! bypassing recursive AST walking and Environment map cloning overhead.
+//! Supports first-class user functions (`fn`), anonymous lambdas, closures with
+//! captured lexical upvalues (mutable and immutable), and higher-order builtins.
 
 use crate::{
     Builtin, Expr, ExprKind, InterpolationPart, RuntimeError, Stmt, StmtKind, Value,
     builtin_catalog,
     runtime::{exact_remainder, format_value_for_display},
 };
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
+
+/// Upvalue state for variables captured in closures.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Upvalue {
+    /// The variable is still alive on the VM operand/locals stack.
+    Open(usize),
+    /// The variable's stack frame has exited; the value now lives on the heap.
+    Closed(Value<'static>),
+}
+
+/// Upvalue binding descriptor used during compilation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UpvalueDescriptor {
+    pub is_local: bool,
+    pub index: u32,
+}
+
+/// A compiled bytecode function.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BytecodeFunction {
+    pub name: Option<String>,
+    pub arity: usize,
+    pub chunk: Chunk,
+    pub upvalue_descriptors: Vec<UpvalueDescriptor>,
+}
+
+/// A runtime closure wrapping a compiled function and its captured upvalue cells.
+#[derive(Clone, Debug)]
+pub struct BytecodeClosure {
+    pub function: Rc<BytecodeFunction>,
+    pub upvalues: Vec<Rc<RefCell<Upvalue>>>,
+}
+
+impl PartialEq for BytecodeClosure {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.function, &other.function)
+            && self.upvalues.len() == other.upvalues.len()
+            && self
+                .upvalues
+                .iter()
+                .zip(&other.upvalues)
+                .all(|(a, b)| Rc::ptr_eq(a, b))
+    }
+}
 
 /// Opcodes executed by the stack-based Bytecode Virtual Machine.
 #[derive(Clone, Debug, PartialEq)]
@@ -26,7 +74,7 @@ pub enum Opcode {
     Pop,
     /// Duplicate top value on stack.
     Dup,
-    /// Read local variable at stack slot.
+    /// Read local variable at relative stack slot.
     GetLocal(u32),
     /// Write top-of-stack to local variable slot.
     SetLocal(u32),
@@ -34,6 +82,16 @@ pub enum Opcode {
     GetGlobal(u32),
     /// Write top-of-stack to global variable by name constant index.
     SetGlobal(u32),
+    /// Read captured upvalue at closure index.
+    GetUpvalue(u32),
+    /// Write top-of-stack to captured upvalue at closure index.
+    SetUpvalue(u32),
+    /// Mutate container in upvalue by index: pops index and new value.
+    IndexSetUpvalue(u32),
+    /// Mutate member of container in upvalue by field constant index: pops new value.
+    MemberSetUpvalue(u32, u32),
+    /// Instantiate a closure from function constant index with captured upvalues.
+    MakeClosure(u32),
     /// Binary addition / string concatenation / vector addition.
     Add,
     /// Binary subtraction.
@@ -88,11 +146,12 @@ pub enum Opcode {
     Return,
 }
 
-/// A compiled bytecode compilation unit containing instructions and constants.
+/// A compiled bytecode compilation unit containing instructions, constants and functions.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Chunk {
     pub code: Vec<Opcode>,
     pub constants: Vec<Value<'static>>,
+    pub functions: Vec<Rc<BytecodeFunction>>,
     pub spans: Vec<Span>,
     pub local_count: usize,
 }
@@ -117,6 +176,12 @@ impl Chunk {
         }
         let idx = self.constants.len() as u32;
         self.constants.push(value);
+        idx
+    }
+
+    pub fn add_function(&mut self, function: Rc<BytecodeFunction>) -> u32 {
+        let idx = self.functions.len() as u32;
+        self.functions.push(function);
         idx
     }
 
@@ -154,19 +219,20 @@ impl BytecodeProgram {
         }
         let mut compiler = Compiler::new();
         compiler.compile_module(&parsed.module.items)?;
-        Ok(BytecodeProgram {
-            chunk: compiler.chunk,
+        let top_fn = compiler.pop_state();
+        Ok(Self {
+            chunk: top_fn.chunk,
         })
     }
 
-    /// Execute the compiled bytecode with the specified step budget.
+    /// Execute the compiled bytecode program with a step budget limit.
     pub fn execute(&self, budget: usize) -> Result<Value<'static>, RuntimeError> {
         let mut vm = Vm::new(budget);
         vm.run(&self.chunk)
     }
 }
 
-/// Convenience entry point to compile and run Rush code via the Bytecode VM.
+/// Compile and evaluate source code directly via the Bytecode VM.
 pub fn evaluate_bytecode(source: &str, budget: usize) -> Result<Value<'static>, RuntimeError> {
     let program = BytecodeProgram::compile(source)?;
     program.execute(budget)
@@ -177,32 +243,26 @@ struct LoopContext {
     break_jumps: Vec<usize>,
 }
 
-struct Compiler<'s> {
+struct CompilerState {
+    name: Option<String>,
+    arity: usize,
     chunk: Chunk,
     scopes: Vec<HashMap<String, u32>>,
     local_count: u32,
+    upvalues: Vec<UpvalueDescriptor>,
     loops: Vec<LoopContext>,
-    _phantom: std::marker::PhantomData<&'s ()>,
 }
 
-impl<'s> Compiler<'s> {
-    fn new() -> Self {
+impl CompilerState {
+    fn new(name: Option<String>, arity: usize) -> Self {
         Self {
+            name,
+            arity,
             chunk: Chunk::new(),
             scopes: vec![HashMap::new()],
-            local_count: 0,
+            local_count: arity as u32,
+            upvalues: Vec::new(),
             loops: Vec::new(),
-            _phantom: std::marker::PhantomData,
-        }
-    }
-
-    fn error(&self, span: Span, message: impl Into<String>) -> RuntimeError {
-        RuntimeError {
-            module: None,
-            span,
-            message: message.into(),
-            stack: Vec::new(),
-            location: None,
         }
     }
 
@@ -215,18 +275,131 @@ impl<'s> Compiler<'s> {
         None
     }
 
+    fn declare_local(&mut self, name: &str) -> u32 {
+        let slot = self.local_count;
+        self.local_count += 1;
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.to_string(), slot);
+        }
+        slot
+    }
+
+    fn add_upvalue(&mut self, desc: UpvalueDescriptor) -> u32 {
+        for (i, existing) in self.upvalues.iter().enumerate() {
+            if *existing == desc {
+                return i as u32;
+            }
+        }
+        let idx = self.upvalues.len() as u32;
+        self.upvalues.push(desc);
+        idx
+    }
+}
+
+enum VariableResolution {
+    Local(u32),
+    Upvalue(u32),
+    Builtin(Builtin),
+    Global(String),
+}
+
+struct Compiler<'s> {
+    states: Vec<CompilerState>,
+    _phantom: std::marker::PhantomData<&'s ()>,
+}
+
+impl<'s> Compiler<'s> {
+    fn new() -> Self {
+        Self {
+            states: vec![CompilerState::new(Some("<main>".into()), 0)],
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    fn current(&mut self) -> &mut CompilerState {
+        self.states.last_mut().expect("Compiler state stack empty")
+    }
+
+    fn current_ref(&self) -> &CompilerState {
+        self.states.last().expect("Compiler state stack empty")
+    }
+
+    fn push_state(&mut self, name: Option<String>, arity: usize) {
+        self.states.push(CompilerState::new(name, arity));
+    }
+
+    fn pop_state(&mut self) -> BytecodeFunction {
+        let mut state = self.states.pop().expect("Compiler state stack underflow");
+        state.chunk.local_count = state.local_count as usize;
+        BytecodeFunction {
+            name: state.name,
+            arity: state.arity,
+            chunk: state.chunk,
+            upvalue_descriptors: state.upvalues,
+        }
+    }
+
+    fn is_module_level(&self) -> bool {
+        self.states.len() == 1
+    }
+
+    fn resolve_variable(&mut self, name: &str) -> VariableResolution {
+        if let Some(slot) = self.current_ref().resolve_local(name) {
+            return VariableResolution::Local(slot);
+        }
+        let cur_idx = self.states.len() - 1;
+        if let Some(upval_idx) = self.resolve_upvalue(cur_idx, name) {
+            return VariableResolution::Upvalue(upval_idx);
+        }
+        if let Some((_, builtin)) = builtin_catalog().iter().find(|(n, _)| *n == name) {
+            return VariableResolution::Builtin(*builtin);
+        }
+        VariableResolution::Global(name.to_string())
+    }
+
+    fn resolve_upvalue(&mut self, state_idx: usize, name: &str) -> Option<u32> {
+        if state_idx == 0 {
+            return None;
+        }
+        let parent_idx = state_idx - 1;
+        if let Some(slot) = self.states[parent_idx].resolve_local(name) {
+            let desc = UpvalueDescriptor {
+                is_local: true,
+                index: slot,
+            };
+            return Some(self.states[state_idx].add_upvalue(desc));
+        }
+        if let Some(parent_upval) = self.resolve_upvalue(parent_idx, name) {
+            let desc = UpvalueDescriptor {
+                is_local: false,
+                index: parent_upval,
+            };
+            return Some(self.states[state_idx].add_upvalue(desc));
+        }
+        None
+    }
+
+    fn error(&self, span: Span, message: impl Into<String>) -> RuntimeError {
+        RuntimeError {
+            module: None,
+            span,
+            message: message.into(),
+            stack: Vec::new(),
+            location: None,
+        }
+    }
+
     fn compile_module(&mut self, items: &[Stmt<'s>]) -> Result<(), RuntimeError> {
         self.compile_block(items, true)?;
         let end_span = items.last().map_or(Span::new(0, 0), |s| s.span);
-        self.chunk.emit(Opcode::Return, end_span);
-        self.chunk.local_count = self.local_count as usize;
+        self.current().chunk.emit(Opcode::Return, end_span);
         Ok(())
     }
 
     fn compile_block(&mut self, items: &[Stmt<'s>], keep_result: bool) -> Result<(), RuntimeError> {
         if items.is_empty() {
             if keep_result {
-                self.chunk.emit(Opcode::Null, Span::new(0, 0));
+                self.current().chunk.emit(Opcode::Null, Span::new(0, 0));
             }
             return Ok(());
         }
@@ -241,15 +414,56 @@ impl<'s> Compiler<'s> {
         match &stmt.kind {
             StmtKind::Declaration { name, value, .. } => {
                 self.compile_expr(value)?;
-                let slot = self.local_count;
-                self.local_count += 1;
-                if let Some(scope) = self.scopes.last_mut() {
-                    scope.insert(name.text.to_string(), slot);
+                let slot = self.current().declare_local(name.text);
+                if self.is_module_level() {
+                    let name_idx = self
+                        .current()
+                        .chunk
+                        .add_constant(Value::String(name.text.to_string()));
+                    self.current()
+                        .chunk
+                        .emit(Opcode::SetGlobal(name_idx), stmt.span);
                 }
-                self.chunk.emit(Opcode::SetLocal(slot), stmt.span);
-                self.chunk.emit(Opcode::Pop, stmt.span);
+                self.current().chunk.emit(Opcode::SetLocal(slot), stmt.span);
+                self.current().chunk.emit(Opcode::Pop, stmt.span);
                 if keep_result {
-                    self.chunk.emit(Opcode::Null, stmt.span);
+                    self.current().chunk.emit(Opcode::Null, stmt.span);
+                }
+            }
+            StmtKind::Function {
+                name,
+                parameters,
+                body,
+                ..
+            } => {
+                let slot = self.current().declare_local(name.text);
+                self.push_state(Some(name.text.to_string()), parameters.len());
+                for (i, p) in parameters.iter().enumerate() {
+                    if let Some(p_name) = extract_pattern_name(&p.pattern) {
+                        self.current().scopes[0].insert(p_name.to_string(), i as u32);
+                    }
+                }
+                self.compile_block(&body.stmts, false)?;
+                self.current().chunk.emit(Opcode::Null, stmt.span);
+                self.current().chunk.emit(Opcode::Return, stmt.span);
+                let compiled = self.pop_state();
+                let fn_idx = self.current().chunk.add_function(Rc::new(compiled));
+                self.current()
+                    .chunk
+                    .emit(Opcode::MakeClosure(fn_idx), stmt.span);
+                if self.is_module_level() {
+                    let name_idx = self
+                        .current()
+                        .chunk
+                        .add_constant(Value::String(name.text.to_string()));
+                    self.current()
+                        .chunk
+                        .emit(Opcode::SetGlobal(name_idx), stmt.span);
+                }
+                self.current().chunk.emit(Opcode::SetLocal(slot), stmt.span);
+                self.current().chunk.emit(Opcode::Pop, stmt.span);
+                if keep_result {
+                    self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
             }
             StmtKind::If {
@@ -258,68 +472,75 @@ impl<'s> Compiler<'s> {
                 else_block,
             } => {
                 self.compile_expr(condition)?;
-                let false_jump = self.chunk.emit(Opcode::JumpIfFalse(0), stmt.span);
+                let false_jump = self.current().chunk.emit(Opcode::JumpIfFalse(0), stmt.span);
                 self.compile_block(&then_block.stmts, keep_result)?;
-                let end_jump = self.chunk.emit(Opcode::Jump(0), stmt.span);
-                self.chunk.patch_jump(false_jump, self.chunk.code.len());
+                let end_jump = self.current().chunk.emit(Opcode::Jump(0), stmt.span);
+                let then_len = self.current().chunk.code.len();
+                self.current().chunk.patch_jump(false_jump, then_len);
                 if let Some(else_b) = else_block {
                     self.compile_block(&else_b.stmts, keep_result)?;
                 } else if keep_result {
-                    self.chunk.emit(Opcode::Null, stmt.span);
+                    self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
-                self.chunk.patch_jump(end_jump, self.chunk.code.len());
+                let end_len = self.current().chunk.code.len();
+                self.current().chunk.patch_jump(end_jump, end_len);
             }
             StmtKind::While { condition, body } => {
-                let start_ip = self.chunk.code.len();
+                let start_ip = self.current().chunk.code.len();
                 self.compile_expr(condition)?;
-                let exit_jump = self.chunk.emit(Opcode::JumpIfFalse(0), stmt.span);
-                self.loops.push(LoopContext {
+                let exit_jump = self.current().chunk.emit(Opcode::JumpIfFalse(0), stmt.span);
+                self.current().loops.push(LoopContext {
                     start_ip,
                     break_jumps: Vec::new(),
                 });
                 self.compile_block(&body.stmts, false)?;
-                self.chunk.emit(Opcode::Jump(start_ip), stmt.span);
-                let loop_ctx = self.loops.pop().unwrap();
-                let exit_target = self.chunk.code.len();
-                self.chunk.patch_jump(exit_jump, exit_target);
+                self.current().chunk.emit(Opcode::Jump(start_ip), stmt.span);
+                let loop_ctx = self.current().loops.pop().unwrap();
+                let exit_target = self.current().chunk.code.len();
+                self.current().chunk.patch_jump(exit_jump, exit_target);
                 for brk in loop_ctx.break_jumps {
-                    self.chunk.patch_jump(brk, exit_target);
+                    self.current().chunk.patch_jump(brk, exit_target);
                 }
                 if keep_result {
-                    self.chunk.emit(Opcode::Null, stmt.span);
+                    self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
             }
             StmtKind::Break => {
-                let Some(loop_ctx) = self.loops.last_mut() else {
+                if self.current().loops.is_empty() {
                     return Err(self.error(stmt.span, "break outside of loop"));
-                };
-                let jmp = self.chunk.emit(Opcode::Jump(0), stmt.span);
-                loop_ctx.break_jumps.push(jmp);
+                }
+                let jmp = self.current().chunk.emit(Opcode::Jump(0), stmt.span);
+                self.current()
+                    .loops
+                    .last_mut()
+                    .unwrap()
+                    .break_jumps
+                    .push(jmp);
                 if keep_result {
-                    self.chunk.emit(Opcode::Null, stmt.span);
+                    self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
             }
             StmtKind::Continue => {
-                let Some(loop_ctx) = self.loops.last() else {
+                let Some(target) = self.current().loops.last().map(|l| l.start_ip) else {
                     return Err(self.error(stmt.span, "continue outside of loop"));
                 };
-                self.chunk.emit(Opcode::Jump(loop_ctx.start_ip), stmt.span);
+                self.current().chunk.emit(Opcode::Jump(target), stmt.span);
                 if keep_result {
-                    self.chunk.emit(Opcode::Null, stmt.span);
+                    self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
             }
             StmtKind::Return(value) => {
                 if let Some(val) = value {
                     self.compile_expr(val)?;
                 } else {
-                    self.chunk.emit(Opcode::Null, stmt.span);
+                    self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
-                self.chunk.emit(Opcode::Return, stmt.span);
+                self.current().chunk.emit(Opcode::Return, stmt.span);
             }
             StmtKind::Expr(expr) => {
                 self.compile_expr(expr)?;
                 if !keep_result {
-                    self.chunk.emit(Opcode::Pop, stmt.span);
+                    self.current().chunk.emit(Opcode::Pop, stmt.span);
                 }
             }
             _ => {
@@ -339,8 +560,8 @@ impl<'s> Compiler<'s> {
                 let n: f64 = clean
                     .parse()
                     .map_err(|_| self.error(span, "Invalid number"))?;
-                let idx = self.chunk.add_constant(Value::Number(n));
-                self.chunk.emit(Opcode::Constant(idx), span);
+                let idx = self.current().chunk.add_constant(Value::Number(n));
+                self.current().chunk.emit(Opcode::Constant(idx), span);
             }
             ExprKind::String(text) => {
                 let mut decoded = String::new();
@@ -348,42 +569,43 @@ impl<'s> Compiler<'s> {
                     let ch = c.map_err(|e| self.error(span, e))?;
                     decoded.push(ch);
                 }
-                let idx = self.chunk.add_constant(Value::String(decoded));
-                self.chunk.emit(Opcode::Constant(idx), span);
+                let idx = self.current().chunk.add_constant(Value::String(decoded));
+                self.current().chunk.emit(Opcode::Constant(idx), span);
             }
             ExprKind::Bool(b) => {
                 if *b {
-                    self.chunk.emit(Opcode::True, span);
+                    self.current().chunk.emit(Opcode::True, span);
                 } else {
-                    self.chunk.emit(Opcode::False, span);
+                    self.current().chunk.emit(Opcode::False, span);
                 }
             }
             ExprKind::Null => {
-                self.chunk.emit(Opcode::Null, span);
+                self.current().chunk.emit(Opcode::Null, span);
             }
-            ExprKind::Name(name) => {
-                if let Some(slot) = self.resolve_local(name.text) {
-                    self.chunk.emit(Opcode::GetLocal(slot), span);
-                } else if let Some((_, builtin)) =
-                    builtin_catalog().iter().find(|(n, _)| *n == name.text)
-                {
-                    let idx = self.chunk.add_constant(Value::Builtin(*builtin));
-                    self.chunk.emit(Opcode::Constant(idx), span);
-                } else {
-                    let name_idx = self
-                        .chunk
-                        .add_constant(Value::String(name.text.to_string()));
-                    self.chunk.emit(Opcode::GetGlobal(name_idx), span);
+            ExprKind::Name(name) => match self.resolve_variable(name.text) {
+                VariableResolution::Local(slot) => {
+                    self.current().chunk.emit(Opcode::GetLocal(slot), span);
                 }
-            }
+                VariableResolution::Upvalue(idx) => {
+                    self.current().chunk.emit(Opcode::GetUpvalue(idx), span);
+                }
+                VariableResolution::Builtin(builtin) => {
+                    let idx = self.current().chunk.add_constant(Value::Builtin(builtin));
+                    self.current().chunk.emit(Opcode::Constant(idx), span);
+                }
+                VariableResolution::Global(var_name) => {
+                    let idx = self.current().chunk.add_constant(Value::String(var_name));
+                    self.current().chunk.emit(Opcode::GetGlobal(idx), span);
+                }
+            },
             ExprKind::Unary { operator, value } => {
                 self.compile_expr(value)?;
                 match *operator {
                     "-" => {
-                        self.chunk.emit(Opcode::Neg, span);
+                        self.current().chunk.emit(Opcode::Neg, span);
                     }
                     "!" => {
-                        self.chunk.emit(Opcode::Not, span);
+                        self.current().chunk.emit(Opcode::Not, span);
                     }
                     _ => return Err(self.error(span, "Unsupported unary operator")),
                 }
@@ -395,37 +617,39 @@ impl<'s> Compiler<'s> {
             } => {
                 if *operator == "&&" {
                     self.compile_expr(left)?;
-                    self.chunk.emit(Opcode::Dup, span);
-                    let false_jump = self.chunk.emit(Opcode::JumpIfFalse(0), span);
-                    self.chunk.emit(Opcode::Pop, span);
+                    self.current().chunk.emit(Opcode::Dup, span);
+                    let false_jump = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
+                    self.current().chunk.emit(Opcode::Pop, span);
                     self.compile_expr(right)?;
-                    self.chunk.patch_jump(false_jump, self.chunk.code.len());
+                    let len = self.current().chunk.code.len();
+                    self.current().chunk.patch_jump(false_jump, len);
                     return Ok(());
                 }
                 if *operator == "||" {
                     self.compile_expr(left)?;
-                    self.chunk.emit(Opcode::Dup, span);
-                    let true_jump = self.chunk.emit(Opcode::JumpIfTrue(0), span);
-                    self.chunk.emit(Opcode::Pop, span);
+                    self.current().chunk.emit(Opcode::Dup, span);
+                    let true_jump = self.current().chunk.emit(Opcode::JumpIfTrue(0), span);
+                    self.current().chunk.emit(Opcode::Pop, span);
                     self.compile_expr(right)?;
-                    self.chunk.patch_jump(true_jump, self.chunk.code.len());
+                    let len = self.current().chunk.code.len();
+                    self.current().chunk.patch_jump(true_jump, len);
                     return Ok(());
                 }
 
                 self.compile_expr(left)?;
                 self.compile_expr(right)?;
                 match *operator {
-                    "+" => self.chunk.emit(Opcode::Add, span),
-                    "-" => self.chunk.emit(Opcode::Sub, span),
-                    "*" => self.chunk.emit(Opcode::Mul, span),
-                    "/" => self.chunk.emit(Opcode::Div, span),
-                    "%" => self.chunk.emit(Opcode::Mod, span),
-                    "==" => self.chunk.emit(Opcode::Equal, span),
-                    "!=" => self.chunk.emit(Opcode::NotEqual, span),
-                    "<" => self.chunk.emit(Opcode::Less, span),
-                    "<=" => self.chunk.emit(Opcode::LessEqual, span),
-                    ">" => self.chunk.emit(Opcode::Greater, span),
-                    ">=" => self.chunk.emit(Opcode::GreaterEqual, span),
+                    "+" => self.current().chunk.emit(Opcode::Add, span),
+                    "-" => self.current().chunk.emit(Opcode::Sub, span),
+                    "*" => self.current().chunk.emit(Opcode::Mul, span),
+                    "/" => self.current().chunk.emit(Opcode::Div, span),
+                    "%" => self.current().chunk.emit(Opcode::Mod, span),
+                    "==" => self.current().chunk.emit(Opcode::Equal, span),
+                    "!=" => self.current().chunk.emit(Opcode::NotEqual, span),
+                    "<" => self.current().chunk.emit(Opcode::Less, span),
+                    "<=" => self.current().chunk.emit(Opcode::LessEqual, span),
+                    ">" => self.current().chunk.emit(Opcode::Greater, span),
+                    ">=" => self.current().chunk.emit(Opcode::GreaterEqual, span),
                     _ => return Err(self.error(span, "Unsupported binary operator")),
                 };
             }
@@ -435,112 +659,176 @@ impl<'s> Compiler<'s> {
                 operator,
             } => match &target.kind {
                 ExprKind::Name(name) => {
+                    let res = self.resolve_variable(name.text);
                     if *operator == "=" {
                         self.compile_expr(value)?;
                     } else {
                         let base_op = operator.strip_suffix('=').unwrap_or(operator);
-                        if let Some(slot) = self.resolve_local(name.text) {
-                            self.chunk.emit(Opcode::GetLocal(slot), target.span);
-                        } else {
-                            let name_idx = self
-                                .chunk
-                                .add_constant(Value::String(name.text.to_string()));
-                            self.chunk.emit(Opcode::GetGlobal(name_idx), target.span);
+                        match &res {
+                            VariableResolution::Local(slot) => {
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::GetLocal(*slot), target.span);
+                            }
+                            VariableResolution::Upvalue(idx) => {
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::GetUpvalue(*idx), target.span);
+                            }
+                            VariableResolution::Global(n) => {
+                                let idx =
+                                    self.current().chunk.add_constant(Value::String(n.clone()));
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::GetGlobal(idx), target.span);
+                            }
+                            VariableResolution::Builtin(_) => {
+                                return Err(self.error(target.span, "Cannot reassign builtin"));
+                            }
                         }
                         self.compile_expr(value)?;
                         match base_op {
-                            "+" => self.chunk.emit(Opcode::Add, span),
-                            "-" => self.chunk.emit(Opcode::Sub, span),
-                            "*" => self.chunk.emit(Opcode::Mul, span),
-                            "/" => self.chunk.emit(Opcode::Div, span),
-                            "%" => self.chunk.emit(Opcode::Mod, span),
+                            "+" => self.current().chunk.emit(Opcode::Add, span),
+                            "-" => self.current().chunk.emit(Opcode::Sub, span),
+                            "*" => self.current().chunk.emit(Opcode::Mul, span),
+                            "/" => self.current().chunk.emit(Opcode::Div, span),
+                            "%" => self.current().chunk.emit(Opcode::Mod, span),
                             _ => return Err(self.error(span, "Unsupported assignment operator")),
                         };
                     }
-                    if let Some(slot) = self.resolve_local(name.text) {
-                        self.chunk.emit(Opcode::SetLocal(slot), target.span);
-                    } else {
-                        let name_idx = self
-                            .chunk
-                            .add_constant(Value::String(name.text.to_string()));
-                        self.chunk.emit(Opcode::SetGlobal(name_idx), target.span);
+                    match res {
+                        VariableResolution::Local(slot) => {
+                            self.current()
+                                .chunk
+                                .emit(Opcode::SetLocal(slot), target.span);
+                        }
+                        VariableResolution::Upvalue(idx) => {
+                            self.current()
+                                .chunk
+                                .emit(Opcode::SetUpvalue(idx), target.span);
+                        }
+                        VariableResolution::Global(n) => {
+                            let idx = self.current().chunk.add_constant(Value::String(n));
+                            self.current()
+                                .chunk
+                                .emit(Opcode::SetGlobal(idx), target.span);
+                        }
+                        VariableResolution::Builtin(_) => {
+                            return Err(self.error(target.span, "Cannot reassign builtin"));
+                        }
                     }
                 }
                 ExprKind::Index { object, index } => {
                     let ExprKind::Name(obj_name) = &object.kind else {
-                        return Err(self.error(
-                            object.span,
-                            "Index assignment requires a local variable target",
-                        ));
-                    };
-                    let Some(slot) = self.resolve_local(obj_name.text) else {
                         return Err(
-                            self.error(object.span, "Variable not found for index assignment")
+                            self.error(object.span, "Index assignment requires a variable target")
                         );
                     };
+                    let res = self.resolve_variable(obj_name.text);
                     self.compile_expr(index)?;
                     self.compile_expr(value)?;
-                    self.chunk.emit(Opcode::IndexSet(slot), target.span);
-                    self.chunk.emit(Opcode::GetLocal(slot), target.span);
+                    match res {
+                        VariableResolution::Local(slot) => {
+                            self.current()
+                                .chunk
+                                .emit(Opcode::IndexSet(slot), target.span);
+                            self.current()
+                                .chunk
+                                .emit(Opcode::GetLocal(slot), target.span);
+                        }
+                        VariableResolution::Upvalue(idx) => {
+                            self.current()
+                                .chunk
+                                .emit(Opcode::IndexSetUpvalue(idx), target.span);
+                            self.current()
+                                .chunk
+                                .emit(Opcode::GetUpvalue(idx), target.span);
+                        }
+                        _ => return Err(self.error(object.span, "Cannot mutate target by index")),
+                    }
                 }
                 ExprKind::Member { object, field } => {
                     let ExprKind::Name(obj_name) = &object.kind else {
-                        return Err(self.error(
-                            object.span,
-                            "Member assignment requires a local variable target",
-                        ));
-                    };
-                    let Some(slot) = self.resolve_local(obj_name.text) else {
                         return Err(
-                            self.error(object.span, "Variable not found for member assignment")
+                            self.error(object.span, "Member assignment requires a variable target")
                         );
                     };
+                    let res = self.resolve_variable(obj_name.text);
                     self.compile_expr(value)?;
                     let field_idx = self
+                        .current()
                         .chunk
                         .add_constant(Value::String(field.text.to_string()));
-                    self.chunk
-                        .emit(Opcode::MemberSet(slot, field_idx), target.span);
-                    self.chunk.emit(Opcode::GetLocal(slot), target.span);
+                    match res {
+                        VariableResolution::Local(slot) => {
+                            self.current()
+                                .chunk
+                                .emit(Opcode::MemberSet(slot, field_idx), target.span);
+                            self.current()
+                                .chunk
+                                .emit(Opcode::GetLocal(slot), target.span);
+                        }
+                        VariableResolution::Upvalue(idx) => {
+                            self.current()
+                                .chunk
+                                .emit(Opcode::MemberSetUpvalue(idx, field_idx), target.span);
+                            self.current()
+                                .chunk
+                                .emit(Opcode::GetUpvalue(idx), target.span);
+                        }
+                        _ => return Err(self.error(object.span, "Cannot mutate member on value")),
+                    }
                 }
                 _ => return Err(self.error(target.span, "Unsupported assignment expression")),
             },
             ExprKind::Index { object, index } => {
                 self.compile_expr(object)?;
                 self.compile_expr(index)?;
-                self.chunk.emit(Opcode::IndexGet, span);
+                self.current().chunk.emit(Opcode::IndexGet, span);
             }
             ExprKind::Member { object, field } => {
                 self.compile_expr(object)?;
                 let field_idx = self
+                    .current()
                     .chunk
                     .add_constant(Value::String(field.text.to_string()));
-                self.chunk.emit(Opcode::MemberGet(field_idx), span);
+                self.current()
+                    .chunk
+                    .emit(Opcode::MemberGet(field_idx), span);
             }
             ExprKind::List(items) => {
                 for item in items {
                     self.compile_expr(item)?;
                 }
-                self.chunk.emit(Opcode::BuildList(items.len()), span);
+                self.current()
+                    .chunk
+                    .emit(Opcode::BuildList(items.len()), span);
             }
             ExprKind::Tuple(items) => {
                 for item in items {
                     self.compile_expr(item)?;
                 }
-                self.chunk.emit(Opcode::BuildTuple(items.len()), span);
+                self.current()
+                    .chunk
+                    .emit(Opcode::BuildTuple(items.len()), span);
             }
             ExprKind::Map(entries) => {
                 for (key, val) in entries {
                     match &key.kind {
                         ExprKind::Name(n) => {
-                            let idx = self.chunk.add_constant(Value::String(n.text.to_string()));
-                            self.chunk.emit(Opcode::Constant(idx), key.span);
+                            let idx = self
+                                .current()
+                                .chunk
+                                .add_constant(Value::String(n.text.to_string()));
+                            self.current().chunk.emit(Opcode::Constant(idx), key.span);
                         }
                         _ => self.compile_expr(key)?,
                     }
                     self.compile_expr(val)?;
                 }
-                self.chunk.emit(Opcode::BuildRecord(entries.len()), span);
+                self.current()
+                    .chunk
+                    .emit(Opcode::BuildRecord(entries.len()), span);
             }
             ExprKind::If {
                 condition,
@@ -548,45 +836,69 @@ impl<'s> Compiler<'s> {
                 else_value,
             } => {
                 self.compile_expr(condition)?;
-                let false_jump = self.chunk.emit(Opcode::JumpIfFalse(0), span);
+                let false_jump = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
                 self.compile_expr(then_value)?;
-                let end_jump = self.chunk.emit(Opcode::Jump(0), span);
-                self.chunk.patch_jump(false_jump, self.chunk.code.len());
+                let end_jump = self.current().chunk.emit(Opcode::Jump(0), span);
+                let then_len = self.current().chunk.code.len();
+                self.current().chunk.patch_jump(false_jump, then_len);
                 self.compile_expr(else_value)?;
-                self.chunk.patch_jump(end_jump, self.chunk.code.len());
+                let end_len = self.current().chunk.code.len();
+                self.current().chunk.patch_jump(end_jump, end_len);
+            }
+            ExprKind::Lambda { parameters, body } => {
+                self.push_state(None, parameters.len());
+                for (i, p) in parameters.iter().enumerate() {
+                    if let Some(p_name) = extract_pattern_name(p) {
+                        self.current().scopes[0].insert(p_name.to_string(), i as u32);
+                    }
+                }
+                self.compile_expr(body)?;
+                self.current().chunk.emit(Opcode::Return, span);
+                let compiled = self.pop_state();
+                let fn_idx = self.current().chunk.add_function(Rc::new(compiled));
+                self.current().chunk.emit(Opcode::MakeClosure(fn_idx), span);
             }
             ExprKind::Call { callee, arguments } => {
                 self.compile_expr(callee)?;
                 for arg in arguments {
                     self.compile_expr(arg)?;
                 }
-                self.chunk.emit(Opcode::Call(arguments.len()), span);
+                self.current()
+                    .chunk
+                    .emit(Opcode::Call(arguments.len()), span);
             }
             ExprKind::Pipeline { input, stages } => {
                 self.compile_expr(input)?;
                 for stage in stages {
                     match &stage.kind {
                         ExprKind::Call { callee, arguments } => {
-                            let tmp_slot = self.local_count;
-                            self.local_count += 1;
-                            self.chunk.emit(Opcode::SetLocal(tmp_slot), stage.span);
-                            self.chunk.emit(Opcode::Pop, stage.span);
+                            let tmp_slot = self.current().declare_local("__pipe_tmp");
+                            self.current()
+                                .chunk
+                                .emit(Opcode::SetLocal(tmp_slot), stage.span);
+                            self.current().chunk.emit(Opcode::Pop, stage.span);
                             self.compile_expr(callee)?;
-                            self.chunk.emit(Opcode::GetLocal(tmp_slot), stage.span);
+                            self.current()
+                                .chunk
+                                .emit(Opcode::GetLocal(tmp_slot), stage.span);
                             for arg in arguments {
                                 self.compile_expr(arg)?;
                             }
-                            self.chunk
+                            self.current()
+                                .chunk
                                 .emit(Opcode::Call(arguments.len() + 1), stage.span);
                         }
                         _ => {
-                            let tmp_slot = self.local_count;
-                            self.local_count += 1;
-                            self.chunk.emit(Opcode::SetLocal(tmp_slot), stage.span);
-                            self.chunk.emit(Opcode::Pop, stage.span);
+                            let tmp_slot = self.current().declare_local("__pipe_tmp");
+                            self.current()
+                                .chunk
+                                .emit(Opcode::SetLocal(tmp_slot), stage.span);
+                            self.current().chunk.emit(Opcode::Pop, stage.span);
                             self.compile_expr(stage)?;
-                            self.chunk.emit(Opcode::GetLocal(tmp_slot), stage.span);
-                            self.chunk.emit(Opcode::Call(1), stage.span);
+                            self.current()
+                                .chunk
+                                .emit(Opcode::GetLocal(tmp_slot), stage.span);
+                            self.current().chunk.emit(Opcode::Call(1), stage.span);
                         }
                     }
                 }
@@ -595,15 +907,17 @@ impl<'s> Compiler<'s> {
                 for part in parts {
                     match part {
                         InterpolationPart::Literal(s) => {
-                            let idx = self.chunk.add_constant(Value::String(s.clone()));
-                            self.chunk.emit(Opcode::Constant(idx), span);
+                            let idx = self.current().chunk.add_constant(Value::String(s.clone()));
+                            self.current().chunk.emit(Opcode::Constant(idx), span);
                         }
                         InterpolationPart::Expr(sub) => {
                             self.compile_expr(sub)?;
                         }
                     }
                 }
-                self.chunk.emit(Opcode::Interpolate(parts.len()), span);
+                self.current()
+                    .chunk
+                    .emit(Opcode::Interpolate(parts.len()), span);
             }
             _ => {
                 return Err(self.error(span, "Expression not supported in bytecode compilation"));
@@ -613,10 +927,26 @@ impl<'s> Compiler<'s> {
     }
 }
 
+fn extract_pattern_name<'s>(expr: &Expr<'s>) -> Option<&'s str> {
+    match &expr.kind {
+        ExprKind::Name(n) => Some(n.text),
+        _ => None,
+    }
+}
+
+struct CallFrame {
+    closure: Rc<BytecodeClosure>,
+    ip: usize,
+    stack_base: usize,
+}
+
 /// The flat stack Bytecode Virtual Machine runtime.
 pub struct Vm {
     fuel: usize,
     globals: HashMap<String, Value<'static>>,
+    frames: Vec<CallFrame>,
+    stack: Vec<Value<'static>>,
+    open_upvalues: Vec<Rc<RefCell<Upvalue>>>,
 }
 
 impl Vm {
@@ -624,7 +954,14 @@ impl Vm {
         Self {
             fuel: budget,
             globals: HashMap::new(),
+            frames: Vec::new(),
+            stack: Vec::new(),
+            open_upvalues: Vec::new(),
         }
+    }
+
+    pub fn fuel(&self) -> usize {
+        self.fuel
     }
 
     fn error(&self, span: Span, message: impl Into<String>) -> RuntimeError {
@@ -638,230 +975,471 @@ impl Vm {
     }
 
     pub fn run(&mut self, chunk: &Chunk) -> Result<Value<'static>, RuntimeError> {
-        let mut ip = 0;
-        let mut stack: Vec<Value<'static>> = Vec::with_capacity(chunk.local_count.max(64));
-        stack.resize(chunk.local_count, Value::Null);
+        let main_fn = Rc::new(BytecodeFunction {
+            name: Some("<main>".into()),
+            arity: 0,
+            chunk: chunk.clone(),
+            upvalue_descriptors: Vec::new(),
+        });
+        let main_closure = Rc::new(BytecodeClosure {
+            function: main_fn,
+            upvalues: Vec::new(),
+        });
+        self.run_closure(&main_closure, &[])
+    }
 
-        while ip < chunk.code.len() {
+    pub fn run_closure(
+        &mut self,
+        closure: &Rc<BytecodeClosure>,
+        args: &[Value<'static>],
+    ) -> Result<Value<'static>, RuntimeError> {
+        if args.len() != closure.function.arity {
+            return Err(self.error(
+                Span::new(0, 0),
+                format!(
+                    "Argument count mismatch: expected {}, got {}",
+                    closure.function.arity,
+                    args.len()
+                ),
+            ));
+        }
+        let prev_frames = std::mem::take(&mut self.frames);
+        let prev_stack = std::mem::take(&mut self.stack);
+
+        let stack_base = 0;
+        let local_count = closure.function.chunk.local_count;
+        let mut stack = Vec::with_capacity(local_count.max(args.len()));
+        stack.extend_from_slice(args);
+        if stack.len() < local_count {
+            stack.resize(local_count, Value::Null);
+        }
+        self.stack = stack;
+        self.frames = vec![CallFrame {
+            closure: closure.clone(),
+            ip: 0,
+            stack_base,
+        }];
+
+        let result = self.execute_loop();
+
+        self.frames = prev_frames;
+        self.stack = prev_stack;
+
+        result
+    }
+
+    fn close_upvalues(&mut self, from_slot: usize) {
+        let stack = &self.stack;
+        self.open_upvalues.retain(|upval| {
+            let mut cell = upval.borrow_mut();
+            if let Upvalue::Open(slot) = *cell
+                && slot >= from_slot
+            {
+                let val = stack.get(slot).cloned().unwrap_or(Value::Null);
+                *cell = Upvalue::Closed(val);
+                return false;
+            }
+            true
+        });
+    }
+
+    fn execute_loop(&mut self) -> Result<Value<'static>, RuntimeError> {
+        while !self.frames.is_empty() {
+            let frame_idx = self.frames.len() - 1;
+            let ip = self.frames[frame_idx].ip;
+
             if self.fuel == 0 {
-                let span = chunk.spans.get(ip).copied().unwrap_or(Span::new(0, 0));
+                let span = self.frames[frame_idx]
+                    .closure
+                    .function
+                    .chunk
+                    .spans
+                    .get(ip)
+                    .copied()
+                    .unwrap_or(Span::new(0, 0));
                 return Err(self.error(span, "Execution limit exceeded"));
             }
             self.fuel -= 1;
 
-            let op = &chunk.code[ip];
-            let span = chunk.spans[ip];
-            ip += 1;
+            if ip >= self.frames[frame_idx].closure.function.chunk.code.len() {
+                let ret_val = self.stack.pop().unwrap_or(Value::Null);
+                let exiting = self.frames.pop().unwrap();
+                self.close_upvalues(exiting.stack_base);
+                if self.frames.is_empty() {
+                    return Ok(ret_val);
+                }
+                if exiting.stack_base > 0 {
+                    self.stack.truncate(exiting.stack_base - 1);
+                } else {
+                    self.stack.clear();
+                }
+                self.stack.push(ret_val);
+                continue;
+            }
+
+            let op = self.frames[frame_idx].closure.function.chunk.code[ip].clone();
+            let span = self.frames[frame_idx].closure.function.chunk.spans[ip];
+            self.frames[frame_idx].ip += 1;
 
             match op {
                 Opcode::Constant(idx) => {
-                    let val = chunk.constants[*idx as usize].clone();
-                    stack.push(val);
+                    let val = self.frames[frame_idx].closure.function.chunk.constants[idx as usize]
+                        .clone();
+                    self.stack.push(val);
                 }
-                Opcode::Null => stack.push(Value::Null),
-                Opcode::True => stack.push(Value::Bool(true)),
-                Opcode::False => stack.push(Value::Bool(false)),
+                Opcode::Null => self.stack.push(Value::Null),
+                Opcode::True => self.stack.push(Value::Bool(true)),
+                Opcode::False => self.stack.push(Value::Bool(false)),
                 Opcode::Pop => {
-                    stack.pop();
+                    self.stack.pop();
                 }
                 Opcode::Dup => {
-                    let top = stack.last().cloned().unwrap_or(Value::Null);
-                    stack.push(top);
+                    let top = self.stack.last().cloned().unwrap_or(Value::Null);
+                    self.stack.push(top);
                 }
                 Opcode::GetLocal(slot) => {
-                    let val = stack.get(*slot as usize).cloned().unwrap_or(Value::Null);
-                    stack.push(val);
+                    let stack_base = self.frames[frame_idx].stack_base;
+                    let idx = stack_base + slot as usize;
+                    let val = self.stack.get(idx).cloned().unwrap_or(Value::Null);
+                    self.stack.push(val);
                 }
                 Opcode::SetLocal(slot) => {
-                    let val = stack.last().cloned().unwrap_or(Value::Null);
-                    let idx = *slot as usize;
-                    if idx >= stack.len() {
-                        stack.resize(idx + 1, Value::Null);
+                    let stack_base = self.frames[frame_idx].stack_base;
+                    let val = self.stack.last().cloned().unwrap_or(Value::Null);
+                    let idx = stack_base + slot as usize;
+                    if idx >= self.stack.len() {
+                        self.stack.resize(idx + 1, Value::Null);
                     }
-                    stack[idx] = val;
+                    self.stack[idx] = val;
                 }
-                Opcode::GetGlobal(name_idx) => {
-                    let name = match &chunk.constants[*name_idx as usize] {
-                        Value::String(s) => s.as_str(),
+                Opcode::GetUpvalue(idx) => {
+                    let cell = self.frames[frame_idx].closure.upvalues[idx as usize].clone();
+                    let val = match &*cell.borrow() {
+                        Upvalue::Open(slot) => {
+                            self.stack.get(*slot).cloned().unwrap_or(Value::Null)
+                        }
+                        Upvalue::Closed(v) => v.clone(),
+                    };
+                    self.stack.push(val);
+                }
+                Opcode::SetUpvalue(idx) => {
+                    let val = self.stack.last().cloned().unwrap_or(Value::Null);
+                    let cell = self.frames[frame_idx].closure.upvalues[idx as usize].clone();
+                    let mut borrow = cell.borrow_mut();
+                    match &mut *borrow {
+                        Upvalue::Open(slot) => {
+                            let slot = *slot;
+                            if slot >= self.stack.len() {
+                                self.stack.resize(slot + 1, Value::Null);
+                            }
+                            self.stack[slot] = val;
+                        }
+                        Upvalue::Closed(v) => *v = val,
+                    }
+                }
+                Opcode::IndexSetUpvalue(upval_idx) => {
+                    let val = self.stack.pop().unwrap();
+                    let idx = self.stack.pop().unwrap();
+                    let cell = self.frames[frame_idx].closure.upvalues[upval_idx as usize].clone();
+                    let mut borrow = cell.borrow_mut();
+                    let err = match &mut *borrow {
+                        Upvalue::Open(s) => {
+                            let slot = *s;
+                            match (&mut self.stack[slot], &idx) {
+                                (Value::List(items), Value::Number(n)) => {
+                                    let i = *n as usize;
+                                    if *n >= 0.0 && n.fract() == 0.0 && i < items.len() {
+                                        items[i] = val;
+                                        None
+                                    } else {
+                                        Some("Index out of bounds")
+                                    }
+                                }
+                                (Value::Record(fields), Value::String(k)) => {
+                                    fields.insert(k.clone(), val);
+                                    None
+                                }
+                                _ => Some("Cannot mutate target by index"),
+                            }
+                        }
+                        Upvalue::Closed(c) => match (c, &idx) {
+                            (Value::List(items), Value::Number(n)) => {
+                                let i = *n as usize;
+                                if *n >= 0.0 && n.fract() == 0.0 && i < items.len() {
+                                    items[i] = val;
+                                    None
+                                } else {
+                                    Some("Index out of bounds")
+                                }
+                            }
+                            (Value::Record(fields), Value::String(k)) => {
+                                fields.insert(k.clone(), val);
+                                None
+                            }
+                            _ => Some("Cannot mutate target by index"),
+                        },
+                    };
+                    if let Some(msg) = err {
+                        return Err(self.error(span, msg));
+                    }
+                }
+                Opcode::MemberSetUpvalue(upval_idx, field_idx) => {
+                    let field_name = match &self.frames[frame_idx].closure.function.chunk.constants
+                        [field_idx as usize]
+                    {
+                        Value::String(s) => s.clone(),
                         _ => unreachable!(),
                     };
-                    if let Some(val) = self.globals.get(name) {
-                        stack.push(val.clone());
-                    } else if let Some((_, builtin)) =
-                        builtin_catalog().iter().find(|(n, _)| *n == name)
+                    let val = self.stack.pop().unwrap();
+                    let cell = self.frames[frame_idx].closure.upvalues[upval_idx as usize].clone();
+                    let mut borrow = cell.borrow_mut();
+                    let err = match &mut *borrow {
+                        Upvalue::Open(s) => {
+                            let slot = *s;
+                            match &mut self.stack[slot] {
+                                Value::Record(fields) => {
+                                    fields.insert(field_name, val);
+                                    None
+                                }
+                                _ => Some("Cannot mutate member on value"),
+                            }
+                        }
+                        Upvalue::Closed(c) => match c {
+                            Value::Record(fields) => {
+                                fields.insert(field_name, val);
+                                None
+                            }
+                            _ => Some("Cannot mutate member on value"),
+                        },
+                    };
+                    if let Some(msg) = err {
+                        return Err(self.error(span, msg));
+                    }
+                }
+                Opcode::MakeClosure(fn_idx) => {
+                    let target_fn = self.frames[frame_idx].closure.function.chunk.functions
+                        [fn_idx as usize]
+                        .clone();
+                    let stack_base = self.frames[frame_idx].stack_base;
+                    let parent_closure = self.frames[frame_idx].closure.clone();
+                    let mut upvals = Vec::with_capacity(target_fn.upvalue_descriptors.len());
+                    for desc in &target_fn.upvalue_descriptors {
+                        if desc.is_local {
+                            let slot = stack_base + desc.index as usize;
+                            let upval = if let Some(existing) = self
+                                .open_upvalues
+                                .iter()
+                                .find(|u| matches!(*u.borrow(), Upvalue::Open(s) if s == slot))
+                            {
+                                existing.clone()
+                            } else {
+                                let created = Rc::new(RefCell::new(Upvalue::Open(slot)));
+                                self.open_upvalues.push(created.clone());
+                                created
+                            };
+                            upvals.push(upval);
+                        } else {
+                            let parent_upval = parent_closure.upvalues[desc.index as usize].clone();
+                            upvals.push(parent_upval);
+                        }
+                    }
+                    let closure = BytecodeClosure {
+                        function: target_fn,
+                        upvalues: upvals,
+                    };
+                    self.stack.push(Value::BytecodeFunction(Rc::new(closure)));
+                }
+                Opcode::GetGlobal(name_idx) => {
+                    let name = match &self.frames[frame_idx].closure.function.chunk.constants
+                        [name_idx as usize]
                     {
-                        stack.push(Value::Builtin(*builtin));
+                        Value::String(s) => s.clone(),
+                        _ => unreachable!(),
+                    };
+                    if let Some(val) = self.globals.get(&name) {
+                        self.stack.push(val.clone());
+                    } else if let Some((_, builtin)) =
+                        builtin_catalog().iter().find(|(n, _)| *n == name.as_str())
+                    {
+                        self.stack.push(Value::Builtin(*builtin));
                     } else {
                         return Err(self.error(span, format!("Undefined variable '{name}'")));
                     }
                 }
                 Opcode::SetGlobal(name_idx) => {
-                    let name = match &chunk.constants[*name_idx as usize] {
+                    let name = match &self.frames[frame_idx].closure.function.chunk.constants
+                        [name_idx as usize]
+                    {
                         Value::String(s) => s.clone(),
                         _ => unreachable!(),
                     };
-                    let val = stack.last().cloned().unwrap_or(Value::Null);
+                    let val = self.stack.last().cloned().unwrap_or(Value::Null);
                     self.globals.insert(name, val);
                 }
                 Opcode::Add => {
-                    let right = stack.pop().unwrap();
-                    let left = stack.pop().unwrap();
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Number(a + b)),
+                        (Value::Number(a), Value::Number(b)) => {
+                            self.stack.push(Value::Number(a + b))
+                        }
                         (Value::String(a), Value::String(b)) => {
-                            stack.push(Value::String(format!("{a}{b}")));
+                            self.stack.push(Value::String(format!("{a}{b}")));
                         }
                         (Value::Vector(a), Value::Vector(b)) if a.len() == b.len() => {
                             let res = a.iter().zip(&b).map(|(x, y)| x + y).collect();
-                            stack.push(Value::Vector(res));
+                            self.stack.push(Value::Vector(res));
                         }
                         _ => return Err(self.error(span, "Invalid operands for +")),
                     }
                 }
                 Opcode::Sub => {
-                    let right = stack.pop().unwrap();
-                    let left = stack.pop().unwrap();
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Number(a - b)),
+                        (Value::Number(a), Value::Number(b)) => {
+                            self.stack.push(Value::Number(a - b))
+                        }
                         (Value::Vector(a), Value::Vector(b)) if a.len() == b.len() => {
                             let res = a.iter().zip(&b).map(|(x, y)| x - y).collect();
-                            stack.push(Value::Vector(res));
+                            self.stack.push(Value::Vector(res));
                         }
                         _ => return Err(self.error(span, "Invalid operands for -")),
                     }
                 }
                 Opcode::Mul => {
-                    let right = stack.pop().unwrap();
-                    let left = stack.pop().unwrap();
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Number(a * b)),
+                        (Value::Number(a), Value::Number(b)) => {
+                            self.stack.push(Value::Number(a * b))
+                        }
                         (Value::Vector(a), Value::Number(b)) => {
                             let res = a.iter().map(|x| x * b).collect();
-                            stack.push(Value::Vector(res));
+                            self.stack.push(Value::Vector(res));
                         }
                         (Value::Number(a), Value::Vector(b)) => {
                             let res = b.iter().map(|x| x * a).collect();
-                            stack.push(Value::Vector(res));
+                            self.stack.push(Value::Vector(res));
                         }
                         _ => return Err(self.error(span, "Invalid operands for *")),
                     }
                 }
                 Opcode::Div => {
-                    let right = stack.pop().unwrap();
-                    let left = stack.pop().unwrap();
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
                     match (left, right) {
                         (Value::Number(a), Value::Number(b)) => {
                             if b == 0.0 {
                                 return Err(self.error(span, "Division by zero"));
                             }
-                            stack.push(Value::Number(a / b));
+                            self.stack.push(Value::Number(a / b));
                         }
                         _ => return Err(self.error(span, "Invalid operands for /")),
                     }
                 }
                 Opcode::Mod => {
-                    let right = stack.pop().unwrap();
-                    let left = stack.pop().unwrap();
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
                     match (left, right) {
                         (Value::Number(a), Value::Number(b)) => {
                             if b == 0.0 {
                                 return Err(self.error(span, "Division by zero"));
                             }
-                            stack.push(Value::Number(exact_remainder(a, b)));
+                            self.stack.push(Value::Number(exact_remainder(a, b)));
                         }
                         _ => return Err(self.error(span, "Invalid operands for %")),
                     }
                 }
                 Opcode::Neg => {
-                    let val = stack.pop().unwrap();
+                    let val = self.stack.pop().unwrap();
                     match val {
-                        Value::Number(n) => stack.push(Value::Number(-n)),
+                        Value::Number(n) => self.stack.push(Value::Number(-n)),
                         Value::Vector(v) => {
                             let res = v.into_iter().map(|x| -x).collect();
-                            stack.push(Value::Vector(res));
+                            self.stack.push(Value::Vector(res));
                         }
                         _ => return Err(self.error(span, "Invalid operand for negation")),
                     }
                 }
                 Opcode::Not => {
-                    let val = stack.pop().unwrap();
-                    let truthy = is_truthy(&val);
-                    stack.push(Value::Bool(!truthy));
+                    let val = self.stack.pop().unwrap();
+                    self.stack.push(Value::Bool(!is_truthy(&val)));
                 }
                 Opcode::Equal => {
-                    let right = stack.pop().unwrap();
-                    let left = stack.pop().unwrap();
-                    stack.push(Value::Bool(left == right));
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
+                    self.stack.push(Value::Bool(left == right));
                 }
                 Opcode::NotEqual => {
-                    let right = stack.pop().unwrap();
-                    let left = stack.pop().unwrap();
-                    stack.push(Value::Bool(left != right));
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
+                    self.stack.push(Value::Bool(left != right));
                 }
                 Opcode::Less => {
-                    let right = stack.pop().unwrap();
-                    let left = stack.pop().unwrap();
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Bool(a < b)),
-                        (Value::String(a), Value::String(b)) => stack.push(Value::Bool(a < b)),
+                        (Value::Number(a), Value::Number(b)) => self.stack.push(Value::Bool(a < b)),
                         _ => return Err(self.error(span, "Invalid operands for <")),
                     }
                 }
                 Opcode::LessEqual => {
-                    let right = stack.pop().unwrap();
-                    let left = stack.pop().unwrap();
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Bool(a <= b)),
-                        (Value::String(a), Value::String(b)) => stack.push(Value::Bool(a <= b)),
+                        (Value::Number(a), Value::Number(b)) => {
+                            self.stack.push(Value::Bool(a <= b))
+                        }
                         _ => return Err(self.error(span, "Invalid operands for <=")),
                     }
                 }
                 Opcode::Greater => {
-                    let right = stack.pop().unwrap();
-                    let left = stack.pop().unwrap();
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Bool(a > b)),
-                        (Value::String(a), Value::String(b)) => stack.push(Value::Bool(a > b)),
+                        (Value::Number(a), Value::Number(b)) => self.stack.push(Value::Bool(a > b)),
                         _ => return Err(self.error(span, "Invalid operands for >")),
                     }
                 }
                 Opcode::GreaterEqual => {
-                    let right = stack.pop().unwrap();
-                    let left = stack.pop().unwrap();
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
                     match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => stack.push(Value::Bool(a >= b)),
-                        (Value::String(a), Value::String(b)) => stack.push(Value::Bool(a >= b)),
+                        (Value::Number(a), Value::Number(b)) => {
+                            self.stack.push(Value::Bool(a >= b))
+                        }
                         _ => return Err(self.error(span, "Invalid operands for >=")),
                     }
                 }
                 Opcode::Jump(target) => {
-                    ip = *target;
+                    self.frames[frame_idx].ip = target;
                 }
                 Opcode::JumpIfFalse(target) => {
-                    let val = stack.pop().unwrap();
-                    if !is_truthy(&val) {
-                        ip = *target;
+                    let cond = self.stack.pop().unwrap_or(Value::Null);
+                    if !is_truthy(&cond) {
+                        self.frames[frame_idx].ip = target;
                     }
                 }
                 Opcode::JumpIfTrue(target) => {
-                    let val = stack.pop().unwrap();
-                    if is_truthy(&val) {
-                        ip = *target;
+                    let cond = self.stack.pop().unwrap_or(Value::Null);
+                    if is_truthy(&cond) {
+                        self.frames[frame_idx].ip = target;
                     }
                 }
                 Opcode::BuildList(count) => {
-                    let start = stack.len() - *count;
-                    let items = stack.drain(start..).collect();
-                    stack.push(Value::List(items));
+                    let start = self.stack.len() - count;
+                    let items = self.stack.drain(start..).collect();
+                    self.stack.push(Value::List(items));
                 }
                 Opcode::BuildTuple(count) => {
-                    let start = stack.len() - *count;
-                    let items = stack.drain(start..).collect();
-                    stack.push(Value::Tuple(items));
+                    let start = self.stack.len() - count;
+                    let items = self.stack.drain(start..).collect();
+                    self.stack.push(Value::Tuple(items));
                 }
                 Opcode::BuildRecord(count) => {
-                    let start = stack.len() - (*count * 2);
-                    let drained: Vec<_> = stack.drain(start..).collect();
+                    let start = self.stack.len() - (count * 2);
+                    let drained: Vec<_> = self.stack.drain(start..).collect();
                     let mut fields = BTreeMap::new();
                     for chunk in drained.as_chunks::<2>().0 {
                         let key = match &chunk[0] {
@@ -870,16 +1448,16 @@ impl Vm {
                         };
                         fields.insert(key, chunk[1].clone());
                     }
-                    stack.push(Value::Record(fields));
+                    self.stack.push(Value::Record(fields));
                 }
                 Opcode::IndexGet => {
-                    let idx = stack.pop().unwrap();
-                    let obj = stack.pop().unwrap();
+                    let idx = self.stack.pop().unwrap();
+                    let obj = self.stack.pop().unwrap();
                     match (&obj, &idx) {
                         (Value::List(items), Value::Number(n)) => {
                             let i = *n as usize;
                             if *n >= 0.0 && n.fract() == 0.0 && i < items.len() {
-                                stack.push(items[i].clone());
+                                self.stack.push(items[i].clone());
                             } else {
                                 return Err(self.error(span, "Index out of bounds"));
                             }
@@ -887,14 +1465,14 @@ impl Vm {
                         (Value::Tuple(items), Value::Number(n)) => {
                             let i = *n as usize;
                             if *n >= 0.0 && n.fract() == 0.0 && i < items.len() {
-                                stack.push(items[i].clone());
+                                self.stack.push(items[i].clone());
                             } else {
                                 return Err(self.error(span, "Index out of bounds"));
                             }
                         }
                         (Value::Record(fields), Value::String(k)) => {
                             if let Some(val) = fields.get(k) {
-                                stack.push(val.clone());
+                                self.stack.push(val.clone());
                             } else {
                                 return Err(self.error(span, format!("Field '{k}' not found")));
                             }
@@ -903,10 +1481,11 @@ impl Vm {
                     }
                 }
                 Opcode::IndexSet(slot) => {
-                    let val = stack.pop().unwrap();
-                    let idx = stack.pop().unwrap();
-                    let target_slot = *slot as usize;
-                    match (&mut stack[target_slot], &idx) {
+                    let val = self.stack.pop().unwrap();
+                    let idx = self.stack.pop().unwrap();
+                    let stack_base = self.frames[frame_idx].stack_base;
+                    let target_slot = stack_base + slot as usize;
+                    match (&mut self.stack[target_slot], &idx) {
                         (Value::List(items), Value::Number(n)) => {
                             let i = *n as usize;
                             if *n >= 0.0 && n.fract() == 0.0 && i < items.len() {
@@ -922,15 +1501,17 @@ impl Vm {
                     }
                 }
                 Opcode::MemberGet(field_idx) => {
-                    let field_name = match &chunk.constants[*field_idx as usize] {
-                        Value::String(s) => s.as_str(),
+                    let field_name = match &self.frames[frame_idx].closure.function.chunk.constants
+                        [field_idx as usize]
+                    {
+                        Value::String(s) => s.clone(),
                         _ => unreachable!(),
                     };
-                    let obj = stack.pop().unwrap();
+                    let obj = self.stack.pop().unwrap();
                     match &obj {
                         Value::Record(fields) => {
-                            if let Some(val) = fields.get(field_name) {
-                                stack.push(val.clone());
+                            if let Some(val) = fields.get(&field_name) {
+                                self.stack.push(val.clone());
                             } else {
                                 return Err(
                                     self.error(span, format!("Field '{field_name}' not found"))
@@ -938,7 +1519,7 @@ impl Vm {
                             }
                         }
                         Value::Vector(v) => {
-                            let val = match field_name {
+                            let val = match field_name.as_str() {
                                 "x" if !v.is_empty() => v[0],
                                 "y" if v.len() > 1 => v[1],
                                 "z" if v.len() > 2 => v[2],
@@ -950,19 +1531,22 @@ impl Vm {
                                     ));
                                 }
                             };
-                            stack.push(Value::Number(val));
+                            self.stack.push(Value::Number(val));
                         }
                         _ => return Err(self.error(span, "Cannot access member on value")),
                     }
                 }
                 Opcode::MemberSet(slot, field_idx) => {
-                    let field_name = match &chunk.constants[*field_idx as usize] {
+                    let field_name = match &self.frames[frame_idx].closure.function.chunk.constants
+                        [field_idx as usize]
+                    {
                         Value::String(s) => s.clone(),
                         _ => unreachable!(),
                     };
-                    let val = stack.pop().unwrap();
-                    let target_slot = *slot as usize;
-                    match &mut stack[target_slot] {
+                    let val = self.stack.pop().unwrap();
+                    let stack_base = self.frames[frame_idx].stack_base;
+                    let target_slot = stack_base + slot as usize;
+                    match &mut self.stack[target_slot] {
                         Value::Record(fields) => {
                             fields.insert(field_name, val);
                         }
@@ -970,33 +1554,82 @@ impl Vm {
                     }
                 }
                 Opcode::Interpolate(count) => {
-                    let start = stack.len() - *count;
-                    let parts: Vec<_> = stack.drain(start..).collect();
+                    let start = self.stack.len() - count;
+                    let parts: Vec<_> = self.stack.drain(start..).collect();
                     let mut out = String::new();
                     for part in parts {
                         format_value_for_display(&part, &mut out, 0);
                     }
-                    stack.push(Value::String(out));
+                    self.stack.push(Value::String(out));
                 }
                 Opcode::Call(arg_count) => {
-                    let start = stack.len() - *arg_count;
-                    let args: Vec<_> = stack.drain(start..).collect();
-                    let callee = stack.pop().unwrap();
+                    let callee_idx = self.stack.len() - arg_count - 1;
+                    let callee = self.stack[callee_idx].clone();
                     match callee {
                         Value::Builtin(b) => {
-                            let result = self.call_builtin(b, &args, span)?;
-                            stack.push(result);
+                            let args: Vec<_> = self.stack.drain(callee_idx + 1..).collect();
+                            self.stack.pop(); // pop callee
+                            let res = self.call_builtin(b, &args, span)?;
+                            self.stack.push(res);
+                        }
+                        Value::BytecodeFunction(target_closure) => {
+                            if arg_count != target_closure.function.arity {
+                                return Err(self.error(
+                                    span,
+                                    format!(
+                                        "Argument count mismatch: expected {}, got {}",
+                                        target_closure.function.arity, arg_count
+                                    ),
+                                ));
+                            }
+                            if self.frames.len() >= 512 {
+                                return Err(self.error(span, "Call stack overflow"));
+                            }
+                            let stack_base = callee_idx + 1;
+                            let needed = stack_base + target_closure.function.chunk.local_count;
+                            if self.stack.len() < needed {
+                                self.stack.resize(needed, Value::Null);
+                            }
+                            self.frames.push(CallFrame {
+                                closure: target_closure,
+                                ip: 0,
+                                stack_base,
+                            });
                         }
                         _ => return Err(self.error(span, "Value is not callable")),
                     }
                 }
                 Opcode::Return => {
-                    return Ok(stack.pop().unwrap_or(Value::Null));
+                    let ret_val = self.stack.pop().unwrap_or(Value::Null);
+                    let exiting = self.frames.pop().unwrap();
+                    self.close_upvalues(exiting.stack_base);
+                    if self.frames.is_empty() {
+                        return Ok(ret_val);
+                    }
+                    if exiting.stack_base > 0 {
+                        self.stack.truncate(exiting.stack_base - 1);
+                    } else {
+                        self.stack.clear();
+                    }
+                    self.stack.push(ret_val);
                 }
             }
         }
 
-        Ok(stack.pop().unwrap_or(Value::Null))
+        Ok(self.stack.pop().unwrap_or(Value::Null))
+    }
+
+    pub fn invoke_callable(
+        &mut self,
+        callable: &Value<'static>,
+        args: &[Value<'static>],
+        span: Span,
+    ) -> Result<Value<'static>, RuntimeError> {
+        match callable {
+            Value::BytecodeFunction(closure) => self.run_closure(closure, args),
+            Value::Builtin(b) => self.call_builtin(*b, args, span),
+            _ => Err(self.error(span, "Value is not callable")),
+        }
     }
 
     fn call_builtin(
@@ -1112,6 +1745,52 @@ impl Vm {
                 }
                 Ok(Value::String(out))
             }
+            Builtin::Map => {
+                if args.len() != 2 {
+                    return Err(self.error(span, "map requires 2 arguments"));
+                }
+                let (Value::List(items), callback) = (&args[0], &args[1]) else {
+                    return Err(self.error(span, "map requires a list and a callback"));
+                };
+                let mut output = Vec::with_capacity(items.len());
+                for item in items {
+                    let res = self.invoke_callable(callback, std::slice::from_ref(item), span)?;
+                    output.push(res);
+                }
+                Ok(Value::List(output))
+            }
+            Builtin::Filter => {
+                if args.len() != 2 {
+                    return Err(self.error(span, "filter requires 2 arguments"));
+                }
+                let (Value::List(items), callback) = (&args[0], &args[1]) else {
+                    return Err(self.error(span, "filter requires a list and a callback"));
+                };
+                let mut output = Vec::new();
+                for item in items {
+                    let res = self.invoke_callable(callback, std::slice::from_ref(item), span)?;
+                    if is_truthy(&res) {
+                        output.push(item.clone());
+                    }
+                }
+                Ok(Value::List(output))
+            }
+            Builtin::Fold => {
+                if args.len() != 3 {
+                    return Err(self.error(span, "fold requires 3 arguments"));
+                }
+                let (Value::List(items), initial, callback) = (&args[0], &args[1], &args[2]) else {
+                    return Err(self.error(
+                        span,
+                        "fold requires a list, an initial value and a callback",
+                    ));
+                };
+                let mut acc = initial.clone();
+                for item in items {
+                    acc = self.invoke_callable(callback, &[acc, item.clone()], span)?;
+                }
+                Ok(acc)
+            }
             Builtin::Len => {
                 let Some(arg) = args.first() else {
                     return Err(self.error(span, "len requires 1 argument"));
@@ -1178,6 +1857,15 @@ impl Vm {
                     Err(e) => Err(self.error(span, format!("json_stringify failed: {e}"))),
                 }
             }
+            Builtin::Sqrt => {
+                let Some(Value::Number(n)) = args.first() else {
+                    return Err(self.error(span, "sqrt requires a number"));
+                };
+                if *n < 0.0 {
+                    return Err(self.error(span, "sqrt requires a non-negative number"));
+                }
+                Ok(Value::Number(n.sqrt()))
+            }
             Builtin::Sin => {
                 let Some(Value::Number(n)) = args.first() else {
                     return Err(self.error(span, "sin requires a number"));
@@ -1189,24 +1877,6 @@ impl Vm {
                     return Err(self.error(span, "cos requires a number"));
                 };
                 Ok(Value::Number(n.cos()))
-            }
-            Builtin::Sqrt => {
-                let Some(Value::Number(n)) = args.first() else {
-                    return Err(self.error(span, "sqrt requires a number"));
-                };
-                Ok(Value::Number(n.sqrt()))
-            }
-            Builtin::Degrees => {
-                let Some(Value::Number(n)) = args.first() else {
-                    return Err(self.error(span, "degrees requires a number"));
-                };
-                Ok(Value::Number(n.to_degrees()))
-            }
-            Builtin::Radians | Builtin::Deg => {
-                let Some(Value::Number(n)) = args.first() else {
-                    return Err(self.error(span, "radians requires a number"));
-                };
-                Ok(Value::Number(n.to_radians()))
             }
             Builtin::Vec2 => {
                 if args.len() != 2 {

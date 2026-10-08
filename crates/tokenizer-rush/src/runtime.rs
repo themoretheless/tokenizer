@@ -184,6 +184,7 @@ pub enum Value<'s> {
     List(Vec<Value<'s>>),
     Tuple(Vec<Value<'s>>),
     Function(Rc<Closure<'s>>),
+    BytecodeFunction(Rc<crate::bytecode::BytecodeClosure>),
     Builtin(Builtin),
     Host(Rc<HostFunction>),
 }
@@ -230,6 +231,51 @@ impl<'s> Value<'s> {
             source: SequenceSource::Host(HostSource { factory, item_type }),
             stages: SequenceStages::default(),
         }))
+    }
+
+    /// Try to convert to an owned static value if all inner parts can be static.
+    pub fn to_static(&self) -> Option<Value<'static>> {
+        match self {
+            Value::Null => Some(Value::Null),
+            Value::Bool(b) => Some(Value::Bool(*b)),
+            Value::Number(n) => Some(Value::Number(*n)),
+            Value::Angle(a) => Some(Value::Angle(*a)),
+            Value::String(s) => Some(Value::String(s.clone())),
+            Value::Vector(v) => Some(Value::Vector(v.clone())),
+            Value::Matrix(m) => Some(Value::Matrix(m.clone())),
+            Value::Quaternion(q) => Some(Value::Quaternion(q.clone())),
+            Value::Mesh(m) => Some(Value::Mesh(m.clone())),
+            Value::Polygon(p) => Some(Value::Polygon(p.clone())),
+            Value::Range { start, end, step } => Some(Value::Range {
+                start: *start,
+                end: *end,
+                step: *step,
+            }),
+            Value::List(items) => {
+                let static_items: Option<Vec<_>> = items.iter().map(|it| it.to_static()).collect();
+                static_items.map(Value::List)
+            }
+            Value::Tuple(items) => {
+                let static_items: Option<Vec<_>> = items.iter().map(|it| it.to_static()).collect();
+                static_items.map(Value::Tuple)
+            }
+            Value::Record(fields) => {
+                let mut static_fields = BTreeMap::new();
+                for (k, v) in fields {
+                    static_fields.insert(k.clone(), v.to_static()?);
+                }
+                Some(Value::Record(static_fields))
+            }
+            Value::Variant(tag, items) => {
+                let static_items: Option<Vec<_>> = items.iter().map(|it| it.to_static()).collect();
+                static_items.map(|its| Value::Variant(tag, its))
+            }
+            Value::Builtin(b) => Some(Value::Builtin(*b)),
+            Value::Host(h) => Some(Value::Host(h.clone())),
+            Value::HostObject(o) => Some(Value::HostObject(o.clone())),
+            Value::BytecodeFunction(f) => Some(Value::BytecodeFunction(f.clone())),
+            _ => None,
+        }
     }
 }
 
@@ -349,6 +395,13 @@ pub(crate) fn format_value_for_display(value: &Value<'_>, out: &mut String, dept
         }
         Value::Function(f) => {
             if let Some(name) = f.name() {
+                let _ = write!(out, "<function {}>", name);
+            } else {
+                out.push_str("<function>");
+            }
+        }
+        Value::BytecodeFunction(f) => {
+            if let Some(name) = f.function.name.as_deref() {
                 let _ = write!(out, "<function {}>", name);
             } else {
                 out.push_str("<function>");
@@ -856,6 +909,9 @@ impl ValueType {
                         .zip(parameters)
                         .all(|(actual, expected)| actual.as_ref() == Some(expected))
                     && function.result_type.as_ref() == Some(result.as_ref())
+            }
+            (Self::Function(parameters, _), Value::BytecodeFunction(function)) => {
+                function.function.arity == parameters.len()
             }
             (Self::Function(parameters, result), Value::Host(function)) => {
                 &function.parameters == parameters && &function.result == result.as_ref()
@@ -2474,12 +2530,20 @@ impl<'s> Runtime<'_, 's> {
             self.charge(1, span)?;
             match (left, right) {
                 (
-                    Value::Sequence(_) | Value::Function(_) | Value::Host(_) | Value::Builtin(_),
+                    Value::Sequence(_)
+                    | Value::Function(_)
+                    | Value::BytecodeFunction(_)
+                    | Value::Host(_)
+                    | Value::Builtin(_),
                     _,
                 )
                 | (
                     _,
-                    Value::Sequence(_) | Value::Function(_) | Value::Host(_) | Value::Builtin(_),
+                    Value::Sequence(_)
+                    | Value::Function(_)
+                    | Value::BytecodeFunction(_)
+                    | Value::Host(_)
+                    | Value::Builtin(_),
                 ) => {
                     return self.error(span, "Functions and lazy sequences cannot be compared");
                 }
@@ -3991,18 +4055,36 @@ impl<'s> Runtime<'_, 's> {
         // Capture only borrowed/copyable labels on the successful path. Stack
         // strings and source coordinates are needed only when a call fails.
         let (name, builtin) = match &function {
-            Value::Function(f) => (f.name.unwrap_or("<lambda>"), None),
-            Value::Host(f) => (f.name, None),
-            Value::Builtin(b) => ("", Some(*b)),
-            _ => ("<non-callable>", None),
+            Value::Function(f) => (f.name.unwrap_or("<lambda>").to_owned(), None),
+            Value::BytecodeFunction(f) => (
+                f.function.name.as_deref().unwrap_or("<lambda>").to_owned(),
+                None,
+            ),
+            Value::Host(f) => (f.name.to_owned(), None),
+            Value::Builtin(b) => (String::new(), Some(*b)),
+            _ => ("<non-callable>".to_owned(), None),
         };
         let module = self.module;
         let result = match function {
             Value::Function(function) => self.call_user(function, arguments, span),
+            Value::BytecodeFunction(closure) => {
+                let mut vm = crate::bytecode::Vm::new(self.remaining);
+                let static_args: Vec<_> = arguments.iter().filter_map(|a| a.to_static()).collect();
+                if static_args.len() != arguments.len() {
+                    return self.error(span, "Non-static arguments in bytecode call");
+                }
+                match vm.run_closure(&closure, &static_args) {
+                    Ok(val) => {
+                        self.remaining = vm.fuel();
+                        Ok(val)
+                    }
+                    Err(e) => self.error(span, &e.message),
+                }
+            }
             other => self.call_inner(other, arguments, span),
         };
         result.map_err(|error| {
-            let name = builtin.map_or_else(|| name.to_owned(), |b| format!("{b:?}"));
+            let name = builtin.map_or(name, |b| format!("{b:?}"));
             self.call_error(error, name, module, span)
         })
     }
@@ -4072,6 +4154,9 @@ impl<'s> Runtime<'_, 's> {
             for &(index, expected) in builtin.callback_arities() {
                 let valid = match arguments.get(index) {
                     Some(Value::Function(function)) => Some(function.parameters.len() == expected),
+                    Some(Value::BytecodeFunction(function)) => {
+                        Some(function.function.arity == expected)
+                    }
                     Some(Value::Host(function)) => Some(function.parameters.len() == expected),
                     Some(Value::Builtin(function)) => Some(function.arity().contains(&expected)),
                     _ => None,
@@ -4126,7 +4211,10 @@ impl<'s> Runtime<'_, 's> {
                 };
                 if !matches!(
                     callback,
-                    Value::Function(_) | Value::Builtin(_) | Value::Host(_)
+                    Value::Function(_)
+                        | Value::BytecodeFunction(_)
+                        | Value::Builtin(_)
+                        | Value::Host(_)
                 ) {
                     return self.error(span, "Callback must be callable");
                 }
@@ -4160,7 +4248,10 @@ impl<'s> Runtime<'_, 's> {
                 let mut cursor = self.sequence_cursor(source.clone(), span)?;
                 if !matches!(
                     callback,
-                    Value::Function(_) | Value::Builtin(_) | Value::Host(_)
+                    Value::Function(_)
+                        | Value::BytecodeFunction(_)
+                        | Value::Builtin(_)
+                        | Value::Host(_)
                 ) {
                     return self.error(span, "Predicate must be callable");
                 }
@@ -4746,14 +4837,23 @@ impl<'s> Runtime<'_, 's> {
                 let callback = arguments.next().unwrap();
                 if !matches!(
                     callback,
-                    Value::Function(_) | Value::Builtin(_) | Value::Host(_)
+                    Value::Function(_)
+                        | Value::BytecodeFunction(_)
+                        | Value::Builtin(_)
+                        | Value::Host(_)
                 ) {
                     return self.error(span, "Callback must be callable");
                 }
                 let initial = arguments.next().unwrap_or(Value::Null);
                 let reducer = arguments.next();
                 if reducer.as_ref().is_some_and(|f| {
-                    !matches!(f, Value::Function(_) | Value::Builtin(_) | Value::Host(_))
+                    !matches!(
+                        f,
+                        Value::Function(_)
+                            | Value::BytecodeFunction(_)
+                            | Value::Builtin(_)
+                            | Value::Host(_)
+                    )
                 }) {
                     return self.error(span, "Reducer must be callable");
                 }
@@ -4829,7 +4929,10 @@ impl<'s> Runtime<'_, 's> {
             let callback = arguments.next().unwrap();
             if !matches!(
                 callback,
-                Value::Function(_) | Value::Builtin(_) | Value::Host(_)
+                Value::Function(_)
+                    | Value::BytecodeFunction(_)
+                    | Value::Builtin(_)
+                    | Value::Host(_)
             ) {
                 return self.error(span, "Callback must be callable");
             }

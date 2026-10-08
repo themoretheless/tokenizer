@@ -330,6 +330,9 @@ impl Usage {
                     self.environment(&f.environment);
                 }
             }
+            Value::BytecodeFunction(f) if self.seen.insert((20, Rc::as_ptr(f) as usize)) => {
+                self.add(std::mem::size_of::<crate::bytecode::BytecodeClosure>());
+            }
             Value::Sequence(sequence) if self.seen.insert((3, Rc::as_ptr(sequence) as usize)) => {
                 self.add(std::mem::size_of::<Sequence<'_>>());
                 if let SequenceSource::List(list) = &sequence.source
@@ -503,6 +506,7 @@ pub(super) fn owned_value(value: Value<'_>) -> std::result::Result<Value<'static
         ),
         Value::Host(v) => Value::Host(v),
         Value::Builtin(v) => Value::Builtin(v),
+        Value::BytecodeFunction(v) => Value::BytecodeFunction(v),
         Value::Function(_) | Value::Sequence(_) => {
             return Err("Borrowed callable or lazy sequence result requires with_instance".into());
         }
