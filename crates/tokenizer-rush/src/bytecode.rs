@@ -8,7 +8,7 @@
 use crate::{
     Builtin, Expr, ExprKind, InterpolationPart, RuntimeError, Stmt, StmtKind, Value,
     builtin_catalog,
-    runtime::{exact_remainder, format_value_for_display},
+    runtime::{UserData, exact_remainder, format_value_for_display},
 };
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -142,6 +142,32 @@ pub enum Opcode {
     Interpolate(usize),
     /// Call callee with N arguments.
     Call(usize),
+    /// Check if top of stack is a tuple with exact arity (pops tuple, pushes bool).
+    CheckTuple(usize),
+    /// Assert top of stack is a tuple with exact arity (pops tuple, errors if invalid).
+    AssertTuple(usize),
+    /// Extract element from tuple on top of stack (pops tuple, pushes element).
+    TupleGet(u32),
+    /// Check if top of stack is a record or struct (pops value, pushes bool).
+    CheckRecord,
+    /// Assert top of stack is a record or struct (pops value, errors if invalid).
+    AssertRecord,
+    /// Check if record on top of stack has given field (pops record, pushes bool).
+    CheckRecordField(u32),
+    /// Extract field from record on top of stack (pops record, pushes field, errors if missing).
+    RecordGetAssert(u32),
+    /// Check if top of stack is a variant with tag and arity (pops variant, pushes bool).
+    CheckVariant(u32, usize),
+    /// Extract payload item from variant on top of stack (pops variant, pushes item).
+    VariantGet(u32),
+    /// Raise runtime error "No matching pattern".
+    MatchError,
+    /// Construct UserData instance with type_name, optional variant and arguments.
+    MakeUserData {
+        type_name_idx: u32,
+        variant_idx: Option<u32>,
+        arity: usize,
+    },
     /// Return from execution.
     Return,
 }
@@ -282,6 +308,20 @@ impl CompilerState {
             scope.insert(name.to_string(), slot);
         }
         slot
+    }
+
+    fn declare_temp_local(&mut self) -> u32 {
+        let slot = self.local_count;
+        self.local_count += 1;
+        slot
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scopes.pop();
     }
 
     fn add_upvalue(&mut self, desc: UpvalueDescriptor) -> u32 {
@@ -536,6 +576,120 @@ impl<'s> Compiler<'s> {
                     self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
                 self.current().chunk.emit(Opcode::Return, stmt.span);
+            }
+            StmtKind::Destructure { pattern, value } => {
+                self.compile_expr(value)?;
+                let val_slot = self.current().declare_temp_local();
+                self.current()
+                    .chunk
+                    .emit(Opcode::SetLocal(val_slot), stmt.span);
+                self.current().chunk.emit(Opcode::Pop, stmt.span);
+                self.compile_destructure_binding(pattern, val_slot, stmt.span)?;
+                if keep_result {
+                    self.current().chunk.emit(Opcode::Null, stmt.span);
+                }
+            }
+            StmtKind::Struct { name, .. } => {
+                let slot = self.current().declare_local(name.text);
+                let type_name_idx = self
+                    .current()
+                    .chunk
+                    .add_constant(Value::String(name.text.to_string()));
+                let mut ctor_chunk = Chunk::new();
+                let ctor_type_idx = ctor_chunk.add_constant(Value::String(name.text.to_string()));
+                ctor_chunk.emit(Opcode::GetLocal(0), stmt.span);
+                ctor_chunk.emit(
+                    Opcode::MakeUserData {
+                        type_name_idx: ctor_type_idx,
+                        variant_idx: None,
+                        arity: 1,
+                    },
+                    stmt.span,
+                );
+                ctor_chunk.emit(Opcode::Return, stmt.span);
+                ctor_chunk.local_count = 1;
+                let ctor_fn = Rc::new(BytecodeFunction {
+                    name: Some(format!("{}::constructor", name.text)),
+                    arity: 1,
+                    chunk: ctor_chunk,
+                    upvalue_descriptors: Vec::new(),
+                });
+                let fn_idx = self.current().chunk.add_function(ctor_fn);
+                self.current()
+                    .chunk
+                    .emit(Opcode::MakeClosure(fn_idx), stmt.span);
+                if self.is_module_level() {
+                    self.current()
+                        .chunk
+                        .emit(Opcode::SetGlobal(type_name_idx), stmt.span);
+                }
+                self.current().chunk.emit(Opcode::SetLocal(slot), stmt.span);
+                self.current().chunk.emit(Opcode::Pop, stmt.span);
+                if keep_result {
+                    self.current().chunk.emit(Opcode::Null, stmt.span);
+                }
+            }
+            StmtKind::Enum { name, variants } => {
+                let slot = self.current().declare_local(name.text);
+                let type_name_idx = self
+                    .current()
+                    .chunk
+                    .add_constant(Value::String(name.text.to_string()));
+
+                for (var_name, var_types) in variants {
+                    let var_const_idx = self
+                        .current()
+                        .chunk
+                        .add_constant(Value::String(var_name.text.to_string()));
+                    self.current()
+                        .chunk
+                        .emit(Opcode::Constant(var_const_idx), var_name.span);
+
+                    let arity = var_types.len();
+                    let mut ctor_chunk = Chunk::new();
+                    let ctor_type_idx =
+                        ctor_chunk.add_constant(Value::String(name.text.to_string()));
+                    let ctor_var_idx =
+                        ctor_chunk.add_constant(Value::String(var_name.text.to_string()));
+                    for i in 0..arity {
+                        ctor_chunk.emit(Opcode::GetLocal(i as u32), var_name.span);
+                    }
+                    ctor_chunk.emit(
+                        Opcode::MakeUserData {
+                            type_name_idx: ctor_type_idx,
+                            variant_idx: Some(ctor_var_idx),
+                            arity,
+                        },
+                        var_name.span,
+                    );
+                    ctor_chunk.emit(Opcode::Return, var_name.span);
+                    ctor_chunk.local_count = arity;
+                    let ctor_fn = Rc::new(BytecodeFunction {
+                        name: Some(format!("{}::{}", name.text, var_name.text)),
+                        arity,
+                        chunk: ctor_chunk,
+                        upvalue_descriptors: Vec::new(),
+                    });
+                    let fn_idx = self.current().chunk.add_function(ctor_fn);
+                    self.current()
+                        .chunk
+                        .emit(Opcode::MakeClosure(fn_idx), var_name.span);
+                }
+
+                self.current()
+                    .chunk
+                    .emit(Opcode::BuildRecord(variants.len()), stmt.span);
+
+                if self.is_module_level() {
+                    self.current()
+                        .chunk
+                        .emit(Opcode::SetGlobal(type_name_idx), stmt.span);
+                }
+                self.current().chunk.emit(Opcode::SetLocal(slot), stmt.span);
+                self.current().chunk.emit(Opcode::Pop, stmt.span);
+                if keep_result {
+                    self.current().chunk.emit(Opcode::Null, stmt.span);
+                }
             }
             StmtKind::Expr(expr) => {
                 self.compile_expr(expr)?;
@@ -919,11 +1073,250 @@ impl<'s> Compiler<'s> {
                     .chunk
                     .emit(Opcode::Interpolate(parts.len()), span);
             }
+            ExprKind::Match { value, arms } => {
+                self.compile_expr(value)?;
+                let val_slot = self.current().declare_temp_local();
+                self.current().chunk.emit(Opcode::SetLocal(val_slot), span);
+                self.current().chunk.emit(Opcode::Pop, span);
+
+                let mut match_end_jumps = Vec::new();
+
+                for arm in arms {
+                    self.current().push_scope();
+                    let mut fail_jumps = Vec::new();
+                    self.compile_pattern_match(&arm.pattern, val_slot, &mut fail_jumps)?;
+
+                    if let Some(guard) = &arm.guard {
+                        self.compile_expr(guard)?;
+                        let guard_jmp = self
+                            .current()
+                            .chunk
+                            .emit(Opcode::JumpIfFalse(0), guard.span);
+                        fail_jumps.push(guard_jmp);
+                    }
+
+                    self.compile_expr(&arm.value)?;
+                    let end_jmp = self.current().chunk.emit(Opcode::Jump(0), arm.span);
+                    match_end_jumps.push(end_jmp);
+
+                    let next_arm_target = self.current().chunk.code.len();
+                    for fj in fail_jumps {
+                        self.current().chunk.patch_jump(fj, next_arm_target);
+                    }
+                    self.current().pop_scope();
+                }
+
+                self.current().chunk.emit(Opcode::MatchError, span);
+                let end_target = self.current().chunk.code.len();
+                for ej in match_end_jumps {
+                    self.current().chunk.patch_jump(ej, end_target);
+                }
+            }
             _ => {
                 return Err(self.error(span, "Expression not supported in bytecode compilation"));
             }
         }
         Ok(())
+    }
+
+    fn compile_pattern_match(
+        &mut self,
+        pattern: &Expr<'s>,
+        target_slot: u32,
+        fail_jumps: &mut Vec<usize>,
+    ) -> Result<(), RuntimeError> {
+        let span = pattern.span;
+        match &pattern.kind {
+            ExprKind::Name(name) => {
+                if name.text != "_" {
+                    let slot = self.current().declare_local(name.text);
+                    self.current()
+                        .chunk
+                        .emit(Opcode::GetLocal(target_slot), span);
+                    self.current().chunk.emit(Opcode::SetLocal(slot), span);
+                    self.current().chunk.emit(Opcode::Pop, span);
+                }
+            }
+            ExprKind::Tuple(patterns) => {
+                self.current()
+                    .chunk
+                    .emit(Opcode::GetLocal(target_slot), span);
+                self.current()
+                    .chunk
+                    .emit(Opcode::CheckTuple(patterns.len()), span);
+                let jmp = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
+                fail_jumps.push(jmp);
+                for (i, subpattern) in patterns.iter().enumerate() {
+                    self.current()
+                        .chunk
+                        .emit(Opcode::GetLocal(target_slot), span);
+                    self.current().chunk.emit(Opcode::TupleGet(i as u32), span);
+                    let elem_slot = self.current().declare_temp_local();
+                    self.current().chunk.emit(Opcode::SetLocal(elem_slot), span);
+                    self.current().chunk.emit(Opcode::Pop, span);
+                    self.compile_pattern_match(subpattern, elem_slot, fail_jumps)?;
+                }
+            }
+            ExprKind::Map(entries) => {
+                self.current()
+                    .chunk
+                    .emit(Opcode::GetLocal(target_slot), span);
+                self.current().chunk.emit(Opcode::CheckRecord, span);
+                let jmp = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
+                fail_jumps.push(jmp);
+                for (key, subpattern) in entries {
+                    let ExprKind::Name(field_name) = &key.kind else {
+                        return Err(self.error(key.span, "Record pattern keys must be names"));
+                    };
+                    let field_idx = self
+                        .current()
+                        .chunk
+                        .add_constant(Value::String(field_name.text.to_string()));
+                    self.current()
+                        .chunk
+                        .emit(Opcode::GetLocal(target_slot), span);
+                    self.current()
+                        .chunk
+                        .emit(Opcode::CheckRecordField(field_idx), span);
+                    let jmp = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
+                    fail_jumps.push(jmp);
+                    self.current()
+                        .chunk
+                        .emit(Opcode::GetLocal(target_slot), span);
+                    self.current()
+                        .chunk
+                        .emit(Opcode::RecordGetAssert(field_idx), span);
+                    let field_slot = self.current().declare_temp_local();
+                    self.current()
+                        .chunk
+                        .emit(Opcode::SetLocal(field_slot), span);
+                    self.current().chunk.emit(Opcode::Pop, span);
+                    self.compile_pattern_match(subpattern, field_slot, fail_jumps)?;
+                }
+            }
+            ExprKind::Call { callee, arguments } => {
+                let Some(tag) = extract_callee_tag(callee) else {
+                    return Err(self.error(callee.span, "Invalid variant pattern"));
+                };
+                let tag_idx = self.current().chunk.add_constant(Value::String(tag));
+                self.current()
+                    .chunk
+                    .emit(Opcode::GetLocal(target_slot), span);
+                self.current()
+                    .chunk
+                    .emit(Opcode::CheckVariant(tag_idx, arguments.len()), span);
+                let jmp = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
+                fail_jumps.push(jmp);
+                for (i, arg_pattern) in arguments.iter().enumerate() {
+                    self.current()
+                        .chunk
+                        .emit(Opcode::GetLocal(target_slot), span);
+                    self.current()
+                        .chunk
+                        .emit(Opcode::VariantGet(i as u32), span);
+                    let payload_slot = self.current().declare_temp_local();
+                    self.current()
+                        .chunk
+                        .emit(Opcode::SetLocal(payload_slot), span);
+                    self.current().chunk.emit(Opcode::Pop, span);
+                    self.compile_pattern_match(arg_pattern, payload_slot, fail_jumps)?;
+                }
+            }
+            _ => {
+                self.current()
+                    .chunk
+                    .emit(Opcode::GetLocal(target_slot), span);
+                self.compile_expr(pattern)?;
+                self.current().chunk.emit(Opcode::Equal, span);
+                let jmp = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
+                fail_jumps.push(jmp);
+            }
+        }
+        Ok(())
+    }
+
+    fn compile_destructure_binding(
+        &mut self,
+        pattern: &Expr<'s>,
+        target_slot: u32,
+        span: Span,
+    ) -> Result<(), RuntimeError> {
+        match &pattern.kind {
+            ExprKind::Name(name) => {
+                if name.text != "_" {
+                    let slot = self.current().declare_local(name.text);
+                    self.current()
+                        .chunk
+                        .emit(Opcode::GetLocal(target_slot), span);
+                    if self.is_module_level() {
+                        let name_idx = self
+                            .current()
+                            .chunk
+                            .add_constant(Value::String(name.text.to_string()));
+                        self.current().chunk.emit(Opcode::SetGlobal(name_idx), span);
+                    }
+                    self.current().chunk.emit(Opcode::SetLocal(slot), span);
+                    self.current().chunk.emit(Opcode::Pop, span);
+                }
+            }
+            ExprKind::Tuple(items) => {
+                self.current()
+                    .chunk
+                    .emit(Opcode::GetLocal(target_slot), span);
+                self.current()
+                    .chunk
+                    .emit(Opcode::AssertTuple(items.len()), span);
+                for (i, item) in items.iter().enumerate() {
+                    self.current()
+                        .chunk
+                        .emit(Opcode::GetLocal(target_slot), span);
+                    self.current().chunk.emit(Opcode::TupleGet(i as u32), span);
+                    let elem_slot = self.current().declare_temp_local();
+                    self.current().chunk.emit(Opcode::SetLocal(elem_slot), span);
+                    self.current().chunk.emit(Opcode::Pop, span);
+                    self.compile_destructure_binding(item, elem_slot, span)?;
+                }
+            }
+            ExprKind::Map(entries) => {
+                self.current()
+                    .chunk
+                    .emit(Opcode::GetLocal(target_slot), span);
+                self.current().chunk.emit(Opcode::AssertRecord, span);
+                for (key, subpattern) in entries {
+                    let ExprKind::Name(field_name) = &key.kind else {
+                        return Err(self.error(key.span, "Record pattern keys must be names"));
+                    };
+                    let field_idx = self
+                        .current()
+                        .chunk
+                        .add_constant(Value::String(field_name.text.to_string()));
+                    self.current()
+                        .chunk
+                        .emit(Opcode::GetLocal(target_slot), span);
+                    self.current()
+                        .chunk
+                        .emit(Opcode::RecordGetAssert(field_idx), span);
+                    let field_slot = self.current().declare_temp_local();
+                    self.current()
+                        .chunk
+                        .emit(Opcode::SetLocal(field_slot), span);
+                    self.current().chunk.emit(Opcode::Pop, span);
+                    self.compile_destructure_binding(subpattern, field_slot, span)?;
+                }
+            }
+            _ => {
+                return Err(self.error(pattern.span, "Unsupported destructuring pattern"));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn extract_callee_tag(expr: &Expr<'_>) -> Option<String> {
+    match &expr.kind {
+        ExprKind::Name(n) => Some(n.text.to_string()),
+        ExprKind::Member { field, .. } => Some(field.text.to_string()),
+        _ => None,
     }
 }
 
@@ -1599,6 +1992,160 @@ impl Vm {
                         _ => return Err(self.error(span, "Value is not callable")),
                     }
                 }
+                Opcode::CheckTuple(expected_len) => {
+                    let val = self.stack.pop().unwrap();
+                    let matches = match val {
+                        Value::Tuple(items) => items.len() == expected_len,
+                        _ => false,
+                    };
+                    self.stack.push(Value::Bool(matches));
+                }
+                Opcode::AssertTuple(expected_len) => {
+                    let val = self.stack.pop().unwrap();
+                    match val {
+                        Value::Tuple(items) if items.len() == expected_len => {}
+                        _ => return Err(self.error(span, "Value does not match binding pattern")),
+                    }
+                }
+                Opcode::TupleGet(idx) => {
+                    let val = self.stack.pop().unwrap();
+                    match val {
+                        Value::Tuple(items) => {
+                            let item = items.get(idx as usize).cloned().unwrap_or(Value::Null);
+                            self.stack.push(item);
+                        }
+                        _ => return Err(self.error(span, "Expected tuple")),
+                    }
+                }
+                Opcode::CheckRecord => {
+                    let val = self.stack.pop().unwrap();
+                    let matches = match &val {
+                        Value::Record(_) => true,
+                        Value::UserData(data) if data.variant.is_none() => {
+                            matches!(data.values.first(), Some(Value::Record(_)))
+                        }
+                        _ => false,
+                    };
+                    self.stack.push(Value::Bool(matches));
+                }
+                Opcode::AssertRecord => {
+                    let val = self.stack.pop().unwrap();
+                    match &val {
+                        Value::Record(_) => {}
+                        Value::UserData(data)
+                            if data.variant.is_none()
+                                && matches!(data.values.first(), Some(Value::Record(_))) => {}
+                        _ => return Err(self.error(span, "Value does not match binding pattern")),
+                    }
+                }
+                Opcode::CheckRecordField(field_idx) => {
+                    let field_name = match &self.frames[frame_idx].closure.function.chunk.constants
+                        [field_idx as usize]
+                    {
+                        Value::String(s) => s.as_str(),
+                        _ => unreachable!(),
+                    };
+                    let val = self.stack.pop().unwrap();
+                    let contains = match &val {
+                        Value::Record(fields) => fields.contains_key(field_name),
+                        Value::UserData(data) if data.variant.is_none() => {
+                            if let Some(Value::Record(fields)) = data.values.first() {
+                                fields.contains_key(field_name)
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
+                    };
+                    self.stack.push(Value::Bool(contains));
+                }
+                Opcode::RecordGetAssert(field_idx) => {
+                    let field_name = match &self.frames[frame_idx].closure.function.chunk.constants
+                        [field_idx as usize]
+                    {
+                        Value::String(s) => s.clone(),
+                        _ => unreachable!(),
+                    };
+                    let val = self.stack.pop().unwrap();
+                    let found = match &val {
+                        Value::Record(fields) => fields.get(&field_name).cloned(),
+                        Value::UserData(data) if data.variant.is_none() => {
+                            if let Some(Value::Record(fields)) = data.values.first() {
+                                fields.get(&field_name).cloned()
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+                    match found {
+                        Some(v) => self.stack.push(v),
+                        None => return Err(self.error(span, "Missing record pattern field")),
+                    }
+                }
+                Opcode::CheckVariant(tag_idx, expected_arity) => {
+                    let tag = match &self.frames[frame_idx].closure.function.chunk.constants
+                        [tag_idx as usize]
+                    {
+                        Value::String(s) => s.as_str(),
+                        _ => unreachable!(),
+                    };
+                    let val = self.stack.pop().unwrap();
+                    let matches = match &val {
+                        Value::Variant(t, items) => *t == tag && items.len() == expected_arity,
+                        Value::UserData(data) => {
+                            let variant_matches = data.variant.as_deref() == Some(tag)
+                                || (data.variant.is_none() && data.type_name.as_str() == tag);
+                            variant_matches && data.values.len() == expected_arity
+                        }
+                        _ => false,
+                    };
+                    self.stack.push(Value::Bool(matches));
+                }
+                Opcode::VariantGet(idx) => {
+                    let val = self.stack.pop().unwrap();
+                    let item = match &val {
+                        Value::Variant(_, items) => {
+                            items.get(idx as usize).cloned().unwrap_or(Value::Null)
+                        }
+                        Value::UserData(data) => data
+                            .values
+                            .get(idx as usize)
+                            .cloned()
+                            .unwrap_or(Value::Null),
+                        _ => return Err(self.error(span, "Expected variant")),
+                    };
+                    self.stack.push(item);
+                }
+                Opcode::MatchError => {
+                    return Err(self.error(span, "No matching pattern"));
+                }
+                Opcode::MakeUserData {
+                    type_name_idx,
+                    variant_idx,
+                    arity,
+                } => {
+                    let type_name = match &self.frames[frame_idx].closure.function.chunk.constants
+                        [type_name_idx as usize]
+                    {
+                        Value::String(s) => s.clone(),
+                        _ => unreachable!(),
+                    };
+                    let variant = variant_idx.map(|idx| {
+                        match &self.frames[frame_idx].closure.function.chunk.constants[idx as usize]
+                        {
+                            Value::String(s) => s.clone(),
+                            _ => unreachable!(),
+                        }
+                    });
+                    let start = self.stack.len() - arity;
+                    let values = self.stack.drain(start..).collect();
+                    self.stack.push(Value::UserData(Box::new(UserData {
+                        type_name,
+                        variant,
+                        values,
+                    })));
+                }
                 Opcode::Return => {
                     let ret_val = self.stack.pop().unwrap_or(Value::Null);
                     let exiting = self.frames.pop().unwrap();
@@ -1909,6 +2456,10 @@ impl Vm {
                 };
                 Ok(Value::Vector(vec![*x, *y, *z, *w]))
             }
+            Builtin::Some => Ok(Value::Variant("Some", args.to_vec())),
+            Builtin::None => Ok(Value::Variant("None", Vec::new())),
+            Builtin::Ok => Ok(Value::Variant("Ok", args.to_vec())),
+            Builtin::Err => Ok(Value::Variant("Err", args.to_vec())),
             _ => Err(self.error(
                 span,
                 format!("Builtin '{builtin:?}' not supported in VM yet"),
