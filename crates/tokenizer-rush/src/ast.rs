@@ -177,7 +177,14 @@ pub enum ExprKind<'s> {
         value: Box<Expr<'s>>,
         arms: Vec<MatchArm<'s>>,
     },
+    Interpolate(Vec<InterpolationPart<'s>>),
     Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InterpolationPart<'s> {
+    Literal(String),
+    Expr(Expr<'s>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

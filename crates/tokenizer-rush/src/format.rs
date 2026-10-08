@@ -579,6 +579,36 @@ impl<'s> Writer<'s> {
                 self.indent -= 1;
                 self.text("}");
             }
+            ExprKind::Interpolate(parts) => {
+                self.text("f\"");
+                for part in parts {
+                    match part {
+                        crate::InterpolationPart::Literal(s) => {
+                            for ch in s.chars() {
+                                match ch {
+                                    '{' => self.text("{{"),
+                                    '}' => self.text("}}"),
+                                    '"' => self.text("\\\""),
+                                    '\\' => self.text("\\\\"),
+                                    '\n' => self.text("\\n"),
+                                    '\r' => self.text("\\r"),
+                                    '\t' => self.text("\\t"),
+                                    _ => {
+                                        let mut buf = [0u8; 4];
+                                        self.text(ch.encode_utf8(&mut buf));
+                                    }
+                                }
+                            }
+                        }
+                        crate::InterpolationPart::Expr(sub) => {
+                            self.text("{");
+                            self.expr(sub, 0);
+                            self.text("}");
+                        }
+                    }
+                }
+                self.text("\"");
+            }
             ExprKind::Error => unreachable!("invalid input is rejected"),
         }
         self.before(expression.span.end);

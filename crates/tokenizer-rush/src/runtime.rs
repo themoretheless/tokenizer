@@ -3,6 +3,7 @@ use crate::{Block, Expr, ExprKind, Name, Stmt, StmtKind};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write as _;
 use std::rc::{Rc, Weak};
 use std::sync::{
     Arc,
@@ -232,6 +233,147 @@ impl<'s> Value<'s> {
     }
 }
 
+pub(crate) fn format_value_for_display(value: &Value<'_>, out: &mut String, depth: usize) {
+    if depth > 16 {
+        out.push_str("...");
+        return;
+    }
+    match value {
+        Value::Null => out.push_str("null"),
+        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Value::Number(n) => {
+            if n.fract() == 0.0 && *n >= (i64::MIN as f64) && *n <= (i64::MAX as f64) {
+                let _ = write!(out, "{:.0}", n);
+            } else {
+                let _ = write!(out, "{}", n);
+            }
+        }
+        Value::Angle(a) => {
+            let _ = write!(out, "{} rad", a);
+        }
+        Value::String(s) => {
+            if depth == 0 {
+                out.push_str(s);
+            } else {
+                out.push('"');
+                for c in s.chars() {
+                    match c {
+                        '"' => out.push_str("\\\""),
+                        '\\' => out.push_str("\\\\"),
+                        '\n' => out.push_str("\\n"),
+                        '\r' => out.push_str("\\r"),
+                        '\t' => out.push_str("\\t"),
+                        _ => out.push(c),
+                    }
+                }
+                out.push('"');
+            }
+        }
+        Value::List(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                format_value_for_display(item, out, depth + 1);
+            }
+            out.push(']');
+        }
+        Value::Tuple(items) => {
+            out.push('(');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                format_value_for_display(item, out, depth + 1);
+            }
+            if items.len() == 1 {
+                out.push(',');
+            }
+            out.push(')');
+        }
+        Value::Record(fields) => {
+            out.push_str("{ ");
+            for (i, (k, v)) in fields.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(k);
+                out.push_str(": ");
+                format_value_for_display(v, out, depth + 1);
+            }
+            out.push_str(" }");
+        }
+        Value::Vector(comps) => {
+            match comps.len() {
+                2 => out.push_str("vec2("),
+                3 => out.push_str("vec3("),
+                4 => out.push_str("vec4("),
+                _ => out.push_str("vec("),
+            }
+            for (i, c) in comps.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                let _ = write!(out, "{}", c);
+            }
+            out.push(')');
+        }
+        Value::Variant(tag, payload) => {
+            out.push_str(tag);
+            if !payload.is_empty() {
+                out.push('(');
+                for (i, item) in payload.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    format_value_for_display(item, out, depth + 1);
+                }
+                out.push(')');
+            }
+        }
+        Value::UserData(data) => {
+            out.push_str(&data.type_name);
+            if let Some(var) = &data.variant {
+                out.push('.');
+                out.push_str(var);
+            }
+            out.push('(');
+            for (i, item) in data.values.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                format_value_for_display(item, out, depth + 1);
+            }
+            out.push(')');
+        }
+        Value::Function(f) => {
+            if let Some(name) = f.name() {
+                let _ = write!(out, "<function {}>", name);
+            } else {
+                out.push_str("<function>");
+            }
+        }
+        Value::Builtin(b) => {
+            let _ = write!(out, "<builtin {:?}>", b);
+        }
+        Value::Host(h) => {
+            let _ = write!(out, "<host function {}>", h.name);
+        }
+        Value::HostObject(o) => {
+            let _ = write!(out, "<host object {:?}>", o);
+        }
+        Value::Range { start, end, step } => {
+            let _ = write!(out, "range({}, {}, {})", start, end, step);
+        }
+        Value::Mesh(_) => out.push_str("<Mesh>"),
+        Value::Polygon(_) => out.push_str("<Polygon>"),
+        Value::Matrix(_) => out.push_str("<Matrix4>"),
+        Value::Quaternion(_) => out.push_str("<Quaternion>"),
+        Value::Sequence(_) => out.push_str("<sequence>"),
+    }
+}
+
 /// Repeatable sequence with deferred transformations. Construct through Rush builtins.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sequence<'s> {
@@ -365,6 +507,17 @@ pub enum Builtin {
     ArenaStats,
     JsonParse,
     JsonStringify,
+    Trim,
+    TrimStart,
+    TrimEnd,
+    Split,
+    Join,
+    StartsWith,
+    EndsWith,
+    Contains,
+    Replace,
+    ToLower,
+    ToUpper,
 }
 
 impl Builtin {
@@ -407,7 +560,12 @@ impl Builtin {
             | Self::Sqrt
             | Self::JsonParse
             | Self::JsonStringify
-            | Self::Deg => (1, 1),
+            | Self::Deg
+            | Self::Trim
+            | Self::TrimStart
+            | Self::TrimEnd
+            | Self::ToLower
+            | Self::ToUpper => (1, 1),
             Self::Range | Self::RangeIter => (2, 3),
             Self::Assert | Self::Arena => (1, 2),
             Self::ArenaStats => (1, 1),
@@ -418,6 +576,7 @@ impl Builtin {
             | Self::Clamp
             | Self::Smoothstep
             | Self::Vec3
+            | Self::Replace
             | Self::Fold => (3, 3),
             Self::Vec4 | Self::FoldBy => (4, 4),
             Self::Random
@@ -440,6 +599,11 @@ impl Builtin {
             | Self::Map
             | Self::GroupBy
             | Self::FlatMap
+            | Self::Split
+            | Self::Join
+            | Self::StartsWith
+            | Self::EndsWith
+            | Self::Contains
             | Self::Filter => (2, 2),
         };
         min..=max
@@ -3005,6 +3169,25 @@ impl<'s> Runtime<'_, 's> {
                 }
                 Ok(Value::String(decoded))
             }
+            ExprKind::Interpolate(parts) => {
+                let mut out = String::new();
+                for part in parts {
+                    match part {
+                        crate::InterpolationPart::Literal(s) => {
+                            self.string_growth(out.len(), s.len(), span)?;
+                            out.push_str(s);
+                        }
+                        crate::InterpolationPart::Expr(sub) => {
+                            let val = self.expr(sub, environment)?;
+                            let mut rendered = String::new();
+                            format_value_for_display(&val, &mut rendered, 0);
+                            self.string_growth(out.len(), rendered.len(), span)?;
+                            out.push_str(&rendered);
+                        }
+                    }
+                }
+                Ok(Value::String(out))
+            }
             ExprKind::Map(entries) => {
                 self.collection_growth(0, entries.len(), span)?;
                 let mut fields = BTreeMap::new();
@@ -4094,6 +4277,140 @@ impl<'s> Runtime<'_, 's> {
                 return Ok(Value::String(encoded));
             }
 
+            if builtin == Builtin::Trim {
+                let Value::String(s) = &arguments[0] else {
+                    return self.error(span, "trim requires a string");
+                };
+                let res = s.trim().to_string();
+                self.string_growth(0, res.len(), span)?;
+                return Ok(Value::String(res));
+            }
+            if builtin == Builtin::TrimStart {
+                let Value::String(s) = &arguments[0] else {
+                    return self.error(span, "trim_start requires a string");
+                };
+                let res = s.trim_start().to_string();
+                self.string_growth(0, res.len(), span)?;
+                return Ok(Value::String(res));
+            }
+            if builtin == Builtin::TrimEnd {
+                let Value::String(s) = &arguments[0] else {
+                    return self.error(span, "trim_end requires a string");
+                };
+                let res = s.trim_end().to_string();
+                self.string_growth(0, res.len(), span)?;
+                return Ok(Value::String(res));
+            }
+            if builtin == Builtin::ToLower {
+                let Value::String(s) = &arguments[0] else {
+                    return self.error(span, "to_lower requires a string");
+                };
+                let res = s.to_lowercase();
+                self.string_growth(0, res.len(), span)?;
+                return Ok(Value::String(res));
+            }
+            if builtin == Builtin::ToUpper {
+                let Value::String(s) = &arguments[0] else {
+                    return self.error(span, "to_upper requires a string");
+                };
+                let res = s.to_uppercase();
+                self.string_growth(0, res.len(), span)?;
+                return Ok(Value::String(res));
+            }
+            if builtin == Builtin::StartsWith {
+                let Value::String(s) = &arguments[0] else {
+                    return self.error(span, "starts_with requires a string as first argument");
+                };
+                let Value::String(prefix) = &arguments[1] else {
+                    return self.error(span, "starts_with requires a string prefix");
+                };
+                return Ok(Value::Bool(s.starts_with(prefix.as_str())));
+            }
+            if builtin == Builtin::EndsWith {
+                let Value::String(s) = &arguments[0] else {
+                    return self.error(span, "ends_with requires a string as first argument");
+                };
+                let Value::String(suffix) = &arguments[1] else {
+                    return self.error(span, "ends_with requires a string suffix");
+                };
+                return Ok(Value::Bool(s.ends_with(suffix.as_str())));
+            }
+            if builtin == Builtin::Contains {
+                match (&arguments[0], &arguments[1]) {
+                    (Value::String(s), Value::String(needle)) => {
+                        return Ok(Value::Bool(s.contains(needle.as_str())));
+                    }
+                    (Value::List(items), needle) => {
+                        return Ok(Value::Bool(items.contains(needle)));
+                    }
+                    (Value::Record(fields), Value::String(key)) => {
+                        return Ok(Value::Bool(fields.contains_key(key)));
+                    }
+                    _ => {
+                        return self.error(
+                            span,
+                            "contains requires (string, string), (list, value), or (record, string)",
+                        );
+                    }
+                }
+            }
+            if builtin == Builtin::Replace {
+                let Value::String(s) = &arguments[0] else {
+                    return self.error(span, "replace requires a string as first argument");
+                };
+                let Value::String(from) = &arguments[1] else {
+                    return self.error(span, "replace requires a string from-pattern");
+                };
+                let Value::String(to) = &arguments[2] else {
+                    return self.error(span, "replace requires a string to-pattern");
+                };
+                let res = s.replace(from.as_str(), to.as_str());
+                self.string_growth(0, res.len(), span)?;
+                return Ok(Value::String(res));
+            }
+            if builtin == Builtin::Split {
+                let Value::String(s) = &arguments[0] else {
+                    return self.error(span, "split requires a string as first argument");
+                };
+                let Value::String(delimiter) = &arguments[1] else {
+                    return self.error(span, "split requires a string delimiter");
+                };
+                let raw_parts: Vec<String> = if delimiter.is_empty() {
+                    s.chars().map(|c| c.to_string()).collect()
+                } else {
+                    s.split(delimiter.as_str())
+                        .map(|part| part.to_string())
+                        .collect()
+                };
+                self.collection_growth(0, raw_parts.len(), span)?;
+                let mut parts = Vec::with_capacity(raw_parts.len());
+                for part in raw_parts {
+                    self.string_growth(0, part.len(), span)?;
+                    parts.push(Value::String(part));
+                }
+                return Ok(Value::List(parts));
+            }
+            if builtin == Builtin::Join {
+                let Value::List(items) = &arguments[0] else {
+                    return self.error(span, "join requires a list as first argument");
+                };
+                let Value::String(separator) = &arguments[1] else {
+                    return self.error(span, "join requires a string separator");
+                };
+                let mut out = String::new();
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        self.string_growth(out.len(), separator.len(), span)?;
+                        out.push_str(separator);
+                    }
+                    let mut piece = String::new();
+                    format_value_for_display(item, &mut piece, 0);
+                    self.string_growth(out.len(), piece.len(), span)?;
+                    out.push_str(&piece);
+                }
+                return Ok(Value::String(out));
+            }
+
             // Explicit region escape hatch: identity at runtime, the promotion
             // itself is automatic; analysis recognizes the wrapper as intent.
             if builtin == Builtin::Promote {
@@ -4758,6 +5075,17 @@ pub fn builtin_catalog() -> &'static [(&'static str, Builtin)] {
         ("assert", Builtin::Assert),
         ("json_parse", Builtin::JsonParse),
         ("json_stringify", Builtin::JsonStringify),
+        ("trim", Builtin::Trim),
+        ("trim_start", Builtin::TrimStart),
+        ("trim_end", Builtin::TrimEnd),
+        ("split", Builtin::Split),
+        ("join", Builtin::Join),
+        ("starts_with", Builtin::StartsWith),
+        ("ends_with", Builtin::EndsWith),
+        ("contains", Builtin::Contains),
+        ("replace", Builtin::Replace),
+        ("to_lower", Builtin::ToLower),
+        ("to_upper", Builtin::ToUpper),
         ("len", Builtin::Len),
         ("get", Builtin::Get),
         ("any", Builtin::Any),

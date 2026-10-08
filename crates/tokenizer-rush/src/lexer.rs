@@ -58,16 +58,63 @@ pub(crate) fn run(source: &str, limits: InputLimits) -> (Lexed, bool) {
                 error = Some(("unclosed-comment", "Expected */ to close the comment"));
             }
             kind = SyntaxKind::BlockComment;
-        } else if c == '"' || c == '\'' {
+        } else if c == '"'
+            || c == '\''
+            || ((c == 'f' || c == 'F')
+                && (rest[1..].starts_with('"') || rest[1..].starts_with('\'')))
+        {
+            let is_format = c == 'f' || c == 'F';
+            let quote = if is_format {
+                i += 1;
+                source.as_bytes()[i] as char
+            } else {
+                c
+            };
             i += 1;
             let mut closed = false;
+            let mut brace_depth: usize = 0;
             while i < source.len() {
                 let next = source[i..].chars().next().unwrap();
                 if matches!(next, '\n' | '\r') {
                     break;
                 }
                 i += next.len_utf8();
-                if next == c {
+                if is_format {
+                    if brace_depth > 0 && (next == '"' || next == '\'') {
+                        let inner_quote = next;
+                        while i < source.len() {
+                            let ch = source[i..].chars().next().unwrap();
+                            if matches!(ch, '\n' | '\r') {
+                                break;
+                            }
+                            i += ch.len_utf8();
+                            if ch == inner_quote {
+                                break;
+                            }
+                            if ch == '\\' && i < source.len() {
+                                let esc = source[i..].chars().next().unwrap();
+                                i += esc.len_utf8();
+                            }
+                        }
+                        continue;
+                    }
+                    if next == '{' {
+                        if source[i..].starts_with('{') {
+                            i += 1; // skip escaped {{
+                        } else {
+                            brace_depth += 1;
+                        }
+                        continue;
+                    } else if next == '}' {
+                        if source[i..].starts_with('}') {
+                            i += 1; // skip escaped }}
+                        } else {
+                            brace_depth = brace_depth.saturating_sub(1);
+                        }
+                        continue;
+                    }
+                }
+                if next == quote && brace_depth == 0 {
                     closed = true;
                     break;
                 }

@@ -2456,6 +2456,17 @@ impl<'s> Checker<'s> {
                 Builtin::Degrees | Builtin::Radians => Some(ValueType::Angle),
                 Builtin::Mesh | Builtin::GridMesh | Builtin::Transform => Some(ValueType::Mesh),
                 Builtin::Polygon | Builtin::Translate | Builtin::Rotate => Some(ValueType::Polygon),
+                Builtin::Trim
+                | Builtin::TrimStart
+                | Builtin::TrimEnd
+                | Builtin::Join
+                | Builtin::Replace
+                | Builtin::ToLower
+                | Builtin::ToUpper => Some(ValueType::String),
+                Builtin::StartsWith | Builtin::EndsWith | Builtin::Contains => {
+                    Some(ValueType::Bool)
+                }
+                Builtin::Split => Some(ValueType::List(Box::new(ValueType::String))),
                 _ => None,
             };
             if let Some(ty) = ty {
@@ -2537,7 +2548,7 @@ impl<'s> Checker<'s> {
                 .find_map(|scope| scope.get(name.text))
                 .map_or(Shape::Unknown, |binding| self.binding_shape(binding)),
             ExprKind::Number(_) => Shape::Typed(ValueType::Number),
-            ExprKind::String(_) => Shape::Typed(ValueType::String),
+            ExprKind::String(_) | ExprKind::Interpolate(_) => Shape::Typed(ValueType::String),
             ExprKind::Bool(_) => Shape::Typed(ValueType::Bool),
             ExprKind::Null => Shape::Typed(ValueType::Null),
             ExprKind::List(items) => {
@@ -3480,6 +3491,13 @@ impl<'s> Checker<'s> {
                     usage: name.span,
                     definition,
                 });
+            }
+            ExprKind::Interpolate(parts) => {
+                for part in parts {
+                    if let crate::InterpolationPart::Expr(sub) = part {
+                        self.expr(sub);
+                    }
+                }
             }
             ExprKind::Number(_)
             | ExprKind::String(_)

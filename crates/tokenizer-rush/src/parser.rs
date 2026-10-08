@@ -1035,8 +1035,17 @@ impl<'s> Parser<'s> {
                 ExprKind::Number(text)
             }
             Some(SyntaxKind::StringLit) => {
+                let span = self.peek().unwrap().raw.span;
                 self.bump();
-                ExprKind::String(text)
+                if text.starts_with("f\"")
+                    || text.starts_with("f'")
+                    || text.starts_with("F\"")
+                    || text.starts_with("F'")
+                {
+                    self.parse_interpolated_string(text, span)
+                } else {
+                    ExprKind::String(text)
+                }
             }
             Some(SyntaxKind::Keyword) if text == "true" || text == "false" => {
                 self.bump();
@@ -1293,6 +1302,284 @@ impl<'s> Parser<'s> {
                 arms,
             },
         }
+    }
+
+    fn parse_interpolated_string(&mut self, text: &'s str, span: Span) -> ExprKind<'s> {
+        let is_format = text.starts_with("f\"")
+            || text.starts_with("f'")
+            || text.starts_with("F\"")
+            || text.starts_with("F'");
+        if !is_format {
+            return ExprKind::String(text);
+        }
+        let quote = text.as_bytes()[1] as char;
+        if text.len() < 3 || !text.ends_with(quote) {
+            self.error("unclosed-string", "Unclosed format string");
+            return ExprKind::Error;
+        }
+
+        let content = &text[2..text.len() - 1];
+        let content_start_offset = span.start + 2;
+
+        let mut parts = Vec::new();
+        let mut current_literal = String::new();
+        let mut byte_idx = 0;
+
+        while byte_idx < content.len() {
+            let rest = &content[byte_idx..];
+            let c = rest.chars().next().unwrap();
+
+            if c == '\\' {
+                byte_idx += 1;
+                if byte_idx >= content.len() {
+                    break;
+                }
+                let next_ch = content[byte_idx..].chars().next().unwrap();
+                byte_idx += next_ch.len_utf8();
+                match next_ch {
+                    'n' => current_literal.push('\n'),
+                    'r' => current_literal.push('\r'),
+                    't' => current_literal.push('\t'),
+                    '\\' => current_literal.push('\\'),
+                    '"' => current_literal.push('"'),
+                    '\'' => current_literal.push('\''),
+                    '{' => current_literal.push('{'),
+                    '}' => current_literal.push('}'),
+                    'u' if content[byte_idx..].starts_with('{') => {
+                        byte_idx += 1;
+                        let mut code = 0u32;
+                        let mut digits = 0;
+                        while byte_idx < content.len() {
+                            let ch = content[byte_idx..].chars().next().unwrap();
+                            byte_idx += ch.len_utf8();
+                            if ch == '}' {
+                                break;
+                            }
+                            if let Some(digit) = ch.to_digit(16) {
+                                code = code * 16 + digit;
+                                digits += 1;
+                            } else {
+                                self.error("invalid-escape", "Invalid hex in Unicode escape");
+                                break;
+                            }
+                        }
+                        if digits > 0
+                            && let Some(u_char) = char::from_u32(code)
+                        {
+                            current_literal.push(u_char);
+                        }
+                    }
+                    other => {
+                        current_literal.push('\\');
+                        current_literal.push(other);
+                    }
+                }
+            } else if c == '{' {
+                if rest[1..].starts_with('{') {
+                    // Escaped {{
+                    current_literal.push('{');
+                    byte_idx += 2;
+                } else {
+                    // Expression start
+                    if !current_literal.is_empty() {
+                        parts.push(InterpolationPart::Literal(std::mem::take(
+                            &mut current_literal,
+                        )));
+                    }
+                    byte_idx += 1;
+                    let expr_start_idx = byte_idx;
+                    let mut brace_depth = 1;
+                    let mut in_str = false;
+                    let mut str_quote = ' ';
+                    let mut expr_end_idx = None;
+
+                    while byte_idx < content.len() {
+                        let ch = content[byte_idx..].chars().next().unwrap();
+                        let ch_len = ch.len_utf8();
+                        if in_str {
+                            if ch == '\\' && byte_idx + 1 < content.len() {
+                                byte_idx +=
+                                    1 + content[byte_idx + 1..].chars().next().unwrap().len_utf8();
+                                continue;
+                            } else if ch == str_quote {
+                                in_str = false;
+                            }
+                        } else {
+                            match ch {
+                                '"' | '\'' => {
+                                    in_str = true;
+                                    str_quote = ch;
+                                }
+                                '{' => brace_depth += 1,
+                                '}' => {
+                                    brace_depth -= 1;
+                                    if brace_depth == 0 {
+                                        expr_end_idx = Some(byte_idx);
+                                        byte_idx += 1;
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        byte_idx += ch_len;
+                    }
+
+                    let Some(expr_end) = expr_end_idx else {
+                        self.error(
+                            "unclosed-interpolation",
+                            "Expected } to close interpolated expression",
+                        );
+                        return ExprKind::Error;
+                    };
+
+                    let expr_source = &content[expr_start_idx..expr_end];
+                    let expr_abs_start = content_start_offset + expr_start_idx;
+                    if expr_source.trim().is_empty() {
+                        self.error(
+                            "empty-interpolation",
+                            "Interpolated expression cannot be empty",
+                        );
+                    } else {
+                        let parsed_expr = crate::parse_with(expr_source, self.limits);
+                        for d in &parsed_expr.diagnostics {
+                            self.diagnostics.push(Diagnostic::new(
+                                Span::new(
+                                    expr_abs_start + d.span.start,
+                                    expr_abs_start + d.span.end,
+                                ),
+                                d.code,
+                                d.message,
+                            ));
+                        }
+                        if let Some(stmt) = parsed_expr.module.items.into_iter().next() {
+                            if let StmtKind::Expr(mut e) = stmt.kind {
+                                offset_expr_spans(&mut e, expr_abs_start);
+                                parts.push(InterpolationPart::Expr(e));
+                            } else {
+                                self.error(
+                                    "invalid-interpolation",
+                                    "Expected expression in interpolation",
+                                );
+                            }
+                        }
+                    }
+                }
+            } else if c == '}' {
+                if rest[1..].starts_with('}') {
+                    current_literal.push('}');
+                    byte_idx += 2;
+                } else {
+                    self.error(
+                        "stray-brace",
+                        "Single '}' is not allowed in format string; use '}}' to escape",
+                    );
+                    current_literal.push('}');
+                    byte_idx += 1;
+                }
+            } else {
+                current_literal.push(c);
+                byte_idx += c.len_utf8();
+            }
+        }
+
+        if !current_literal.is_empty() {
+            parts.push(InterpolationPart::Literal(current_literal));
+        }
+
+        ExprKind::Interpolate(parts)
+    }
+}
+
+fn offset_expr_spans(expr: &mut Expr<'_>, offset: usize) {
+    expr.span.start += offset;
+    expr.span.end += offset;
+    match &mut expr.kind {
+        ExprKind::Try(sub) => offset_expr_spans(sub, offset),
+        ExprKind::If {
+            condition,
+            then_value,
+            else_value,
+        } => {
+            offset_expr_spans(condition, offset);
+            offset_expr_spans(then_value, offset);
+            offset_expr_spans(else_value, offset);
+        }
+        ExprKind::Lambda { parameters, body } => {
+            for param in parameters {
+                offset_expr_spans(param, offset);
+            }
+            offset_expr_spans(body, offset);
+        }
+        ExprKind::Name(name) => {
+            name.span.start += offset;
+            name.span.end += offset;
+        }
+        ExprKind::Unary { value, .. } => offset_expr_spans(value, offset),
+        ExprKind::Binary { left, right, .. } => {
+            offset_expr_spans(left, offset);
+            offset_expr_spans(right, offset);
+        }
+        ExprKind::Assign { target, value, .. } => {
+            offset_expr_spans(target, offset);
+            offset_expr_spans(value, offset);
+        }
+        ExprKind::Call { callee, arguments } => {
+            offset_expr_spans(callee, offset);
+            for arg in arguments {
+                offset_expr_spans(arg, offset);
+            }
+        }
+        ExprKind::Member { object, field } => {
+            offset_expr_spans(object, offset);
+            field.span.start += offset;
+            field.span.end += offset;
+        }
+        ExprKind::Index { object, index } => {
+            offset_expr_spans(object, offset);
+            offset_expr_spans(index, offset);
+        }
+        ExprKind::List(items) | ExprKind::Tuple(items) => {
+            for item in items {
+                offset_expr_spans(item, offset);
+            }
+        }
+        ExprKind::Map(entries) => {
+            for (k, v) in entries {
+                offset_expr_spans(k, offset);
+                offset_expr_spans(v, offset);
+            }
+        }
+        ExprKind::Pipeline { input, stages } => {
+            offset_expr_spans(input, offset);
+            for stage in stages {
+                offset_expr_spans(stage, offset);
+            }
+        }
+        ExprKind::Match { value, arms } => {
+            offset_expr_spans(value, offset);
+            for arm in arms {
+                arm.span.start += offset;
+                arm.span.end += offset;
+                offset_expr_spans(&mut arm.pattern, offset);
+                if let Some(guard) = &mut arm.guard {
+                    offset_expr_spans(guard, offset);
+                }
+                offset_expr_spans(&mut arm.value, offset);
+            }
+        }
+        ExprKind::Interpolate(parts) => {
+            for part in parts {
+                if let InterpolationPart::Expr(sub) = part {
+                    offset_expr_spans(sub, offset);
+                }
+            }
+        }
+        ExprKind::Number(_)
+        | ExprKind::String(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Null
+        | ExprKind::Error => {}
     }
 }
 
