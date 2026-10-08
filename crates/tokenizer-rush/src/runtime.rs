@@ -717,7 +717,7 @@ impl ExecutionLimits {
 
 // Integer operands within the exact f64 range can avoid libm fmod. The
 // remainder has the dividend's sign, including zero; other operands use fmod.
-fn exact_remainder(a: f64, b: f64) -> f64 {
+pub(crate) fn exact_remainder(a: f64, b: f64) -> f64 {
     const EXACT_INTEGER: f64 = 9_007_199_254_740_991.;
     if a.abs() <= EXACT_INTEGER
         && b.abs() <= EXACT_INTEGER

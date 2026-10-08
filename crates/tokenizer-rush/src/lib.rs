@@ -38,6 +38,8 @@ pub use runtime::{
 };
 pub mod repl;
 pub use repl::{ReplCommand, ReplOutcome, ReplSession, is_input_complete, pretty_print_value};
+pub mod bytecode;
+pub use bytecode::{BytecodeProgram, evaluate_bytecode};
 
 use themoretheless_tokenizer_core::{
     Capabilities, Diagnostic, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage,
