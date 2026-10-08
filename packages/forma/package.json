@@ -1,0 +1,34 @@
+{
+  "name": "@themoretheless/tokenizer-forma",
+  "version": "0.7.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/language.js",
+    "./language": "./src/language.js",
+    "./expressions": "./src/expressions.js",
+    "./component-semantics": "./src/component-semantics.js",
+    "./property-origins": "./src/property-origins.js",
+    "./forma.grammar": "./src/forma.grammar",
+    "./forma-parser": "./src/forma-parser.js",
+    "./forma-parser.terms": "./src/forma-parser.terms.js",
+    "./forma-tokens": "./src/forma-tokens.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "generate": "lezer-generator src/forma.grammar -o src/forma-parser.js",
+    "build:wasm": "node build-wasm.mjs",
+    "prepare": "node build-wasm.mjs"
+  },
+  "dependencies": {
+    "@lezer/lr": "^1.4.10"
+  },
+  "devDependencies": {
+    "@lezer/generator": "^1.8.0"
+  },
+  "files": [
+    "src",
+    "wasm-pkg",
+    "LANGUAGE.md",
+    "README.md"
+  ]
+}

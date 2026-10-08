@@ -134,3 +134,33 @@ mod svg_limit_tests {
         assert!(result.len() < 200);
     }
 }
+
+/// Persistent time/event scheduler for Rush tasks in browser applications.
+#[wasm_bindgen]
+pub struct RushScheduler {
+    inner: themoretheless_tokenizer::web_bridge::RushSchedule,
+}
+#[wasm_bindgen]
+impl RushScheduler {
+    #[wasm_bindgen(constructor)]
+    pub fn new(source: &str) -> Result<RushScheduler, JsValue> {
+        themoretheless_tokenizer::web_bridge::RushSchedule::new(source)
+            .map(|inner| Self { inner })
+            .map_err(|e| JsValue::from_str(&e))
+    }
+    pub fn spawn(&mut self, name: &str) -> Result<String, JsValue> {
+        self.inner.spawn(name).map_err(|e| JsValue::from_str(&e))
+    }
+    pub fn emit(&mut self, name: &str) -> Result<usize, JsValue> {
+        self.inner.emit(name).map_err(|e| JsValue::from_str(&e))
+    }
+    pub fn poll(&mut self, now_ms: f64) -> Result<String, JsValue> {
+        self.inner.poll(now_ms).map_err(|e| JsValue::from_str(&e))
+    }
+    pub fn next_deadline_ms(&self) -> Option<f64> {
+        self.inner.next_deadline_ms()
+    }
+    pub fn cancel_all(&mut self) {
+        self.inner.cancel_all()
+    }
+}

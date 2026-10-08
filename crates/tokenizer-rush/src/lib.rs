@@ -31,10 +31,13 @@ pub use ast::*;
 pub use runtime::{
     Builtin, CallFrame, CancellationToken, Closure, CoroutineId, CoroutineScheduler,
     CoroutineState, ExecutionLimits, HostCallback, HostFunction, HostRegistration, HostSequence,
-    HostSequenceIterator, OwnedScriptInstance, Program, RuntimeError, ScheduledState,
-    ScheduledStep, ScriptInstance, ScriptState, Sequence, SourceLocation, StateValue, UserData,
-    Value, ValueType, WakeRequest, builtin_catalog, evaluate,
+    HostSequenceIterator, ModelInstance, ModelNode, ModelProgram, OwnedCoroutineScheduler,
+    OwnedScriptInstance, Program, RegionStats, RuntimeError, ScheduledState, ScheduledStep,
+    ScriptInstance, ScriptState, Sequence, SourceLocation, StateValue, UserData, Value, ValueType,
+    WakeRequest, builtin_catalog, evaluate, json_parse, json_stringify,
 };
+pub mod repl;
+pub use repl::{ReplCommand, ReplOutcome, ReplSession, is_input_complete, pretty_print_value};
 
 use themoretheless_tokenizer_core::{
     Capabilities, Diagnostic, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage,
@@ -376,3 +379,6 @@ pub fn analyze_host_calls<'s>(
     );
     parsed
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod sys;

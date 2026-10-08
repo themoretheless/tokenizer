@@ -79,6 +79,11 @@ impl<'s> Parser<'s> {
     fn text(&self) -> &'s str {
         self.peek().map_or("", |t| &self.source[t.raw.span.range()])
     }
+    fn text_at(&self, offset: usize) -> &'s str {
+        self.tokens
+            .get(self.pos + offset)
+            .map_or("", |t| &self.source[t.raw.span.range()])
+    }
     fn at(&self, s: &str) -> bool {
         self.peek().is_some() && self.text() == s
     }
@@ -325,7 +330,7 @@ impl<'s> Parser<'s> {
                 self.bump();
                 StmtKind::Import(self.inline_name("module"))
             }
-            "let" | "const" | "mut" => {
+            "let" | "const" | "mut" | "param" | "node" => {
                 let keyword = self.text();
                 self.bump();
                 let constant = if keyword == "let" {
@@ -350,12 +355,21 @@ impl<'s> Parser<'s> {
                     self.expect_inline("=");
                     let value = self.required_expr(false);
                     StmtKind::Declaration {
+                        role: match keyword {
+                            "param" => DeclarationRole::Parameter,
+                            "node" => DeclarationRole::Node,
+                            _ => DeclarationRole::Binding,
+                        },
                         name,
                         constant,
                         ty,
                         value,
                     }
                 }
+            }
+            "show" => {
+                self.bump();
+                StmtKind::Show(self.required_expr(false))
             }
             "return" => {
                 self.bump();
@@ -385,6 +399,11 @@ impl<'s> Parser<'s> {
                 }
                 StmtKind::Yield(self.required_expr(false))
             }
+            "strict" if self.text_at(1) == "region" => {
+                self.bump();
+                self.region_stmt(token.indent, true)
+            }
+            "region" => self.region_stmt(token.indent, false),
             "if" => self.if_stmt(token.indent),
             "while" => {
                 self.bump();
@@ -577,6 +596,34 @@ impl<'s> Parser<'s> {
         Block {
             span: Span::new(start, self.end().max(start)),
             stmts: std::rc::Rc::new(stmts),
+        }
+    }
+    /// Parses `region [name] [(budget)] { ... }`; the `strict` keyword was
+    /// already consumed by the caller, the `region` keyword is consumed here.
+    fn region_stmt(&mut self, indent: usize, strict: bool) -> StmtKind<'s> {
+        self.bump();
+        let name = if !self.newline()
+            && self.peek().is_some_and(|t| {
+                matches!(t.raw.kind, SyntaxKind::Identifier | SyntaxKind::TypeIdent)
+            }) {
+            Some(self.name("region"))
+        } else {
+            None
+        };
+        let budget = if self.at("(") {
+            self.bump();
+            let budget = self.required_expr(false);
+            self.expect(")");
+            Some(budget)
+        } else {
+            None
+        };
+        let body = self.block(indent);
+        StmtKind::Region {
+            name,
+            strict,
+            budget,
+            body,
         }
     }
     fn if_stmt(&mut self, indent: usize) -> StmtKind<'s> {

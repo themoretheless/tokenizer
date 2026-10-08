@@ -1,8 +1,9 @@
 use themoretheless_tokenizer_core::{Diagnostic, InputLimits, LexToken, Lexed, Span, SyntaxKind};
 
 pub(crate) const KEYWORDS: &[&str] = &[
-    "struct", "enum", "fn", "let", "const", "mut", "return", "yield", "if", "else", "while", "for",
-    "foreach", "in", "match", "break", "continue", "and", "or", "not", "true", "false", "null",
+    "param", "node", "show", "struct", "enum", "fn", "let", "const", "mut", "return", "yield",
+    "if", "else", "while", "for", "foreach", "in", "match", "break", "continue", "and", "or",
+    "not", "true", "false", "null", "region",
     // Reserved until their grammar and semantics are specified.
     "async", "await", "import", "export",
 ];
@@ -46,7 +47,7 @@ pub(crate) fn run(source: &str, limits: InputLimits) -> (Lexed, bool) {
                 i += 1;
             }
             kind = SyntaxKind::Whitespace;
-        } else if rest.starts_with("//") {
+        } else if rest.starts_with("//") || (i == 0 && rest.starts_with("#!")) {
             i += rest.find(['\r', '\n']).unwrap_or(rest.len());
             kind = SyntaxKind::LineComment;
         } else if let Some(comment) = rest.strip_prefix("/*") {

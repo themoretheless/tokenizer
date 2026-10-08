@@ -145,3 +145,30 @@ fn cancellation_during_poll_preserves_completed_results_and_cancels_peers() {
     );
     assert!(scheduler.poll(Duration::ZERO, LIMITS).is_err());
 }
+
+#[test]
+fn owned_scheduler_preserves_time_events_and_locals_between_host_calls() {
+    use themoretheless_tokenizer_rush::OwnedCoroutineScheduler;
+    let mut scheduler = OwnedCoroutineScheduler::new("enum Wait {After(number), Event(str)}; fn work()->number {mut n=1; yield Wait.After(0.25); n+=1; yield Wait.Event('done'); return n}", LIMITS).unwrap();
+    scheduler.spawn("work", &[], LIMITS).unwrap();
+    assert!(matches!(
+        scheduler.poll(Duration::ZERO, LIMITS).unwrap()[0].state,
+        ScheduledState::Waiting(_)
+    ));
+    assert!(
+        scheduler
+            .poll(Duration::from_millis(249), LIMITS)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        scheduler.poll(Duration::from_millis(250), LIMITS).unwrap()[0].state,
+        ScheduledState::Waiting(_)
+    ));
+    assert_eq!(scheduler.emit("done").unwrap(), 1);
+    assert_eq!(
+        scheduler.poll(Duration::from_millis(250), LIMITS).unwrap()[0].state,
+        ScheduledState::Complete(Value::Number(2.))
+    );
+    assert!(scheduler.is_empty());
+}

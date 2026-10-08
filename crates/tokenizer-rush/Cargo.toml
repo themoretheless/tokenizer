@@ -19,6 +19,7 @@ path = "src/lib.rs"
 self_cell = "1"
 serde = { version = "1", features = ["derive"] }
 themoretheless-tokenizer-core = { path = "../tokenizer-core", version = "0.7.0" }
+themoretheless-tokenizer-json = { path = "../tokenizer-json", version = "0.7.0" }
 
 [package.metadata.docs.rs]
 all-features = true
@@ -69,3 +70,6 @@ harness = false
 [[bench]]
 name = "remainder"
 harness = false
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

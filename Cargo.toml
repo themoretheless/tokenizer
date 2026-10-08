@@ -20,6 +20,7 @@ members = [
     "crates/tokenizer-mongo",
     "crates/tokenizer-bash",
     "crates/tokenizer-rush",
+    "crates/tokenizer-forma",
     "crates/tokenizer-powershell",
     "crates/tokenizer-javascript",
     "crates/tokenizer-typescript",
@@ -89,6 +90,7 @@ name = "themoretheless_tokenizer"
 path = "src/lib.rs"
 
 [dependencies]
+themoretheless-tokenizer-forma = { path = "crates/tokenizer-forma", version = "0.7.0", optional = true }
 themoretheless-tokenizer-core = { path = "crates/tokenizer-core", version = "0.7.0" }
 themoretheless-tokenizer-json = { path = "crates/tokenizer-json", version = "0.7.0", optional = true }
 themoretheless-tokenizer-url = { path = "crates/tokenizer-url", version = "0.7.0", optional = true }
@@ -157,6 +159,7 @@ themoretheless-tokenizer-verilog = { path = "crates/tokenizer-verilog", version 
 themoretheless-tokenizer-graphql = { path = "crates/tokenizer-graphql", version = "0.7.0", optional = true }
 
 [features]
+forma = ["dep:themoretheless-tokenizer-forma"]
 default = ["json", "url"]
 json = ["dep:themoretheless-tokenizer-json"]
 url = ["dep:themoretheless-tokenizer-url"]
@@ -284,7 +287,7 @@ next20 = ["wave7"]
 # Format family: data, config and markup documents (core::family::FORMAT_IDS).
 # Keeps pace with the format target list documented in docs/languages.md.
 formats = ["json", "json5", "jsonl", "url", "xml", "html", "css", "yaml", "toml", "markdown", "csv", "tsv", "logfmt", "ini", "properties", "hcl", "edn", "ics", "srt", "vtt"]
-all-languages = ["json", "url", "wave1", "wave2", "wave3", "wave4", "wave5", "wave6", "wave7", "formats"]
+all-languages = ["forma", "json", "url", "wave1", "wave2", "wave3", "wave4", "wave5", "wave6", "wave7", "formats"]
 # web-bridge used by playground WASM/dev bridge. Pair with language features
 # (or all-languages) so the host registry can resolve ids.
 web-bridge = ["json"]

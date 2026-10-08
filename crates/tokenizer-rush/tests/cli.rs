@@ -310,3 +310,267 @@ fn strict_check_requires_a_complete_function_contract() {
     );
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn model_mode_evaluates_forward_dependencies_and_updates_parameters() {
+    let path = std::env::temp_dir().join(format!("rush-model-{}.r", std::process::id()));
+    std::fs::write(&path, "node answer = n * 3; param n = 2; show answer").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .arg("--model")
+        .arg(&path)
+        .arg("n=4")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "Number(12.0)"
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .arg("--model")
+        .arg(&path)
+        .arg("missing=4")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    std::fs::remove_file(path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn sys_cli_reads_stdin_and_script_args_without_debug_output() {
+    use std::io::Write;
+    let path = std::env::temp_dir().join(format!("rush-sys-io-{}.r", std::process::id()));
+    std::fs::write(&path, "import sys; fn main()->Result[bool,str] { assert(sys.args() == ['hello world']); let input = sys.input()?; sys.out(input)?; sys.err('diagnostic')?; return Ok(true) }; main()").unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .arg(&path)
+        .args(["--quiet", "--", "hello world"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"from stdin")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"from stdin");
+    assert_eq!(output.stderr, b"diagnostic");
+    std::fs::remove_file(path).unwrap();
+}
+#[cfg(unix)]
+#[test]
+fn sys_cli_sigint_cancels_and_reaps_the_child_process() {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+    let path = std::env::temp_dir().join(format!("rush-sys-signal-{}.r", std::process::id()));
+    let pidfile = path.with_extension("pid");
+    std::fs::write(
+        &path,
+        format!(
+            "import sys; sys.run('/bin/sh', ['-c', \"echo $$ > '{}'; sleep 20 & wait\"], '')",
+            pidfile.display()
+        ),
+    )
+    .unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .arg(&path)
+        .arg("--quiet")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let start = Instant::now();
+    let pid: i32 = loop {
+        if let Ok(content) = std::fs::read_to_string(&pidfile)
+            && let Ok(parsed) = content.trim().parse::<i32>()
+        {
+            break parsed;
+        }
+        if start.elapsed() > Duration::from_secs(5) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("sys process did not start or write pidfile");
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    unsafe {
+        libc::kill(child.id() as i32, libc::SIGINT);
+    }
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if start.elapsed() > Duration::from_secs(2) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("SIGINT did not cancel promptly");
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(status.code(), Some(130));
+    assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "child was not reaped");
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_file(pidfile).unwrap();
+}
+#[test]
+fn sys_cli_check_rejects_dead_branch_contract_error_and_err_result_fails() {
+    let path = std::env::temp_dir().join(format!("rush-sys-check-{}.r", std::process::id()));
+    std::fs::write(&path, "import sys; if false { sys.run(123, [], '') }").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .arg("--check")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    std::fs::write(&path, "import sys; sys.read('/rush-file-does-not-exist')").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .arg(&path)
+        .arg("--quiet")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Script returned Err"));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn sys_stdout_backpressure_respects_the_timeout() {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+    let path = std::env::temp_dir().join(format!("rush-sys-backpressure-{}.r", std::process::id()));
+    let data = path.with_extension("txt");
+    std::fs::write(&data, vec![b'x'; 262_144]).unwrap();
+    std::fs::write(&path, format!("import sys; fn main()->Result[bool,str] {{ let data = sys.read('{}')?; return sys.out(data) }}; main()", data.display())).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .arg(&path)
+        .args(["--quiet", "--process-timeout-ms", "50"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if start.elapsed() > Duration::from_secs(3) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("stdout backpressure ignored timeout");
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(status.code(), Some(1));
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_file(data).unwrap();
+}
+
+#[test]
+fn region_report_prints_stats_and_budget_suggestions() {
+    let path = std::env::temp_dir().join(format!("rush-regions-{}.r", std::process::id()));
+    std::fs::write(
+        &path,
+        "mut keep = 0\n\
+         for i in range_iter(0, 5) { region scratch { mut a = i; mut b = a; keep += b } }\n\
+         mut g = () => 0\n\
+         region lift { mut n = 7; g = () => n }\n\
+         keep\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .arg(&path)
+        .arg("--region-report")
+        .output()
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("region scratch: 5 entries, 10 cells"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("peak 2 live"), "{stderr}");
+    assert!(
+        stderr.contains("suggested budget 4 -> region scratch (4)"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("region lift: 1 cells escaped via promotion"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn cli_repl_mode_evaluates_expressions_and_exits() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        stdin.write_all(b"10 + 25\nexit\n").unwrap();
+    }
+
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Rush Interactive Shell"), "{stdout}");
+    assert!(stdout.contains("35"), "{stdout}");
+}
+
+#[test]
+fn cli_repl_flag_and_help() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .arg("--repl")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        stdin.write_all(b"let answer = 42\nanswer\nexit\n").unwrap();
+    }
+
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("42"), "{stdout}");
+
+    let help_output = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(help_output.status.success());
+    let help_stdout = String::from_utf8_lossy(&help_output.stdout);
+    assert!(help_stdout.contains("--repl"), "{help_stdout}");
+}

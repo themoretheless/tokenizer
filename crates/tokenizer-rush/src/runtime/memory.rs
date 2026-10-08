@@ -1237,7 +1237,7 @@ fn module_cache_failure_preserves_previous_exports_and_allows_retry() {
         super::Value::Number(42.0)
     );
     {
-        let _failure = AllocationFailure::after(1);
+        let _failure = AllocationFailure::after(0);
         let error = instance.call("second", &[], limits).unwrap_err();
         assert_eq!(
             error.message,

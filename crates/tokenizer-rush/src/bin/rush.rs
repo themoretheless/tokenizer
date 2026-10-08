@@ -1,9 +1,86 @@
 //! Minimal file runner: rush script.r [name=number ...]. Polygon results print SVG.
 use std::{env, fs, io::Write as _, process::ExitCode};
 use themoretheless_tokenizer_rush::{
-    CancellationToken, ExecutionLimits, Program, Value, analyze, analyze_calls, analyze_names,
-    builtin_catalog,
+    CancellationToken, ExecutionLimits, ModelProgram, Program, ReplCommand, ReplOutcome,
+    ReplSession, Value, analyze, analyze_calls, analyze_names, builtin_catalog,
 };
+
+fn run_repl() -> Result<(), String> {
+    use std::io::{self, BufRead, Write};
+
+    println!(
+        "Rush Interactive Shell (Rush {})",
+        env!("CARGO_PKG_VERSION")
+    );
+    println!("Type :help for guidance, :vars for active bindings, :exit or Ctrl+D to quit.\n");
+
+    let stdin = io::stdin();
+    let mut session = ReplSession::new()?;
+    let mut stdout = io::stdout();
+
+    let mut line_buf = String::new();
+    loop {
+        if session.is_accumulating() {
+            print!("... ");
+        } else {
+            print!(">>> ");
+        }
+        stdout.flush().map_err(|e| e.to_string())?;
+
+        line_buf.clear();
+        let bytes_read = stdin
+            .lock()
+            .read_line(&mut line_buf)
+            .map_err(|e| e.to_string())?;
+        if bytes_read == 0 {
+            println!();
+            break;
+        }
+
+        let line = line_buf.trim_end_matches(&['\r', '\n'][..]);
+        match session.eval_line(line) {
+            ReplOutcome::Value(val) => {
+                println!("{val}");
+            }
+            ReplOutcome::Void => {}
+            ReplOutcome::Incomplete => {}
+            ReplOutcome::Command(ReplCommand::Help) => {
+                println!("Rush REPL Commands:");
+                println!("  :help         Show this help information");
+                println!("  :vars         List active user variables and values");
+                println!("  :reset        Clear all variables and reset environment");
+                println!("  :exit, quit   Exit the REPL session");
+                println!();
+                println!("Rush Syntax Highlights:");
+                println!("  let x = 10                  Define constant");
+                println!("  mut arr = [1, 2, 3]         Define mutable variable");
+                println!("  arr[0] = 99                 Index/field mutation");
+                println!("  json_parse(str)             Parse JSON into Rush data");
+                println!("  json_stringify(val)         Serialize Rush data to JSON");
+                println!("  fn f(x) {{ return x + 1 }}    Define function");
+            }
+            ReplOutcome::Command(ReplCommand::Reset) => {
+                println!("Environment reset.");
+            }
+            ReplOutcome::Command(ReplCommand::Vars(vars)) => {
+                if vars.is_empty() {
+                    println!("No user-defined variables.");
+                } else {
+                    for (k, v) in vars {
+                        println!("  {k} = {v}");
+                    }
+                }
+            }
+            ReplOutcome::Command(ReplCommand::Exit) => {
+                break;
+            }
+            ReplOutcome::Error(err) => {
+                eprintln!("{err}");
+            }
+        }
+    }
+    Ok(())
+}
 
 fn diagnostic(path: &str, source: &str, offset: usize, message: &str) -> String {
     let mut offset = offset.min(source.len());
@@ -26,9 +103,36 @@ fn diagnostic(path: &str, source: &str, offset: usize, message: &str) -> String 
 
 fn run() -> Result<(), String> {
     let mut arguments = env::args().skip(1);
-    let first = arguments
-        .next()
-        .ok_or("Usage: rush [--check|--fmt|--fmt-check] script.r [name=number ...] [--steps N] [--depth N] [--items N] [--string-bytes N]")?;
+    let Some(first) = arguments.next() else {
+        return run_repl();
+    };
+    if first == "--repl" || first == "-i" {
+        return run_repl();
+    }
+    if first == "--help" || first == "-h" {
+        println!("Usage: rush [options] [script.r] [name=number ...] [-- script-args ...]\n");
+        println!("Options:");
+        println!(
+            "  --repl, -i               Launch interactive REPL session (default if no script provided)"
+        );
+        println!("  --check                  Analyze and check script without executing");
+        println!("  --fmt                    Format script source to stdout");
+        println!("  --fmt-check              Verify script formatting matches canonical style");
+        println!("  --model                  Instantiate a geometric/model program");
+        println!("  --quiet                  Suppress final expression output");
+        println!("  --module <name=path>     Register module source path");
+        println!("  --steps <N>              Set maximum execution step budget");
+        println!("  --process-timeout-ms <N> Set maximum subprocess execution timeout");
+        return Ok(());
+    }
+    let quiet_prefix = first == "--quiet";
+    let first = if quiet_prefix {
+        arguments
+            .next()
+            .ok_or("Expected script path after --quiet")?
+    } else {
+        first
+    };
     if first == "--fmt" || first == "--fmt-check" {
         let path = arguments
             .next()
@@ -47,6 +151,33 @@ fn run() -> Result<(), String> {
             print!("{formatted}");
         }
         return Ok(());
+    }
+    if first == "--model" {
+        let path = arguments
+            .next()
+            .ok_or("Expected a model path after --model")?;
+        let source = fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+        let program = ModelProgram::compile(&source)
+            .map_err(|e| diagnostic(&path, &source, e.span.start, &e.message))?;
+        let token = CancellationToken::default();
+        let limits = ExecutionLimits::new(1_000_000);
+        let mut model = program
+            .instantiate(limits, &token, &[])
+            .map_err(|e| diagnostic(&path, &source, e.span.start, &e.message))?;
+        let mut names = std::collections::HashSet::new();
+        for argument in arguments {
+            let (name, raw) = argument.split_once('=').ok_or("Expected name=number")?;
+            let value = raw
+                .parse::<f64>()
+                .map_err(|_| "Expected a numeric parameter")?;
+            if !value.is_finite() || !names.insert(name.to_owned()) {
+                return Err(format!("Invalid or duplicate model parameter: {name}"));
+            }
+            model
+                .set_parameter(name, Value::Number(value), limits)
+                .map_err(|e| diagnostic(&path, &source, e.span.start, &e.message))?;
+        }
+        return write_output(model.output().clone());
     }
     if first == "--test" {
         let directory = arguments
@@ -82,16 +213,47 @@ fn run() -> Result<(), String> {
     }
     let mut limits = ExecutionLimits::new(1_000_000);
     let mut strict = false;
+    let mut region_report = false;
     let mut limit_options = std::collections::HashSet::new();
     let mut values = Vec::new();
+    let mut script_arguments = Vec::new();
+    let mut quiet = quiet_prefix;
+    let mut sys_limits = themoretheless_tokenizer_rush::sys::SysLimits::default();
     let mut module_sources = Vec::new();
     let mut registered = std::collections::HashSet::new();
     while let Some(argument) = arguments.next() {
+        if argument == "--" {
+            script_arguments.extend(arguments);
+            break;
+        }
+        if argument == "--quiet" {
+            quiet = true;
+            continue;
+        }
+        if argument == "--process-timeout-ms" {
+            if !limit_options.insert(argument.clone()) {
+                return Err("Duplicate process timeout".into());
+            }
+            let timeout = arguments
+                .next()
+                .ok_or("Expected timeout milliseconds")?
+                .parse::<u64>()
+                .map_err(|_| "Invalid process timeout")?;
+            sys_limits.timeout = std::time::Duration::from_millis(timeout);
+            continue;
+        }
         if argument == "--strict" {
             if strict {
                 return Err("Duplicate option: --strict".into());
             }
             strict = true;
+            continue;
+        }
+        if argument == "--region-report" {
+            if region_report {
+                return Err("Duplicate option: --region-report".into());
+            }
+            region_report = true;
             continue;
         }
         if matches!(
@@ -162,11 +324,22 @@ fn run() -> Result<(), String> {
             diagnostic(module_path, contents, error.span.start, &error.message)
         })?);
     }
-    let modules = module_sources
+    let sys = themoretheless_tokenizer_rush::sys::SysHost::with_args(sys_limits, script_arguments);
+    let sys_program = Program::compile(themoretheless_tokenizer_rush::sys::MODULE_SOURCE)
+        .map_err(|e| format!("sys: {}", e.message))?;
+    let hosts: Vec<_> = sys
+        .registrations
+        .iter()
+        .map(|r| r.function.clone())
+        .collect();
+    let mut modules = module_sources
         .iter()
         .zip(&module_programs)
         .map(|((name, _, _), program)| (name.as_str(), program))
         .collect::<Vec<_>>();
+    if !registered.contains("sys") {
+        modules.push(("sys", &sys_program));
+    }
     let inputs = arguments
         .iter()
         .map(|argument| {
@@ -211,7 +384,8 @@ fn run() -> Result<(), String> {
                 diagnostic(&path, &source, error.span.start, &error.message)
             }
         })?;
-        let names = names.into_iter().collect::<Vec<_>>();
+        let mut names = names.into_iter().collect::<Vec<_>>();
+        names.extend(hosts.iter().map(|f| f.name));
         let mut messages = Vec::new();
         for (file, contents) in std::iter::once((path.as_str(), source.as_str())).chain(
             module_sources
@@ -220,11 +394,13 @@ fn run() -> Result<(), String> {
         ) {
             let checked_names = analyze_names(contents, &names);
             let calls = analyze_calls(contents);
+            let host_calls = themoretheless_tokenizer_rush::analyze_host_calls(contents, &hosts);
             messages.extend(
                 checked_names
                     .diagnostics
                     .iter()
                     .chain(&calls.diagnostics)
+                    .chain(&host_calls.diagnostics)
                     .map(|d| {
                         diagnostic(
                             file,
@@ -255,14 +431,14 @@ fn run() -> Result<(), String> {
             }
         })?;
     }
-    let value = program
-        .run_with_limits(
-            limits,
-            &CancellationToken::default(),
-            &inputs,
-            &[],
-            &modules,
-        )
+    let token = CancellationToken::default();
+    let _signals = signal_cancellation(&token);
+    let inputs: Vec<_> = inputs
+        .iter()
+        .map(|(name, value)| (*name, Value::Number(*value)))
+        .collect();
+    let instance = program
+        .instantiate(limits, &token, &inputs, &[], &sys.registrations, &modules)
         .map_err(|error| {
             if let Some(module) = &error.module
                 && let Some((_, module_path, contents)) =
@@ -273,6 +449,40 @@ fn run() -> Result<(), String> {
                 diagnostic(&path, &source, error.span.start, &error.message)
             }
         })?;
+    if let Value::Variant("Err", error) = instance.initial_value() {
+        return Err(format!("Script returned Err: {error:?}"));
+    }
+    if region_report {
+        let stats = instance.region_stats();
+        if stats.is_empty() {
+            eprintln!("{path}: no regions executed");
+        }
+        for stats in stats {
+            let name = stats.name.as_deref().unwrap_or("<anonymous>");
+            eprintln!(
+                "{path}: region {name}: {} entries, {} cells ({} reused), peak {} live, {} promoted",
+                stats.entries, stats.allocated, stats.reused_slots, stats.peak_live, stats.promoted,
+            );
+            if stats.promoted > 0 {
+                eprintln!(
+                    "{path}: region {name}: {} cells escaped via promotion; the region does not bound their lifetimes",
+                    stats.promoted,
+                );
+            }
+            eprintln!(
+                "{path}: region {name}: suggested budget {} -> region {name} ({}) {{ ... }}",
+                stats.suggested_budget(),
+                stats.suggested_budget(),
+            );
+        }
+    }
+    if quiet {
+        return Ok(());
+    }
+    write_output(instance.initial_value().clone())
+}
+
+fn write_output(value: Value<'_>) -> Result<(), String> {
     let stdout = std::io::stdout();
     let mut output = IoTextWriter {
         writer: std::io::BufWriter::new(stdout.lock()),
@@ -357,7 +567,66 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{error}");
+            #[cfg(unix)]
+            {
+                let signal = SIGNAL.load(std::sync::atomic::Ordering::Relaxed);
+                if signal != 0 {
+                    return ExitCode::from((128 + signal) as u8);
+                }
+            }
             ExitCode::FAILURE
         }
     }
 }
+
+#[cfg(unix)]
+static SIGNAL: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+#[cfg(unix)]
+extern "C" fn interrupted(signal: libc::c_int) {
+    SIGNAL.store(signal, std::sync::atomic::Ordering::Relaxed);
+}
+#[cfg(unix)]
+struct SignalGuard {
+    stopped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+#[cfg(unix)]
+impl Drop for SignalGuard {
+    fn drop(&mut self) {
+        self.stopped
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+#[cfg(unix)]
+fn signal_cancellation(token: &CancellationToken) -> SignalGuard {
+    // The CLI owns these process-wide handlers. The handler only stores a
+    // lock-free atomic; process cleanup runs on the normal execution thread.
+    unsafe {
+        libc::signal(libc::SIGINT, interrupted as *const () as libc::sighandler_t);
+        libc::signal(
+            libc::SIGTERM,
+            interrupted as *const () as libc::sighandler_t,
+        );
+    }
+    let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop = stopped.clone();
+    let token = token.clone();
+    let worker = std::thread::spawn(move || {
+        while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+            if SIGNAL.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+                token.cancel();
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    });
+    SignalGuard {
+        stopped,
+        worker: Some(worker),
+    }
+}
+#[cfg(not(unix))]
+fn signal_cancellation(_: &CancellationToken) {}

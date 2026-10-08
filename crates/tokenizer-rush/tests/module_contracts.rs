@@ -275,3 +275,29 @@ read(model.Settings({{speed:3}}))"
         }
     }
 }
+
+#[test]
+fn higher_order_contracts_check_callbacks_before_execution() {
+    let source = "fn twice(n:number)->number {return n*2}; fn apply(f:Fn[tuple[number],number], n:number)->number {return f(n)}; apply(twice,3)";
+    let program = Program::compile_strict(source).unwrap();
+    assert_eq!(
+        program
+            .run(1000, &CancellationToken::default(), &[])
+            .unwrap(),
+        Value::Number(6.)
+    );
+    for body in ["return f(true)", "return f()", "return f(n,n)"] {
+        let source = format!("fn apply(f:Fn[tuple[number],number], n:number)->number {{{body}}}");
+        assert!(Program::compile_strict(&source).is_err(), "{source}");
+    }
+    for signature in [
+        "n:bool)->number {return 1}",
+        "n:number)->bool {return true}",
+        "n:number,m:number)->number {return n}",
+    ] {
+        let source = format!(
+            "fn bad({signature}; fn apply(f:Fn[tuple[number],number])->number {{return f(1)}}; if false {{apply(bad)}}"
+        );
+        assert!(Program::compile_strict(&source).is_err(), "{source}");
+    }
+}

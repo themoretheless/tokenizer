@@ -56,6 +56,7 @@ pub struct Stmt<'s> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StmtKind<'s> {
+    Show(Expr<'s>),
     Struct {
         name: Name<'s>,
         fields: Vec<(Name<'s>, Type<'s>)>,
@@ -77,6 +78,7 @@ pub enum StmtKind<'s> {
         body: Block<'s>,
     },
     Declaration {
+        role: DeclarationRole,
         name: Name<'s>,
         constant: bool,
         ty: Option<Type<'s>>,
@@ -100,6 +102,17 @@ pub enum StmtKind<'s> {
     },
     Break,
     Continue,
+    /// Region (arena) block: cells allocated inside are bulk-freed at exit;
+    /// values still referenced from outside are promoted to the parent region.
+    /// `strict` regions make analysis reject implicit escapes; an escape then
+    /// requires an explicit `promote(...)` wrapper.
+    Region {
+        name: Option<Name<'s>>,
+        strict: bool,
+        /// Optional live-cell ceiling: `region scratch (1024) { ... }`.
+        budget: Option<Expr<'s>>,
+        body: Block<'s>,
+    },
     Expr(Expr<'s>),
     Error,
 }
@@ -191,4 +204,12 @@ impl Parse<'_> {
     pub fn is_valid(&self) -> bool {
         self.valid
     }
+}
+
+/// A declaration's role in an ordinary script or declarative model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclarationRole {
+    Binding,
+    Parameter,
+    Node,
 }

@@ -237,12 +237,18 @@ impl<'s> Writer<'s> {
                 self.expr(value, 0);
             }
             StmtKind::Declaration {
+                role,
                 name,
                 constant,
                 ty,
                 value,
             } => {
-                self.text(if *constant { "let " } else { "mut " });
+                self.text(match role {
+                    crate::DeclarationRole::Parameter => "param ",
+                    crate::DeclarationRole::Node => "node ",
+                    crate::DeclarationRole::Binding if *constant => "let ",
+                    _ => "mut ",
+                });
                 self.name(name);
                 if let Some(ty) = ty {
                     self.text(": ");
@@ -323,6 +329,32 @@ impl<'s> Writer<'s> {
             }
             StmtKind::Break => self.text("break"),
             StmtKind::Continue => self.text("continue"),
+            StmtKind::Region {
+                name,
+                strict,
+                budget,
+                body,
+            } => {
+                if *strict {
+                    self.text("strict ");
+                }
+                self.text("region");
+                if let Some(name) = name {
+                    self.text(" ");
+                    self.name(name);
+                }
+                if let Some(budget) = budget {
+                    self.text(" (");
+                    self.expr(budget, 1);
+                    self.text(")");
+                }
+                self.text(" ");
+                self.block(body);
+            }
+            StmtKind::Show(value) => {
+                self.text("show ");
+                self.expr(value, 1);
+            }
             StmtKind::Expr(value) => self.expr(value, 1),
             StmtKind::Error => unreachable!("invalid input is rejected"),
         }
@@ -332,6 +364,7 @@ impl<'s> Writer<'s> {
                 | StmtKind::If { .. }
                 | StmtKind::While { .. }
                 | StmtKind::For { .. }
+                | StmtKind::Region { .. }
         ) {
             self.text(";");
         }

@@ -11,11 +11,17 @@ use std::sync::{
 use themoretheless_tokenizer_core::Span;
 mod cell_gc;
 mod coroutine;
+mod model;
 mod scheduler;
 pub use coroutine::{CoroutineId, CoroutineState};
-pub use scheduler::{CoroutineScheduler, ScheduledState, ScheduledStep, WakeRequest};
+pub use model::{ModelInstance, ModelNode, ModelProgram};
+pub use scheduler::{
+    CoroutineScheduler, OwnedCoroutineScheduler, ScheduledState, ScheduledStep, WakeRequest,
+};
 mod instance;
 pub use instance::{OwnedScriptInstance, ScriptState, StateValue};
+pub mod json;
+pub use json::{parse as json_parse, stringify as json_stringify};
 mod memory;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -81,6 +87,17 @@ impl<'s> Environment<'s> {
         }
         copy.parent = self.parent.clone();
         Ok(copy)
+    }
+    /// Drop every binding so cell references release exactly as they would
+    /// when a freshly cloned scope goes out of scope.
+    fn release_bindings(&mut self) {
+        while self.bindings.pop().is_some() {}
+    }
+    /// Rebind this scope as a child of `parent`, reusing the allocated
+    /// binding storage. Used to recycle per-call environments.
+    fn reset_child(&mut self, parent: memory::Shared<Self>) {
+        self.release_bindings();
+        self.parent = Some(parent);
     }
     fn get(&self, name: &str) -> Option<&Binding<'s>> {
         let mut current = self;
@@ -293,6 +310,7 @@ pub enum Builtin {
     None,
     Ok,
     Err,
+    Promote,
     Random,
     Noise,
     GridMesh,
@@ -342,6 +360,11 @@ pub enum Builtin {
     Fold,
     GroupBy,
     FoldBy,
+    Arena,
+    ArenaRun,
+    ArenaStats,
+    JsonParse,
+    JsonStringify,
 }
 
 impl Builtin {
@@ -354,6 +377,7 @@ impl Builtin {
             Self::Fold => &[(2, 2)],
             Self::FoldBy => &[(1, 1), (3, 2)],
             Self::GridMesh => &[(2, 2)],
+            Self::ArenaRun => &[(1, 0)],
             _ => &[],
         }
     }
@@ -364,6 +388,7 @@ impl Builtin {
             Self::Degrees
             | Self::Iter
             | Self::Len
+            | Self::Promote
             | Self::Radians
             | Self::Some
             | Self::Ok
@@ -380,9 +405,13 @@ impl Builtin {
             | Self::Sin
             | Self::Cos
             | Self::Sqrt
+            | Self::JsonParse
+            | Self::JsonStringify
             | Self::Deg => (1, 1),
             Self::Range | Self::RangeIter => (2, 3),
-            Self::Assert => (1, 2),
+            Self::Assert | Self::Arena => (1, 2),
+            Self::ArenaStats => (1, 1),
+            Self::ArenaRun => (2, 2),
             Self::GridMesh
             | Self::Slerp
             | Self::Lerp
@@ -423,10 +452,16 @@ pub struct Closure<'s> {
     parameters: Vec<Expr<'s>>,
     parameter_types: Vec<Option<ValueType>>,
     result_type: Option<ValueType>,
-    body: FunctionBody<'s>,
+    /// Shared per program point; lambda evaluation no longer deep-clones AST.
+    body: Rc<FunctionBody<'s>>,
     name: Option<&'s str>,
     environment: memory::Shared<Environment<'s>>,
     references: Rc<Vec<CaptureReference<'s>>>,
+}
+impl<'s> Closure<'s> {
+    pub fn name(&self) -> Option<&'s str> {
+        self.name
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -535,6 +570,7 @@ fn exact_remainder(a: f64, b: f64) -> f64 {
 /// Runtime contracts for functions registered by the embedding application.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValueType {
+    Function(Vec<ValueType>, Box<ValueType>),
     User(String),
     HostObject(&'static str),
     Angle,
@@ -588,6 +624,15 @@ impl ValueType {
         {
             return Ok(primitive);
         }
+        if ty.name.text == "Fn"
+            && ty.arguments.len() == 2
+            && let Self::Tuple(parameters) = Self::annotation_with(&ty.arguments[0], resolve)?
+        {
+            return Ok(Self::Function(
+                parameters,
+                Box::new(Self::annotation_with(&ty.arguments[1], resolve)?),
+            ));
+        }
         if ty.name.text == "Option" && ty.arguments.len() == 1 {
             return Ok(Self::Option(Box::new(Self::annotation_with(
                 &ty.arguments[0],
@@ -639,6 +684,18 @@ impl ValueType {
     }
     pub fn accepts(&self, value: &Value<'_>) -> bool {
         match (self, value) {
+            (Self::Function(parameters, result), Value::Function(function)) => {
+                function.parameter_types.len() == parameters.len()
+                    && function
+                        .parameter_types
+                        .iter()
+                        .zip(parameters)
+                        .all(|(actual, expected)| actual.as_ref() == Some(expected))
+                    && function.result_type.as_ref() == Some(result.as_ref())
+            }
+            (Self::Function(parameters, result), Value::Host(function)) => {
+                &function.parameters == parameters && &function.result == result.as_ref()
+            }
             (Self::User(name), Value::UserData(data)) => name == &data.type_name,
             (Self::HostObject(name), Value::HostObject(object)) => {
                 *name == object.type_name() && object.is_alive()
@@ -784,6 +841,90 @@ impl<'a, 's> ScriptInstance<'a, 's> {
             .call(function, Cow::Borrowed(arguments), self.span)?;
         self.enforce_memory_limit()?;
         Ok(value)
+    }
+
+    /// Incrementally execute top-level statements in this instance's environment.
+    /// Useful for REPL and interactive notebook sessions.
+    pub fn eval_chunk(&mut self, source: &'s str) -> Result<Option<Value<'s>>> {
+        let mut parsed = crate::parse(source);
+        let (references, contracts) = crate::analysis::compile_analysis(&mut parsed);
+        if !parsed.is_valid() {
+            let diagnostic = parsed.diagnostics.first();
+            return Err(RuntimeError {
+                stack: Vec::new(),
+                location: None,
+                module: None,
+                span: diagnostic.map_or(parsed.module.span, |d| d.span),
+                message: diagnostic.map_or_else(
+                    || "Invalid Rush program".into(),
+                    |d| format!("{}: {}", d.code, d.message),
+                ),
+            }
+            .locate(source));
+        }
+        if parsed.module.items.is_empty() {
+            return Ok(None);
+        }
+        let mut capture_refs: Vec<_> = references
+            .into_iter()
+            .map(|reference| CaptureReference {
+                name: &source[reference.usage.start..reference.usage.end],
+                usage: reference.usage,
+                definition: reference.definition,
+            })
+            .collect();
+        capture_refs.sort_by_key(|reference| reference.usage.start);
+        self.runtime.current_references = Rc::new(capture_refs);
+        if let Some(contracts_map) = self.runtime.contracts.get_mut(&None) {
+            if let Some(cm) = Rc::get_mut(contracts_map) {
+                cm.extend(contracts);
+            } else {
+                let mut new_contracts = (**contracts_map).clone();
+                new_contracts.extend(contracts);
+                *contracts_map = Rc::new(new_contracts);
+            }
+        }
+        self.runtime.sources.insert(None, source);
+        self.runtime.remaining = 1_000_000;
+        self.runtime.check(parsed.module.span)?;
+
+        let is_expr_or_show = matches!(
+            parsed.module.items.last().map(|s| &s.kind),
+            Some(StmtKind::Expr(_)) | Some(StmtKind::Show(_))
+        );
+
+        let (val, _) = self
+            .runtime
+            .statements(&parsed.module.items, &mut self.environment)
+            .map_err(|e| e.locate(source))?;
+
+        if is_expr_or_show {
+            Ok(Some(val))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// List active user-defined variables and their values.
+    pub fn list_variables(&self) -> Vec<(&str, Value<'s>)> {
+        let mut list = Vec::new();
+        for (name, binding) in self.environment.bindings.iter() {
+            if builtin_catalog().iter().any(|(b, _)| b == name) {
+                continue;
+            }
+            let val = match binding {
+                Binding::Value(v) => v.clone(),
+                Binding::Cell(cell) => {
+                    if let Ok(idx) = self.runtime.cell_index(cell, Span::new(0, 0)) {
+                        self.runtime.cells[idx].0.clone()
+                    } else {
+                        continue;
+                    }
+                }
+            };
+            list.push((*name, val));
+        }
+        list
     }
 }
 
@@ -1002,7 +1143,10 @@ impl<'s> Program<'s> {
         self.parsed.clone()
     }
     pub fn compile(source: &'s str) -> Result<Self> {
-        let mut parsed = crate::parse(source);
+        Self::compile_parsed(crate::parse(source))
+    }
+    fn compile_parsed(mut parsed: crate::Parse<'s>) -> Result<Self> {
+        let source = parsed.source;
         let (references, contracts) = crate::analysis::compile_analysis(&mut parsed);
         if !parsed.is_valid() {
             let diagnostic = parsed.diagnostics.first();
@@ -1142,11 +1286,17 @@ impl<'s> Program<'s> {
                     true,
                     hosts.clone(),
                 );
-                if let Some(diagnostic) = parsed.diagnostics.first() {
+                // Errors are fatal; non-fatal lints (e.g. region-escape
+                // warnings) must not block a valid program.
+                if !parsed.is_valid() {
+                    let diagnostic = parsed.diagnostics.first();
                     return Err(RuntimeError {
                         module: name.map(str::to_owned),
-                        span: diagnostic.span,
-                        message: format!("{}: {}", diagnostic.code, diagnostic.message),
+                        span: diagnostic.map_or(parsed.module.span, |d| d.span),
+                        message: diagnostic.map_or_else(
+                            || "Invalid Rush program".into(),
+                            |d| format!("{}: {}", d.code, d.message),
+                        ),
                         stack: Vec::new(),
                         location: None,
                     }
@@ -1200,6 +1350,13 @@ impl<'s> Program<'s> {
             memory_limit: usize::MAX,
             initial_data_bytes: 0,
             instance_roots: None,
+            environment_pool: Vec::new(),
+            function_bodies: HashMap::new(),
+            region_stack: Vec::new(),
+            cell_regions: Vec::new(),
+            next_region: 0,
+            skip_call_region: false,
+            region_stats: Vec::new(),
             cancellation,
             contextual: contextual
                 .iter()
@@ -1318,9 +1475,247 @@ struct Runtime<'a, 's> {
     memory_limit: usize,
     initial_data_bytes: usize,
     instance_roots: Option<Environment<'s>>,
+    environment_pool: Vec<Environment<'s>>,
+    /// Shared function bodies keyed by (module, expression start), built once
+    /// per program point instead of deep-cloning AST on every evaluation.
+    function_bodies: HashMap<(Option<&'s str>, usize), Rc<FunctionBody<'s>>>,
+    /// Active region (arena) frames, innermost last. Region id 0 is the
+    /// global arena and has no frame.
+    region_stack: Vec<RegionFrame>,
+    /// Region id per cell slot, parallel to `cells`.
+    cell_regions: Vec<u32>,
+    next_region: u32,
+    /// One-shot: the next `call_user` runs without an implicit call region
+    /// because `arena_run` already supplied the region for it.
+    skip_call_region: bool,
+    /// Aggregated per-name metrics; frames reference entries by index.
+    /// Lookups are linear — the number of distinct region names is tiny.
+    region_stats: Vec<RegionStats>,
     cancellation: &'a CancellationToken,
     contextual: HashMap<*const HostFunction, ContextualHostCallback>,
 }
+/// One active region (arena) frame.
+#[derive(Clone, Debug)]
+struct RegionFrame {
+    id: u32,
+    /// Live-cell ceiling; `None` for an unbounded region.
+    budget: Option<usize>,
+    /// Cells currently alive with this region's stamp.
+    live: usize,
+    /// Index into `Runtime::region_stats` for this region's name.
+    stats: usize,
+    /// Cell slots stamped to this region, so exit sweeps only its own cells
+    /// instead of scanning the whole table. May hold stale entries (freed or
+    /// re-stamped slots); the exit pass re-checks the stamp and liveness.
+    cells: Vec<usize>,
+}
+/// Aggregated allocation metrics for one region name, or for all anonymous
+/// regions under `name: None`. Counters accumulate across every entry into
+/// the region, including inside coroutines.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RegionStats {
+    /// Region name as written in source; `None` aggregates anonymous blocks.
+    pub name: Option<String>,
+    /// How many times the region was entered.
+    pub entries: u64,
+    /// Total cell allocations stamped to the region.
+    pub allocated: u64,
+    /// Allocations that reused a previously freed cell slot.
+    pub reused_slots: u64,
+    /// Maximum simultaneously live cells observed; use it to size budgets.
+    pub peak_live: usize,
+    /// Cells promoted to the parent region because they were still reachable
+    /// at region exit.
+    pub promoted: u64,
+}
+impl RegionStats {
+    /// Budget recommendation from the observed peak: the smallest power of
+    /// two above `peak_live`, giving at least 2x headroom for load spikes.
+    /// Treat it as a starting point, not a proof; rerun under realistic load.
+    #[must_use]
+    pub fn suggested_budget(&self) -> usize {
+        (self.peak_live + 1).next_power_of_two()
+    }
+}
+
+enum AccessStep<'s> {
+    Index(Value<'s>, Span),
+    Member(String, Span),
+}
+
+fn path_error(module: Option<&str>, span: Span, message: impl Into<String>) -> RuntimeError {
+    RuntimeError {
+        stack: Vec::new(),
+        location: None,
+        module: module.map(str::to_owned),
+        span,
+        message: message.into(),
+    }
+}
+
+fn mutate_path<'s>(
+    module: Option<&str>,
+    current: &mut Value<'s>,
+    steps: &[AccessStep<'s>],
+    assigned: Value<'s>,
+    span: Span,
+) -> Result<()> {
+    if steps.is_empty() {
+        *current = assigned;
+        return Ok(());
+    }
+    let (head, rest) = steps.split_first().unwrap();
+    match head {
+        AccessStep::Index(index_val, step_span) => match current {
+            Value::List(items) => {
+                let Value::Number(num) = index_val else {
+                    return Err(path_error(module, *step_span, "Index must be an integer"));
+                };
+                if *num < 0.0 || num.fract() != 0.0 || *num >= items.len() as f64 {
+                    return Err(path_error(module, *step_span, "Index out of bounds"));
+                }
+                let idx = *num as usize;
+                if rest.is_empty() {
+                    items[idx] = assigned;
+                    Ok(())
+                } else {
+                    mutate_path(module, &mut items[idx], rest, assigned, span)
+                }
+            }
+            Value::Record(fields) => {
+                let Value::String(key) = index_val else {
+                    return Err(path_error(
+                        module,
+                        *step_span,
+                        "Record index must be a string",
+                    ));
+                };
+                if rest.is_empty() {
+                    fields.insert(key.clone(), assigned);
+                    Ok(())
+                } else {
+                    let sub = fields.get_mut(key).ok_or_else(|| {
+                        path_error(module, *step_span, format!("Unknown field: {key}"))
+                    })?;
+                    mutate_path(module, sub, rest, assigned, span)
+                }
+            }
+            Value::Vector(components) => {
+                let Value::Number(num) = index_val else {
+                    return Err(path_error(module, *step_span, "Index must be an integer"));
+                };
+                if *num < 0.0 || num.fract() != 0.0 || *num >= components.len() as f64 {
+                    return Err(path_error(module, *step_span, "Index out of bounds"));
+                }
+                let idx = *num as usize;
+                if rest.is_empty() {
+                    let Value::Number(val) = assigned else {
+                        return Err(path_error(
+                            module,
+                            span,
+                            "Vector component must be a number",
+                        ));
+                    };
+                    components[idx] = val;
+                    Ok(())
+                } else {
+                    Err(path_error(
+                        module,
+                        *step_span,
+                        "Vector components do not support nested access",
+                    ))
+                }
+            }
+            _ => Err(path_error(
+                module,
+                *step_span,
+                "Indexing requires a list, record or vector",
+            )),
+        },
+        AccessStep::Member(field_name, step_span) => match current {
+            Value::Record(fields) => {
+                if rest.is_empty() {
+                    fields.insert(field_name.clone(), assigned);
+                    Ok(())
+                } else {
+                    let sub = fields.get_mut(field_name).ok_or_else(|| {
+                        path_error(module, *step_span, format!("Unknown field: {field_name}"))
+                    })?;
+                    mutate_path(module, sub, rest, assigned, span)
+                }
+            }
+            Value::UserData(data) if data.variant.is_none() => {
+                if let Some(Value::Record(fields)) = data.values.first_mut() {
+                    if rest.is_empty() {
+                        if !fields.contains_key(field_name) {
+                            return Err(path_error(
+                                module,
+                                *step_span,
+                                format!("Unknown struct field: {field_name}"),
+                            ));
+                        }
+                        fields.insert(field_name.clone(), assigned);
+                        Ok(())
+                    } else {
+                        let sub = fields.get_mut(field_name).ok_or_else(|| {
+                            path_error(
+                                module,
+                                *step_span,
+                                format!("Unknown struct field: {field_name}"),
+                            )
+                        })?;
+                        mutate_path(module, sub, rest, assigned, span)
+                    }
+                } else {
+                    Err(path_error(
+                        module,
+                        *step_span,
+                        "Member access requires a struct or record",
+                    ))
+                }
+            }
+            Value::Vector(components) => {
+                let axis = match field_name.as_str() {
+                    "x" => 0,
+                    "y" => 1,
+                    "z" => 2,
+                    "w" => 3,
+                    _ => return Err(path_error(module, *step_span, "Unknown vector component")),
+                };
+                if axis >= components.len() {
+                    return Err(path_error(
+                        module,
+                        *step_span,
+                        "Vector component out of bounds",
+                    ));
+                }
+                if rest.is_empty() {
+                    let Value::Number(val) = assigned else {
+                        return Err(path_error(
+                            module,
+                            span,
+                            "Vector component must be a number",
+                        ));
+                    };
+                    components[axis] = val;
+                    Ok(())
+                } else {
+                    Err(path_error(
+                        module,
+                        *step_span,
+                        "Vector components do not support nested access",
+                    ))
+                }
+            }
+            _ => Err(path_error(
+                module,
+                *step_span,
+                "Member access requires a record, struct or vector",
+            )),
+        },
+    }
+}
+
 impl<'s> Runtime<'_, 's> {
     fn cell_index(&self, cell: &Rc<CellId>, span: Span) -> Result<usize> {
         if cell.released.as_ptr() != Rc::as_ptr(&self.released_cells) {
@@ -1370,10 +1765,53 @@ impl<'s> Runtime<'_, 's> {
             let Some(index) = released else {
                 break;
             };
+            let region = self.cell_regions[index];
+            if region != 0
+                && let Some(frame) = self
+                    .region_stack
+                    .iter_mut()
+                    .rev()
+                    .find(|frame| frame.id == region)
+            {
+                frame.live = frame.live.saturating_sub(1);
+            }
             self.cells[index] = (Value::Null, None);
             self.free_cells
                 .push(index)
                 .expect("free list reserved with cell");
+        }
+    }
+    fn shared_body(
+        &mut self,
+        span: Span,
+        build: impl FnOnce() -> FunctionBody<'s>,
+    ) -> Rc<FunctionBody<'s>> {
+        self.function_bodies
+            .entry((self.module, span.start))
+            .or_insert_with(|| Rc::new(build()))
+            .clone()
+    }
+    /// Take a call environment from the pool or allocate a fresh child scope.
+    fn take_call_environment(
+        &mut self,
+        parent: &memory::Shared<Environment<'s>>,
+    ) -> Environment<'s> {
+        match self.environment_pool.pop() {
+            Some(mut environment) => {
+                environment.reset_child(parent.clone());
+                environment
+            }
+            None => Environment::child(parent.clone()),
+        }
+    }
+    /// Return a call environment to the pool after releasing its bindings, so
+    /// repeated closure calls reuse the allocated binding storage.
+    fn recycle_call_environment(&mut self, mut environment: Environment<'s>) {
+        const POOL_LIMIT: usize = 64;
+        if self.environment_pool.len() < POOL_LIMIT {
+            environment.release_bindings();
+            environment.parent = None;
+            self.environment_pool.push(environment);
         }
     }
     fn allocate_cell(
@@ -1388,12 +1826,16 @@ impl<'s> Runtime<'_, 's> {
         if self.cell_allocations >= self.cell_collection_interval {
             self.collect_cell_cycles(span)?;
             self.cell_allocations = 0;
-            self.cell_collection_interval = (self.cells.len() - self.free_cells.len()).max(64);
+            self.cell_collection_interval = (self.cells.len() - self.free_cells.len())
+                .saturating_mul(2)
+                .max(64);
         }
+        let mut reused = true;
         let index = if let Some(index) = self.free_cells.pop() {
             self.cells[index] = (value, contract);
             index
         } else {
+            reused = false;
             let index = self.cells.len();
             self.cells
                 .reserve(1)
@@ -1426,7 +1868,129 @@ impl<'s> Runtime<'_, 's> {
             released: Rc::downgrade(&self.released_cells),
         });
         self.cell_ids[index] = Rc::downgrade(&id);
+        let region = self.region_stack.last().map_or(0, |frame| frame.id);
+        if index == self.cell_regions.len() {
+            self.cell_regions.push(region);
+        } else {
+            self.cell_regions[index] = region;
+        }
+        if let Some(frame) = self.region_stack.last_mut() {
+            frame.live += 1;
+            frame.cells.push(index);
+            let stats = &mut self.region_stats[frame.stats];
+            stats.allocated += 1;
+            stats.reused_slots += reused as u64;
+            stats.peak_live = stats.peak_live.max(frame.live);
+            if frame.budget.is_some_and(|budget| frame.live > budget) {
+                return self.error(span, "Region cell budget exceeded");
+            }
+        }
         Ok(id)
+    }
+    /// Parked coroutine regions: frames above `base` leave the shared stack
+    /// while the task is suspended.
+    fn take_regions_above(&mut self, base: usize) -> Vec<RegionFrame> {
+        self.region_stack.split_off(base)
+    }
+    /// A resumed coroutine puts its parked region frames back on top.
+    fn restore_regions(&mut self, frames: Vec<RegionFrame>) {
+        self.region_stack.extend(frames);
+    }
+    /// Drop region frames of a terminated coroutine without sweeping; their
+    /// cells are reclaimed through the normal release path.
+    fn truncate_regions(&mut self, base: usize) {
+        self.region_stack.truncate(base);
+    }
+    /// Evaluate an optional region budget expression in the parent region.
+    fn eval_region_budget(
+        &mut self,
+        budget: Option<&Expr<'s>>,
+        environment: &Environment<'s>,
+    ) -> Result<Option<usize>> {
+        let Some(expression) = budget else {
+            return Ok(None);
+        };
+        match self.expr(expression, environment)? {
+            Value::Number(number)
+                if number.is_finite()
+                    && number >= 0.0
+                    && number.fract() == 0.0
+                    && number <= usize::MAX as f64 =>
+            {
+                Ok(Some(number as usize))
+            }
+            _ => self.error(
+                expression.span,
+                "Region budget must be a non-negative integer",
+            ),
+        }
+    }
+    /// Open a region (arena) frame; cells allocated inside get its stamp and
+    /// count towards the metrics of its name.
+    fn enter_region(&mut self, budget: Option<usize>, name: Option<&str>) -> u32 {
+        self.next_region = self.next_region.checked_add(1).expect("region id overflow");
+        let region = self.next_region;
+        let stats = match self
+            .region_stats
+            .iter()
+            .position(|entry| entry.name.as_deref() == name)
+        {
+            Some(index) => index,
+            None => {
+                let index = self.region_stats.len();
+                self.region_stats.push(RegionStats {
+                    name: name.map(str::to_owned),
+                    ..RegionStats::default()
+                });
+                index
+            }
+        };
+        self.region_stats[stats].entries += 1;
+        self.region_stack.push(RegionFrame {
+            id: region,
+            budget,
+            live: 0,
+            stats,
+            cells: Vec::new(),
+        });
+        region
+    }
+    /// Close a region frame: cells no longer referenced after scope release
+    /// are swept in bulk; escaping values promote to the parent region and
+    /// count against its budget.
+    fn exit_region(&mut self, region: u32, span: Span) -> Result<()> {
+        let frame = self.region_stack.pop().expect("region frame");
+        debug_assert_eq!(frame.id, region);
+        self.reclaim_cells();
+        let parent = self.region_stack.last().map_or(0, |frame| frame.id);
+        let mut promoted = 0_usize;
+        for index in frame.cells {
+            // Stale entries belong to freed or re-stamped slots.
+            if self.cell_regions.get(index).copied() != Some(region) {
+                continue;
+            }
+            if let Some(id) = self.cell_ids[index].upgrade() {
+                self.cell_regions[index] = parent;
+                promoted += 1;
+                if let Some(parent_frame) = self.region_stack.last_mut() {
+                    parent_frame.cells.push(index);
+                }
+                drop(id);
+            }
+        }
+        self.region_stats[frame.stats].promoted += promoted as u64;
+        if promoted > 0
+            && let Some(parent_frame) = self.region_stack.last_mut()
+        {
+            parent_frame.live += promoted;
+            if parent_frame
+                .budget
+                .is_some_and(|budget| parent_frame.live > budget)
+            {
+                return self.error(span, "Region cell budget exceeded");
+            }
+        }
+        Ok(())
     }
     fn host_value_size(&mut self, value: &Value<'s>, span: Span, depth: usize) -> Result<()> {
         if self.max_collection_items == usize::MAX && self.max_string_bytes == usize::MAX {
@@ -1497,6 +2061,13 @@ impl<'s> Runtime<'_, 's> {
                 self.module.unwrap_or("<entry>"),
                 &name[9..]
             )),
+            ValueType::Function(parameters, result) => ValueType::Function(
+                parameters
+                    .iter()
+                    .map(|t| self.runtime_contract(t))
+                    .collect(),
+                Box::new(self.runtime_contract(result)),
+            ),
             ValueType::List(t) => ValueType::List(Box::new(self.runtime_contract(t))),
             ValueType::Option(t) => ValueType::Option(Box::new(self.runtime_contract(t))),
             ValueType::Result(t, e) => ValueType::Result(
@@ -1537,7 +2108,7 @@ impl<'s> Runtime<'_, 's> {
                         }),
                         _ => None,
                     }?;
-                    if let FunctionBody::Constructor { type_name, .. } = &constructor.body {
+                    if let FunctionBody::Constructor { type_name, .. } = &*constructor.body {
                         Some(type_name.clone())
                     } else {
                         None
@@ -1708,6 +2279,32 @@ impl<'s> Runtime<'_, 's> {
     }
 
     fn equal(&mut self, left: &Value<'_>, right: &Value<'_>, span: Span) -> Result<bool> {
+        // Scalar fast path: identical step accounting without a worklist
+        // allocation. Compound and mismatched values use the general walk.
+        match (left, right) {
+            (Value::Number(a), Value::Number(b)) => {
+                self.charge(1, span)?;
+                return Ok(a == b);
+            }
+            (Value::Bool(a), Value::Bool(b)) => {
+                self.charge(1, span)?;
+                return Ok(a == b);
+            }
+            (Value::Null, Value::Null) => {
+                self.charge(1, span)?;
+                return Ok(true);
+            }
+            (Value::String(a), Value::String(b)) => {
+                self.charge(1, span)?;
+                self.charge(a.len().max(b.len()), span)?;
+                return Ok(a == b);
+            }
+            (Value::Angle(a), Value::Angle(b)) => {
+                self.charge(1, span)?;
+                return Ok(a == b);
+            }
+            _ => {}
+        }
         let mut pending = vec![(left, right)];
         while let Some((left, right)) = pending.pop() {
             self.charge(1, span)?;
@@ -1854,7 +2451,7 @@ impl<'s> Runtime<'_, 's> {
                             type_name: expected,
                             variant: tag,
                             ..
-                        } = &constructor.body
+                        } = &*constructor.body
                         else {
                             return Ok(false);
                         };
@@ -2140,6 +2737,7 @@ impl<'s> Runtime<'_, 's> {
                         .map_err(|e| self.environment_error(statement.span, e))?;
                 }
                 StmtKind::Declaration {
+                    role: _,
                     name,
                     constant,
                     value: expression,
@@ -2172,6 +2770,8 @@ impl<'s> Runtime<'_, 's> {
                     body,
                     result,
                 } => {
+                    let shared_body =
+                        self.shared_body(statement.span, || FunctionBody::Block(body.clone()));
                     value = Value::Function(Rc::new(Closure {
                         parameters: parameters.iter().map(|p| p.pattern.clone()).collect(),
                         parameter_types: parameters
@@ -2207,7 +2807,7 @@ impl<'s> Runtime<'_, 's> {
                             }),
                         name: Some(name.text),
                         module: self.module,
-                        body: FunctionBody::Block(body.clone()),
+                        body: shared_body,
                         environment: self.capture(statement.span, environment)?,
                         references: self.current_references.clone(),
                     }));
@@ -2227,6 +2827,16 @@ impl<'s> Runtime<'_, 's> {
                 StmtKind::Break => return Ok((Value::Null, Flow::Break)),
                 StmtKind::Continue => return Ok((Value::Null, Flow::Continue)),
                 StmtKind::While { condition, body } => {
+                    // The outer binding map is loop-invariant (bodies only
+                    // mutate through shared cells), so snapshot it once and
+                    // give every iteration a cheap pooled child scope.
+                    let base = memory::Shared::new(
+                        &self.memory,
+                        environment
+                            .try_clone()
+                            .map_err(|e| self.environment_error(statement.span, e))?,
+                    )
+                    .map_err(|e| self.environment_error(statement.span, e))?;
                     loop {
                         let Value::Bool(keep_going) = self.expr(condition, environment)? else {
                             return self.error(condition.span, "Condition must be boolean");
@@ -2234,12 +2844,16 @@ impl<'s> Runtime<'_, 's> {
                         if !keep_going {
                             break;
                         }
-                        let result = self.scoped_statements(
-                            &body.stmts,
-                            environment
-                                .try_clone()
-                                .map_err(|e| self.environment_error(statement.span, e))?,
-                        )?;
+                        let mut scope = self.take_call_environment(&base);
+                        // Implicit per-iteration arena: scratch cells die in
+                        // bulk at the end of the iteration; escaping values
+                        // promote like in an explicit `region` block.
+                        let iteration = self.enter_region(None, None);
+                        let result = self.statements(&body.stmts, &mut scope);
+                        self.recycle_call_environment(scope);
+                        self.reclaim_cells();
+                        self.exit_region(iteration, statement.span)?;
+                        let result = result?;
                         match result.1 {
                             Flow::Return => return Ok(result),
                             Flow::Break => break,
@@ -2255,14 +2869,25 @@ impl<'s> Runtime<'_, 's> {
                 } => {
                     let source = self.expr(iterable, environment)?;
                     let mut cursor = self.sequence_cursor(source, iterable.span)?;
-                    while let Some(item) = self.sequence_next(&mut cursor, iterable.span)? {
-                        let mut local = environment
+                    let base = memory::Shared::new(
+                        &self.memory,
+                        environment
                             .try_clone()
-                            .map_err(|e| self.environment_error(statement.span, e))?;
-                        local
+                            .map_err(|e| self.environment_error(statement.span, e))?,
+                    )
+                    .map_err(|e| self.environment_error(statement.span, e))?;
+                    while let Some(item) = self.sequence_next(&mut cursor, iterable.span)? {
+                        let mut scope = self.take_call_environment(&base);
+                        scope
                             .insert(binding.text, item)
                             .map_err(|e| self.environment_error(binding.span, e))?;
-                        let result = self.scoped_statements(&body.stmts, local)?;
+                        // Same implicit per-iteration arena as in `while`.
+                        let iteration = self.enter_region(None, None);
+                        let result = self.statements(&body.stmts, &mut scope);
+                        self.recycle_call_environment(scope);
+                        self.reclaim_cells();
+                        self.exit_region(iteration, statement.span)?;
+                        let result = result?;
                         match result.1 {
                             Flow::Return => return Ok(result),
                             Flow::Break => break,
@@ -2271,7 +2896,9 @@ impl<'s> Runtime<'_, 's> {
                     }
                     value = Value::Null;
                 }
-                StmtKind::Expr(expression) => value = self.expr(expression, environment)?,
+                StmtKind::Show(expression) | StmtKind::Expr(expression) => {
+                    value = self.expr(expression, environment)?
+                }
                 StmtKind::If {
                     condition,
                     then_block,
@@ -2299,6 +2926,25 @@ impl<'s> Runtime<'_, 's> {
                     } else {
                         value = Value::Null;
                     }
+                }
+                StmtKind::Region {
+                    name,
+                    strict: _,
+                    budget,
+                    body,
+                } => {
+                    let budget = self.eval_region_budget(budget.as_ref(), environment)?;
+                    let scope = environment
+                        .try_clone()
+                        .map_err(|e| self.environment_error(statement.span, e))?;
+                    let region = self.enter_region(budget, name.as_ref().map(|name| name.text));
+                    let result = self.scoped_statements(&body.stmts, scope);
+                    self.exit_region(region, statement.span)?;
+                    let result = result?;
+                    if result.1 != Flow::Next {
+                        return Ok(result);
+                    }
+                    value = result.0;
                 }
                 _ => return self.error(statement.span, "Statement is not executable yet"),
             }
@@ -2411,17 +3057,15 @@ impl<'s> Runtime<'_, 's> {
                 target,
                 value,
             } => {
-                let ExprKind::Name(name) = &target.kind else {
-                    return self.error(span, "Only variable assignment is supported");
+                let (root_name, steps) = self.resolve_lvalue_path(target, environment)?;
+                let Some(Binding::Cell(cell)) = environment.get(root_name.text) else {
+                    return self.error(root_name.span, "Assignment requires a mutable variable");
                 };
-                let Some(Binding::Cell(cell)) = environment.get(name.text) else {
-                    return self.error(span, "Assignment requires a mutable variable");
-                };
-                let index = self.cell_index(cell, target.span)?;
+                let index = self.cell_index(cell, root_name.span)?;
                 let assigned = if *operator == "=" {
                     self.expr(value, environment)?
                 } else {
-                    let operator = match *operator {
+                    let op = match *operator {
                         "+=" => "+",
                         "-=" => "-",
                         "*=" => "*",
@@ -2429,32 +3073,63 @@ impl<'s> Runtime<'_, 's> {
                         "%=" => "%",
                         _ => return self.error(span, "Unknown assignment operator"),
                     };
-                    self.binary_expression(operator, target, value, environment, span)?
+                    self.binary_expression(op, target, value, environment, span)?
                 };
-                if self.cells[index]
-                    .1
-                    .as_ref()
-                    .is_some_and(|ty| !ty.accepts(&assigned))
-                {
-                    return self.error(span, "Assignment violates variable type");
-                }
-                let previous = std::mem::replace(&mut self.cells[index].0, assigned.clone());
-                if let Err(error) = self.enforce_retained_limit(span, None) {
-                    self.cells[index].0 = previous;
-                    return Err(error);
+                if steps.is_empty() {
+                    if self.cells[index]
+                        .1
+                        .as_ref()
+                        .is_some_and(|ty| !ty.accepts(&assigned))
+                    {
+                        return self.error(span, "Assignment violates variable type");
+                    }
+                    let previous = std::mem::replace(&mut self.cells[index].0, assigned.clone());
+                    if let Err(error) = self.enforce_retained_limit(span, None) {
+                        self.cells[index].0 = previous;
+                        return Err(error);
+                    }
+                } else {
+                    let previous = self.cells[index].0.clone();
+                    if let Err(err) = mutate_path(
+                        self.module,
+                        &mut self.cells[index].0,
+                        &steps,
+                        assigned.clone(),
+                        span,
+                    ) {
+                        self.cells[index].0 = previous;
+                        return Err(err);
+                    }
+                    if self.cells[index]
+                        .1
+                        .as_ref()
+                        .is_some_and(|ty| !ty.accepts(&self.cells[index].0))
+                    {
+                        self.cells[index].0 = previous;
+                        return self.error(span, "Assignment violates variable type");
+                    }
+                    if let Err(error) = self.enforce_retained_limit(span, None) {
+                        self.cells[index].0 = previous;
+                        return Err(error);
+                    }
                 }
                 Ok(assigned)
             }
-            ExprKind::Lambda { parameters, body } => Ok(Value::Function(Rc::new(Closure {
-                parameters: parameters.clone(),
-                parameter_types: vec![None; parameters.len()],
-                result_type: None,
-                body: FunctionBody::Expression(*body.clone()),
-                name: None,
-                module: self.module,
-                environment: self.capture(expression.span, environment)?,
-                references: self.current_references.clone(),
-            }))),
+            ExprKind::Lambda { parameters, body } => {
+                let body = self.shared_body(expression.span, || {
+                    FunctionBody::Expression((**body).clone())
+                });
+                Ok(Value::Function(Rc::new(Closure {
+                    parameters: parameters.clone(),
+                    parameter_types: vec![None; parameters.len()],
+                    result_type: None,
+                    body,
+                    name: None,
+                    module: self.module,
+                    environment: self.capture(expression.span, environment)?,
+                    references: self.current_references.clone(),
+                })))
+            }
             ExprKind::Tuple(items) | ExprKind::List(items) => {
                 self.collection_growth(0, items.len(), span)?;
                 let values = items
@@ -2632,6 +3307,20 @@ impl<'s> Runtime<'_, 's> {
                 Ok(value)
             }
             ExprKind::Call { callee, arguments } => {
+                // `move(binding)` empties a mutable cell and yields its value.
+                // A user binding named `move` shadows this form.
+                if let ExprKind::Name(name) = &callee.kind
+                    && name.text == "move"
+                    && environment.get(name.text).is_none()
+                {
+                    let [target] = arguments.as_slice() else {
+                        return self.error(span, "move requires exactly one argument");
+                    };
+                    let ExprKind::Name(target) = &target.kind else {
+                        return self.error(target.span, "move requires a mutable binding name");
+                    };
+                    return self.move_cell(target, environment);
+                }
                 let function = self.expr(callee, environment)?;
                 let arguments = arguments
                     .iter()
@@ -2660,6 +3349,37 @@ impl<'s> Runtime<'_, 's> {
                 right,
             } => self.binary_inner(operator, left, right, environment, span),
             _ => self.error(span, "Expression is not executable yet"),
+        }
+    }
+    /// Take the value out of a mutable binding's cell, leaving `Null` behind.
+    fn move_cell(&mut self, name: &Name<'s>, environment: &Environment<'s>) -> Result<Value<'s>> {
+        let Some(binding) = environment.get(name.text) else {
+            return self.error(name.span, &format!("Unknown name: {}", name.text));
+        };
+        match binding {
+            Binding::Value(_) => self.error(name.span, "move requires a mutable binding"),
+            Binding::Cell(id) => Ok(std::mem::replace(&mut self.cells[id.index].0, Value::Null)),
+        }
+    }
+    fn resolve_lvalue_path(
+        &mut self,
+        expr: &Expr<'s>,
+        environment: &Environment<'s>,
+    ) -> Result<(Name<'s>, Vec<AccessStep<'s>>)> {
+        match &expr.kind {
+            ExprKind::Name(name) => Ok((name.clone(), Vec::new())),
+            ExprKind::Index { object, index } => {
+                let (root, mut steps) = self.resolve_lvalue_path(object, environment)?;
+                let index_val = self.expr(index, environment)?;
+                steps.push(AccessStep::Index(index_val, index.span));
+                Ok((root, steps))
+            }
+            ExprKind::Member { object, field } => {
+                let (root, mut steps) = self.resolve_lvalue_path(object, environment)?;
+                steps.push(AccessStep::Member(field.text.to_owned(), field.span));
+                Ok((root, steps))
+            }
+            _ => self.error(expr.span, "Assignment requires a variable, member or index"),
         }
     }
     fn binary_expression(
@@ -2710,6 +3430,29 @@ impl<'s> Runtime<'_, 's> {
         if matches!(operator, "==" | "!=") {
             let equal = self.equal(&left, &right, span)?;
             return Ok(Value::Bool(if operator == "==" { equal } else { !equal }));
+        }
+        // Numeric fast path: skip the string/angle/matrix/vector guard chain
+        // for the common number-operator-number case.
+        if let (Value::Number(a), Value::Number(b)) = (&left, &right) {
+            let (a, b) = (*a, *b);
+            let number = match operator {
+                "+" => a + b,
+                "-" => a - b,
+                "*" => a * b,
+                "/" => a / b,
+                "%" => exact_remainder(a, b),
+                "**" => a.powf(b),
+                "<" => return Ok(Value::Bool(a < b)),
+                ">" => return Ok(Value::Bool(a > b)),
+                "<=" => return Ok(Value::Bool(a <= b)),
+                ">=" => return Ok(Value::Bool(a >= b)),
+                _ => return self.error(span, "Unsupported binary operator"),
+            };
+            return if number.is_finite() {
+                Ok(Value::Number(number))
+            } else {
+                self.error(span, "Non-finite arithmetic result")
+            };
         }
         if let (Value::String(a), Value::String(b), "+") = (&left, &right, operator) {
             self.string_growth(a.len(), b.len(), span)?;
@@ -3316,6 +4059,142 @@ impl<'s> Runtime<'_, 's> {
                 return self.error(span, "Incorrect builtin argument count");
             }
 
+            if builtin == Builtin::JsonParse {
+                if arguments.len() != 1 {
+                    return self.error(span, "json_parse requires one argument");
+                }
+                let Value::String(text) = &arguments[0] else {
+                    return self.error(span, "json_parse requires a string");
+                };
+                self.charge(text.len(), span)?;
+                return Ok(match json::parse(text) {
+                    Ok(val) => Value::Variant("Ok", vec![val]),
+                    Err(err) => Value::Variant("Err", vec![Value::String(err)]),
+                });
+            }
+            if builtin == Builtin::JsonStringify {
+                if arguments.len() != 1 {
+                    return self.error(span, "json_stringify requires one argument");
+                }
+                let encoded = json::stringify(&arguments[0]).map_err(|e| {
+                    self.call_error(
+                        RuntimeError {
+                            stack: Vec::new(),
+                            location: None,
+                            module: self.module.map(str::to_owned),
+                            span,
+                            message: format!("json_stringify failed: {e}"),
+                        },
+                        "json_stringify".into(),
+                        self.module,
+                        span,
+                    )
+                })?;
+                self.charge(encoded.len(), span)?;
+                return Ok(Value::String(encoded));
+            }
+
+            // Explicit region escape hatch: identity at runtime, the promotion
+            // itself is automatic; analysis recognizes the wrapper as intent.
+            if builtin == Builtin::Promote {
+                let mut arguments = arguments.into_owned();
+                return Ok(arguments.swap_remove(0));
+            }
+
+            // First-class region handles: `arena(name, budget?)` builds a plain
+            // descriptor record, `arena_run` executes a callback inside a fresh
+            // frame of that region, `arena_stats` reads its aggregated metrics.
+            if builtin == Builtin::Arena {
+                let mut arguments = arguments.into_owned().into_iter();
+                let Some(Value::String(name)) = arguments.next() else {
+                    return self.error(span, "arena requires a name string");
+                };
+                if name.is_empty() {
+                    return self.error(span, "arena name must not be empty");
+                }
+                let budget = match arguments.next() {
+                    None | Some(Value::Null) => Value::Null,
+                    Some(Value::Number(value))
+                        if value.is_finite() && value.fract() == 0.0 && value >= 0.0 =>
+                    {
+                        Value::Number(value)
+                    }
+                    _ => {
+                        return self.error(span, "arena budget must be a non-negative integer");
+                    }
+                };
+                self.collection_growth(0, 2, span)?;
+                return Ok(Value::Record(BTreeMap::from([
+                    ("name".into(), Value::String(name)),
+                    ("budget".into(), budget),
+                ])));
+            }
+            if matches!(builtin, Builtin::ArenaRun | Builtin::ArenaStats) {
+                let mut arguments = arguments.into_owned().into_iter();
+                let descriptor = arguments.next().unwrap();
+                let Value::Record(fields) = &descriptor else {
+                    return self.error(span, "an arena record from arena(...) is required");
+                };
+                let Some(Value::String(name)) = fields.get("name") else {
+                    return self.error(span, "arena record requires a name string");
+                };
+                if builtin == Builtin::ArenaStats {
+                    let stats = self
+                        .region_stats
+                        .iter()
+                        .find(|entry| entry.name.as_deref() == Some(name.as_str()));
+                    let metric = |pick: fn(&RegionStats) -> u64| {
+                        stats.map_or(0.0, |entry| pick(entry) as f64)
+                    };
+                    self.collection_growth(0, 7, span)?;
+                    return Ok(Value::Record(BTreeMap::from([
+                        ("name".into(), Value::String(name.clone())),
+                        ("entries".into(), Value::Number(metric(|s| s.entries))),
+                        ("allocated".into(), Value::Number(metric(|s| s.allocated))),
+                        (
+                            "reused_slots".into(),
+                            Value::Number(metric(|s| s.reused_slots)),
+                        ),
+                        (
+                            "peak_live".into(),
+                            Value::Number(stats.map_or(0.0, |s| s.peak_live as f64)),
+                        ),
+                        ("promoted".into(), Value::Number(metric(|s| s.promoted))),
+                        (
+                            "suggested_budget".into(),
+                            Value::Number(stats.map_or(0.0, |s| s.suggested_budget() as f64)),
+                        ),
+                    ])));
+                }
+                let callback = arguments.next().unwrap();
+                if !matches!(
+                    callback,
+                    Value::Function(_) | Value::Builtin(_) | Value::Host(_)
+                ) {
+                    return self.error(span, "arena_run requires a callable");
+                }
+                let budget = match fields.get("budget") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::Number(value))
+                        if value.is_finite() && value.fract() == 0.0 && *value >= 0.0 =>
+                    {
+                        Some(*value as usize)
+                    }
+                    _ => {
+                        return self.error(span, "arena budget must be a non-negative integer");
+                    }
+                };
+                let region = self.enter_region(budget, Some(name));
+                // The callback's own implicit call region would intercept its
+                // scratch cells before the arena sees them; the arena frame
+                // replaces it for exactly this one call.
+                self.skip_call_region = true;
+                let result = self.call(callback.clone(), Cow::Borrowed(&[]), span);
+                self.skip_call_region = false;
+                self.exit_region(region, span)?;
+                return result;
+            }
+
             if matches!(
                 builtin,
                 Builtin::Some | Builtin::None | Builtin::Ok | Builtin::Err
@@ -3714,11 +4593,11 @@ impl<'s> Runtime<'_, 's> {
                 types.into_iter().map(Some).collect()
             },
             result_type: Some(ValueType::User(type_name.clone())),
-            body: FunctionBody::Constructor {
+            body: Rc::new(FunctionBody::Constructor {
                 type_name,
                 variant,
                 fields,
-            },
+            }),
             environment: memory::Shared::new(&self.memory, Environment::new(&self.memory))
                 .map_err(|e| self.environment_error(name.span, e))?,
             references: Rc::new(Vec::new()),
@@ -3734,7 +4613,7 @@ impl<'s> Runtime<'_, 's> {
             type_name,
             variant,
             fields,
-        } = &function.body
+        } = &*function.body
         {
             if variant.is_none() {
                 let Value::Record(supplied) = &arguments[0] else {
@@ -3774,6 +4653,8 @@ impl<'s> Runtime<'_, 's> {
         arguments: Cow<'_, [Value<'s>]>,
         span: Span,
     ) -> Result<Value<'s>> {
+        // Consumed upfront so no early return can leak the one-shot flag.
+        let skip_call_region = std::mem::take(&mut self.skip_call_region);
         if arguments.len() != function.parameters.len() {
             return self.error(span, "Incorrect argument count");
         }
@@ -3785,14 +4666,16 @@ impl<'s> Runtime<'_, 's> {
         {
             return self.error(span, "Argument does not match its type annotation");
         }
-        if matches!(function.body, FunctionBody::Constructor { .. }) {
+        if matches!(&*function.body, FunctionBody::Constructor { .. }) {
             return self.call_constructor(&function, arguments, span);
         }
-        let mut environment = Environment::child(function.environment.clone());
-        if let Some(name) = function.name {
-            environment
-                .insert(name, Value::Function(function.clone()))
-                .map_err(|e| self.environment_error(span, e))?;
+        let mut environment = self.take_call_environment(&function.environment);
+        if let Some(name) = function.name
+            && let Err(allocation) = environment.insert(name, Value::Function(function.clone()))
+        {
+            let error = self.environment_error(span, allocation);
+            self.recycle_call_environment(environment);
+            return Err(error);
         }
         let previous_module = self.module;
         let previous_references =
@@ -3802,18 +4685,28 @@ impl<'s> Runtime<'_, 's> {
             if let Err(error) = self.bind_pattern(parameter, argument, &mut environment) {
                 self.module = previous_module;
                 self.current_references = previous_references;
+                self.recycle_call_environment(environment);
                 return Err(error);
             }
         }
-        let result = match &function.body {
+        if matches!(&*function.body, FunctionBody::Block(_)) && self.depth >= self.max_depth {
+            self.module = previous_module;
+            self.current_references = previous_references;
+            self.recycle_call_environment(environment);
+            return self.error(span, "Execution limit exceeded");
+        }
+        // Implicit per-call region: temporary cells die in bulk when the call
+        // returns, while captured ones promote into the caller's region.
+        // Skipped when arena_run already supplied this call's region.
+        let call_region = if skip_call_region {
+            None
+        } else {
+            Some(self.enter_region(None, None))
+        };
+        let result = match &*function.body {
             FunctionBody::Constructor { .. } => unreachable!("constructors return above"),
             FunctionBody::Expression(body) => self.expr(body, &environment),
             FunctionBody::Block(body) => {
-                if self.depth >= self.max_depth {
-                    self.module = previous_module;
-                    self.current_references = previous_references;
-                    return self.error(span, "Execution limit exceeded");
-                }
                 self.depth += 1;
                 let result =
                     self.statements(&body.stmts, &mut environment)
@@ -3839,8 +4732,14 @@ impl<'s> Runtime<'_, 's> {
         };
         self.module = previous_module;
         self.current_references = previous_references;
-        drop(environment);
-        self.reclaim_cells();
+        self.recycle_call_environment(environment);
+        // exit_region reclaims dead cells internally before sweeping; without
+        // a call region (arena_run owns it) reclaim explicitly.
+        if let Some(call_region) = call_region {
+            self.exit_region(call_region, span)?;
+        } else {
+            self.reclaim_cells();
+        }
         let value = result?;
         if function
             .result_type
@@ -3857,6 +4756,8 @@ impl<'s> Runtime<'_, 's> {
 pub fn builtin_catalog() -> &'static [(&'static str, Builtin)] {
     &[
         ("assert", Builtin::Assert),
+        ("json_parse", Builtin::JsonParse),
+        ("json_stringify", Builtin::JsonStringify),
         ("len", Builtin::Len),
         ("get", Builtin::Get),
         ("any", Builtin::Any),
@@ -3876,6 +4777,10 @@ pub fn builtin_catalog() -> &'static [(&'static str, Builtin)] {
         ("axis_angle", Builtin::AxisAngle),
         ("rotation_matrix", Builtin::RotationMatrix),
         ("identity", Builtin::Identity),
+        ("promote", Builtin::Promote),
+        ("arena", Builtin::Arena),
+        ("arena_run", Builtin::ArenaRun),
+        ("arena_stats", Builtin::ArenaStats),
         ("translation", Builtin::Translation),
         ("scaling", Builtin::Scaling),
         ("rotation_x", Builtin::RotationX),

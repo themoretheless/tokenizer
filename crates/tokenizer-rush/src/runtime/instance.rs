@@ -383,7 +383,9 @@ impl Runtime<'_, '_> {
                     .saturating_mul(std::mem::size_of::<super::coroutine::Frame<'_>>()),
             );
             for frame in &task.frames {
-                usage.environment(frame.environment());
+                if let Some(environment) = frame.environment() {
+                    usage.environment(environment);
+                }
                 if let Some(sequence) = frame.sequence() {
                     usage.value(&Value::Sequence(sequence.clone()));
                 }
@@ -432,6 +434,11 @@ impl ScriptInstance<'_, '_> {
     pub fn memory_usage(&self) -> usize {
         self.runtime.retained_usage().bytes
     }
+    /// Aggregated allocation metrics per region name, including regions
+    /// executed inside coroutines. Use `peak_live` to size region budgets.
+    pub fn region_stats(&self) -> &[RegionStats] {
+        &self.runtime.region_stats
+    }
     pub(super) fn enforce_memory_limit(&self) -> Result<()> {
         if self.memory_usage() > self.runtime.memory_limit {
             self.runtime
@@ -450,7 +457,7 @@ impl ScriptInstance<'_, '_> {
     }
 }
 
-fn owned_value(value: Value<'_>) -> std::result::Result<Value<'static>, String> {
+pub(super) fn owned_value(value: Value<'_>) -> std::result::Result<Value<'static>, String> {
     Ok(match value {
         Value::UserData(data) => Value::UserData(Box::new(super::UserData {
             type_name: data.type_name,

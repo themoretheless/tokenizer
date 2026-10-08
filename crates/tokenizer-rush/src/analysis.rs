@@ -309,6 +309,10 @@ fn inspect_inner(
         diagnostics: Vec::new(),
         valid: true,
         limit,
+        region_depth: 0,
+        region_strict: Vec::new(),
+        binding_regions: HashMap::new(),
+        moved: HashMap::new(),
     };
     checker.statements(&parsed.module.items);
     if let Some(interface) = interface {
@@ -504,6 +508,11 @@ struct Checker<'s> {
     diagnostics: Vec<Diagnostic>,
     valid: bool,
     limit: usize,
+    region_depth: usize,
+    region_strict: Vec<bool>,
+    binding_regions: HashMap<usize, usize>,
+    /// Bindings emptied by `move(...)`; a read is an error until reassigned.
+    moved: HashMap<usize, Span>,
 }
 // Only exits that can reach a following statement matter for missing-return.
 // Return and continue stop the current block; loops consume their own breaks.
@@ -560,6 +569,7 @@ impl BlockExits {
                     next: true,
                     breaks: false,
                 },
+                StmtKind::Region { body, .. } => Self::inspect(&body.stmts),
                 _ => Self {
                     next: true,
                     breaks: false,
@@ -650,6 +660,120 @@ impl<'s> Checker<'s> {
             self.diagnostics.push(Diagnostic::new(span, code, message));
         }
     }
+    /// Non-fatal lint: the program stays valid and runs, but the host UI
+    /// surfaces the suspicious pattern.
+    fn warn(&mut self, span: Span, code: &'static str, message: &'static str) {
+        if self.diagnostics.len() < self.limit {
+            self.diagnostics.push(Diagnostic::new(span, code, message));
+        }
+    }
+    /// Deepest region level among recorded name references inside `span` that
+    /// resolve to bindings declared deeper than `level`; `None` when nothing
+    /// escapes.
+    fn escape_level(&self, span: Span, level: usize) -> Option<usize> {
+        self.references
+            .iter()
+            .filter(|reference| {
+                reference.usage.start >= span.start && reference.usage.end <= span.end
+            })
+            .filter_map(|reference| {
+                let definition = reference.definition?;
+                let binding_level = self.binding_regions.get(&definition.start).copied()?;
+                (binding_level > level).then_some(binding_level)
+            })
+            .max()
+    }
+    /// Explicit `promote(value)` intent: a single-argument call to the
+    /// builtin, not shadowed by a user binding.
+    fn is_promote_call(&self, expression: &Expr<'s>) -> bool {
+        self.is_unshadowed_call(expression, "promote")
+    }
+    /// Explicit `move(binding)`: takes the value out of a mutable cell,
+    /// leaving it empty. Also an explicit relocation intent for escapes.
+    fn is_move_call(&self, expression: &Expr<'s>) -> bool {
+        self.is_unshadowed_call(expression, "move")
+    }
+    fn is_unshadowed_call(&self, expression: &Expr<'s>, name: &str) -> bool {
+        let ExprKind::Call { callee, arguments } = &expression.kind else {
+            return false;
+        };
+        arguments.len() == 1
+            && matches!(&callee.kind, ExprKind::Name(callee_name)
+                if callee_name.text == name
+                    && !self.scopes.iter().any(|scope| scope.contains_key(callee_name.text)))
+    }
+    /// Check a `move(...)` call: single mutable-binding argument, not moved
+    /// before; marks the binding as emptied for subsequent reads.
+    fn move_call(&mut self, span: Span, arguments: &[Expr<'s>]) {
+        let [target] = arguments else {
+            self.error(span, "move-arity", "move requires exactly one argument");
+            return;
+        };
+        let ExprKind::Name(name) = &target.kind else {
+            self.error(
+                target.span,
+                "move-target",
+                "move requires a mutable binding name",
+            );
+            self.expr(target);
+            return;
+        };
+        let resolved = self
+            .scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name.text))
+            .map(|binding| (binding.0, binding.1));
+        match resolved {
+            None => self.expr(target),
+            Some((constant, definition)) => {
+                if constant {
+                    self.error(
+                        name.span,
+                        "move-immutable",
+                        "move requires a mutable binding",
+                    );
+                } else if self.moved.insert(definition.start, name.span).is_some() {
+                    self.error(
+                        name.span,
+                        "moved-value",
+                        "Binding was already moved out of its cell",
+                    );
+                }
+                self.references.push(NameReference {
+                    definition_module: None,
+                    usage: name.span,
+                    definition: Some(definition),
+                });
+            }
+        }
+    }
+    /// Reports an implicit region escape: a hard error when any crossed
+    /// region is strict, a non-fatal lint otherwise. Values whose shape
+    /// cannot carry captured cells (scalar copies, scalar collections) move
+    /// freely and are never reported.
+    fn check_escape(&mut self, value: &Expr<'s>, target_level: usize, context: &'static str) {
+        if !self.shape(value).can_carry_cells() {
+            return;
+        }
+        let span = value.span;
+        let Some(escaped) = self.escape_level(span, target_level) else {
+            return;
+        };
+        if self
+            .region_strict
+            .get(target_level..escaped)
+            .is_some_and(|crossed| crossed.iter().any(|strict| *strict))
+        {
+            self.error(
+                span,
+                "region-escape",
+                "Value allocated in a strict region escapes; wrap it in promote(...) to allow the escape",
+            );
+        } else {
+            self.warn(span, "region-escape", context);
+        }
+    }
     fn declare(&mut self, name: &Name<'s>, constant: bool, start: usize) {
         let scope = self.scopes.last_mut().unwrap();
         if scope.contains_key(name.text) {
@@ -660,6 +784,8 @@ impl<'s> Checker<'s> {
             );
         } else {
             scope.insert(name.text, (constant, name.span, None, None));
+            self.binding_regions
+                .insert(name.span.start, self.region_depth);
             if self.collect_members {
                 self.bindings.push(LexicalBinding {
                     name: name.text.to_owned(),
@@ -821,10 +947,11 @@ impl<'s> Checker<'s> {
                 StmtKind::Return(Some(value)) => {
                     self.constrain(value, expected.clone(), parameters)
                 }
-                StmtKind::Expr(value) | StmtKind::Yield(value) => {
+                StmtKind::Show(value) | StmtKind::Expr(value) | StmtKind::Yield(value) => {
                     self.constrain(value, None, parameters)
                 }
                 StmtKind::Declaration {
+                    role: _,
                     name,
                     constant,
                     value,
@@ -875,6 +1002,9 @@ impl<'s> Checker<'s> {
                     self.constrain_body(&body.stmts, expected.clone(), parameters);
                     self.scopes.pop();
                 }
+                StmtKind::Region { body, .. } => {
+                    self.constrain_body(&body.stmts, expected.clone(), parameters);
+                }
                 _ => {}
             }
         }
@@ -901,6 +1031,7 @@ impl<'s> Checker<'s> {
                 StmtKind::While { body, .. } | StmtKind::For { body, .. } => {
                     self.return_candidates(&body.stmts, output)
                 }
+                StmtKind::Region { body, .. } => self.return_candidates(&body.stmts, output),
                 _ => {}
             }
         }
@@ -940,6 +1071,7 @@ impl<'s> Checker<'s> {
             StmtKind::While { body, .. } | StmtKind::For { body, .. } => {
                 Self::contains_yield(&body.stmts)
             }
+            StmtKind::Region { body, .. } => Self::contains_yield(&body.stmts),
             _ => false,
         })
     }
@@ -1352,6 +1484,7 @@ impl<'s> Checker<'s> {
                 self.scope_spans.pop();
             }
             StmtKind::Declaration {
+                role: _,
                 name,
                 constant,
                 value,
@@ -1468,6 +1601,16 @@ impl<'s> Checker<'s> {
             StmtKind::Return(value) => {
                 if let Some(value) = value {
                     self.expr(value);
+                    if self.region_depth > 0
+                        && !self.is_promote_call(value)
+                        && !self.is_move_call(value)
+                    {
+                        self.check_escape(
+                            value,
+                            0,
+                            "Returned value may capture cells allocated inside a region; they will be promoted to an outer region",
+                        );
+                    }
                 }
                 let returned = value
                     .as_ref()
@@ -1491,7 +1634,9 @@ impl<'s> Checker<'s> {
                     }
                 }
             }
-            StmtKind::Yield(value) | StmtKind::Expr(value) => self.expr(value),
+            StmtKind::Show(value) | StmtKind::Yield(value) | StmtKind::Expr(value) => {
+                self.expr(value)
+            }
             StmtKind::If {
                 condition,
                 then_block,
@@ -1543,6 +1688,28 @@ impl<'s> Checker<'s> {
                 self.scope_spans.pop();
             }
             StmtKind::Break | StmtKind::Continue | StmtKind::Error => {}
+            StmtKind::Region {
+                strict,
+                budget,
+                body,
+                ..
+            } => {
+                if let Some(budget) = budget {
+                    self.expr(budget);
+                    if self.calls && self.shape(budget).rejects(&ValueType::Number) {
+                        self.error(
+                            budget.span,
+                            "region-budget",
+                            "Region budget must be a number",
+                        );
+                    }
+                }
+                self.region_depth += 1;
+                self.region_strict.push(*strict);
+                self.block(body);
+                self.region_strict.pop();
+                self.region_depth -= 1;
+            }
         }
     }
     fn irrefutable(pattern: &Expr<'s>) -> bool {
@@ -2137,6 +2304,10 @@ impl<'s> Checker<'s> {
         }
     }
     fn known_arity(&self, expression: &Expr<'s>) -> Option<Vec<std::ops::RangeInclusive<usize>>> {
+        if let Shape::Typed(ValueType::Function(parameters, _)) = self.shape(expression) {
+            let n = parameters.len();
+            return Some(std::iter::once(n..=n).collect());
+        }
         if let Shape::Function(parameters, _, _) = self.shape(expression) {
             let n = parameters.len();
             return Some(std::iter::once(n..=n).collect());
@@ -2221,6 +2392,9 @@ impl<'s> Checker<'s> {
         }
     }
     fn known_user_parameters(&self, expression: &Expr<'s>) -> Option<Vec<Option<ValueType>>> {
+        if let Shape::Typed(ValueType::Function(parameters, _)) = self.shape(expression) {
+            return Some(parameters.into_iter().map(Some).collect());
+        }
         if let Shape::Function(parameters, _, _) = self.shape(expression) {
             return Some(parameters);
         }
@@ -2247,6 +2421,9 @@ impl<'s> Checker<'s> {
             .cloned()
     }
     fn call_result_shape(&self, callee: &Expr<'s>) -> Shape {
+        if let Shape::Typed(ValueType::Function(_, result)) = self.shape(callee) {
+            return Shape::Typed(*result);
+        }
         if let Shape::Function(_, result, _) = self.shape(callee) {
             return *result;
         }
@@ -2538,6 +2715,7 @@ impl<'s> Checker<'s> {
         fn data(shape: &Shape) -> bool {
             match shape {
                 Shape::Alternatives(shapes) => shapes.iter().any(data),
+                Shape::Typed(ValueType::Function(..)) => false,
                 Shape::Typed(_) | Shape::List(_) | Shape::Tuple(_) | Shape::Record(_) => true,
                 _ => false,
             }
@@ -2960,8 +3138,47 @@ impl<'s> Checker<'s> {
                     }
                     self.expr(&binary);
                 } else {
+                    // Plain reassignment revives a moved binding's cell.
+                    if let ExprKind::Name(name) = &target.kind {
+                        let id = self
+                            .scopes
+                            .iter()
+                            .rev()
+                            .find_map(|scope| scope.get(name.text))
+                            .map(|binding| binding.1.start);
+                        if let Some(id) = id {
+                            self.moved.remove(&id);
+                        }
+                    }
                     self.expr(target);
                     self.expr(value);
+                }
+                // Compound assignment writes a freshly computed value into an
+                // existing outer cell; no region data or cell can flow out.
+                if self.region_depth > 0
+                    && *operator == "="
+                    && let Some(name) = lvalue_root(target)
+                    && let Some(binding) = self
+                        .scopes
+                        .iter()
+                        .rev()
+                        .find_map(|scope| scope.get(name.text))
+                {
+                    let target_level = self
+                        .binding_regions
+                        .get(&binding.1.start)
+                        .copied()
+                        .unwrap_or(0);
+                    if self.region_depth > target_level
+                        && !self.is_promote_call(value)
+                        && !self.is_move_call(value)
+                    {
+                        self.check_escape(
+                            value,
+                            target_level,
+                            "Assigned value may capture cells allocated in an inner region; they will be promoted to the target binding's region",
+                        );
+                    }
                 }
             }
             ExprKind::Unary {
@@ -3093,7 +3310,13 @@ impl<'s> Checker<'s> {
                 self.expr(right);
             }
             ExprKind::Call { callee, arguments } => {
-                self.call(callee, arguments, None);
+                if matches!(&callee.kind, ExprKind::Name(name) if name.text == "move")
+                    && !self.scopes.iter().any(|scope| scope.contains_key("move"))
+                {
+                    self.move_call(expr.span, arguments);
+                } else {
+                    self.call(callee, arguments, None);
+                }
             }
             ExprKind::Member { object, field } => {
                 self.member_reference(object, field);
@@ -3243,6 +3466,15 @@ impl<'s> Checker<'s> {
                     .rev()
                     .find_map(|scope| scope.get(name.text))
                     .map(|binding| binding.1);
+                if let Some(definition) = definition
+                    && self.moved.contains_key(&definition.start)
+                {
+                    self.error(
+                        name.span,
+                        "moved-value",
+                        "Binding was moved out of its cell; assign it again before reading",
+                    );
+                }
                 self.references.push(NameReference {
                     definition_module: None,
                     usage: name.span,
@@ -3272,6 +3504,32 @@ enum Shape {
     Unsupported,
 }
 impl Shape {
+    /// Whether a value of this shape can carry captured cells — closures or
+    /// containers whose payload is not statically known to be scalar. Pure
+    /// scalar copies never move a cell out of its region.
+    fn can_carry_cells(&self) -> bool {
+        fn type_carries(ty: &ValueType) -> bool {
+            match ty {
+                ValueType::Function(..)
+                | ValueType::User(_)
+                | ValueType::HostObject(_)
+                | ValueType::Sequence => true,
+                ValueType::Option(inner) => type_carries(inner),
+                ValueType::Result(ok, err) => type_carries(ok) || type_carries(err),
+                ValueType::List(element) => type_carries(element),
+                ValueType::Tuple(items) => items.iter().any(type_carries),
+                _ => false,
+            }
+        }
+        match self {
+            Self::Function(..) | Self::Constructor(..) | Self::Unknown | Self::Unsupported => true,
+            Self::Alternatives(items) | Self::List(items) | Self::Tuple(items) => {
+                items.iter().any(Self::can_carry_cells)
+            }
+            Self::Record(fields) => fields.values().any(Self::can_carry_cells),
+            Self::Typed(ty) => type_carries(ty),
+        }
+    }
     fn has_contract(&self) -> bool {
         match self {
             Self::Typed(_) => true,
@@ -3322,9 +3580,21 @@ impl Shape {
         match self {
             Self::Alternatives(shapes) => shapes.iter().any(|shape| shape.rejects(expected)),
             Self::Unknown => false,
-            Self::Unsupported | Self::Record(_) | Self::Constructor(..) | Self::Function(..) => {
-                true
+            Self::Function(parameters, result, suspends) => {
+                if let ValueType::Function(expected_parameters, expected_result) = expected {
+                    *suspends
+                        || parameters.len() != expected_parameters.len()
+                        || parameters
+                            .iter()
+                            .zip(expected_parameters)
+                            .any(|(actual, expected)| actual.as_ref() != Some(expected))
+                        || result.rejects(expected_result)
+                        || matches!(result.as_ref(), Shape::Unknown)
+                } else {
+                    true
+                }
             }
+            Self::Unsupported | Self::Record(_) | Self::Constructor(..) => true,
             Self::Typed(actual) => disjoint(actual, expected),
             Self::List(items) => match expected {
                 ValueType::List(element) => items.iter().any(|item| item.rejects(element)),
@@ -3353,5 +3623,13 @@ fn disjoint(actual: &ValueType, expected: &ValueType) -> bool {
             disjoint(ok_a, ok_b) && disjoint(err_a, err_b)
         }
         _ => actual != expected,
+    }
+}
+
+fn lvalue_root<'a, 's>(expr: &'a Expr<'s>) -> Option<&'a Name<'s>> {
+    match &expr.kind {
+        ExprKind::Name(name) => Some(name),
+        ExprKind::Index { object, .. } | ExprKind::Member { object, .. } => lvalue_root(object),
+        _ => None,
     }
 }

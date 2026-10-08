@@ -559,3 +559,83 @@ mod tests {
         assert!(output.contains("u-scheme"));
     }
 }
+
+/// Stateful browser/application boundary for scheduled Rush functions.
+#[cfg(feature = "rush")]
+pub struct RushSchedule {
+    scheduler: themoretheless_tokenizer_rush::OwnedCoroutineScheduler,
+}
+#[cfg(feature = "rush")]
+impl RushSchedule {
+    fn limits() -> themoretheless_tokenizer_rush::ExecutionLimits {
+        themoretheless_tokenizer_rush::ExecutionLimits {
+            max_collection_items: 10_000,
+            max_string_bytes: 65_536,
+            ..themoretheless_tokenizer_rush::ExecutionLimits::new(100_000)
+        }
+    }
+    pub fn new(source: &str) -> Result<Self, String> {
+        let scheduler =
+            themoretheless_tokenizer_rush::OwnedCoroutineScheduler::new(source, Self::limits())
+                .map_err(|e| e.message)?;
+        Ok(Self { scheduler })
+    }
+    pub fn spawn(&mut self, name: &str) -> Result<String, String> {
+        self.scheduler
+            .spawn(name, &[], Self::limits())
+            .map(|id| id.get().to_string())
+            .map_err(|e| e.message)
+    }
+    pub fn emit(&mut self, name: &str) -> Result<usize, String> {
+        self.scheduler.emit(name).map_err(|e| e.message)
+    }
+    pub fn cancel_all(&mut self) {
+        self.scheduler.cancel_all()
+    }
+    pub fn next_deadline_ms(&self) -> Option<f64> {
+        self.scheduler
+            .next_deadline()
+            .map(|t| t.as_secs_f64() * 1000.)
+    }
+    pub fn poll(&mut self, milliseconds: f64) -> Result<String, String> {
+        use themoretheless_tokenizer_rush::{ScheduledState, WakeRequest};
+        let now = std::time::Duration::try_from_secs_f64(milliseconds / 1000.)
+            .map_err(|_| "Time must be finite and nonnegative".to_owned())?;
+        let steps = self
+            .scheduler
+            .poll(now, Self::limits())
+            .map_err(|e| e.message)?;
+        let mut output = String::from("{\"steps\":[");
+        for (index, step) in steps.into_iter().enumerate() {
+            if index > 0 {
+                output.push(',')
+            }
+            let state = match step.state {
+                ScheduledState::Waiting(WakeRequest::After(delay)) => format!(
+                    "\"state\":\"waiting\",\"afterMs\":{}",
+                    delay.as_secs_f64() * 1000.
+                ),
+                ScheduledState::Waiting(WakeRequest::Event(event)) => {
+                    format!("\"state\":\"waiting\",\"event\":{}", json_string(&event))
+                }
+                ScheduledState::Complete(value) => {
+                    let value = bounded_rush_output(|out| write!(out, "{value:?}"))
+                        .map_err(|_| "Text output byte limit exceeded".to_owned())?;
+                    format!("\"state\":\"complete\",\"output\":{}", json_string(&value))
+                }
+                ScheduledState::Failed(error) => format!(
+                    "\"state\":\"failed\",\"error\":{}",
+                    json_string(&error.message)
+                ),
+            };
+            write!(
+                output,
+                "{{\"id\":{}, {state}}}",
+                json_string(&step.id.get().to_string())
+            )
+            .unwrap();
+        }
+        write!(output, "],\"empty\":{}}}", self.scheduler.is_empty()).unwrap();
+        Ok(output)
+    }
+}
