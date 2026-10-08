@@ -365,6 +365,12 @@ pub enum Opcode {
     IterNext { iter_slot: u32, exit_jump: usize },
     /// Try-propagation `?`: unwrap `Some`/`Ok` or early-return `None`/`Err`.
     TryPropagate,
+    /// Pop top-of-stack and store directly into local variable slot (fused SetLocal + Pop).
+    StoreLocal(u32),
+    /// Pop top-of-stack and store directly into captured upvalue at closure index (fused SetUpvalue + Pop).
+    StoreUpvalue(u32),
+    /// Pop and assert region budget is a non-negative integer.
+    AssertRegionBudget,
     /// Return from execution.
     Return,
 }
@@ -385,6 +391,21 @@ impl Chunk {
     }
 
     pub fn emit(&mut self, op: Opcode, span: Span) -> usize {
+        if op == Opcode::Pop {
+            match self.code.last_mut() {
+                Some(Opcode::SetLocal(slot)) => {
+                    let s = *slot;
+                    *self.code.last_mut().expect("present") = Opcode::StoreLocal(s);
+                    return self.code.len() - 1;
+                }
+                Some(Opcode::SetUpvalue(idx)) => {
+                    let i = *idx;
+                    *self.code.last_mut().expect("present") = Opcode::StoreUpvalue(i);
+                    return self.code.len() - 1;
+                }
+                _ => {}
+            }
+        }
         let idx = self.code.len();
         self.code.push(op);
         self.spans.push(span);
@@ -408,7 +429,18 @@ impl Chunk {
         idx
     }
 
-    pub fn patch_jump(&mut self, instruction_idx: usize, target: usize) {
+    pub fn patch_jump(&mut self, instruction_idx: usize, mut target: usize) {
+        // Jump threading: skip intermediate unconditional jumps
+        while target < self.code.len() {
+            if let Opcode::Jump(next_target) = self.code[target] {
+                if next_target == target {
+                    break;
+                }
+                target = next_target;
+            } else {
+                break;
+            }
+        }
         match &mut self.code[instruction_idx] {
             Opcode::Jump(t) | Opcode::JumpIfFalse(t) | Opcode::JumpIfTrue(t) => {
                 *t = target;
@@ -462,6 +494,85 @@ impl BytecodeProgram {
 pub fn evaluate_bytecode(source: &str, budget: usize) -> Result<Value<'static>, RuntimeError> {
     let program = BytecodeProgram::compile(source)?;
     program.execute(budget)
+}
+
+/// Evaluates compile-time constants for peephole folding.
+fn try_eval_const(expr: &Expr<'_>) -> Option<Value<'static>> {
+    match &expr.kind {
+        ExprKind::Number(text) => {
+            let clean = text.replace('_', "");
+            clean
+                .parse::<f64>()
+                .ok()
+                .filter(|n| n.is_finite())
+                .map(Value::Number)
+        }
+        ExprKind::String(text) => {
+            let mut decoded = String::new();
+            for c in crate::string_literal::characters(text) {
+                decoded.push(c.ok()?);
+            }
+            Some(Value::String(decoded))
+        }
+        ExprKind::Bool(b) => Some(Value::Bool(*b)),
+        ExprKind::Null => Some(Value::Null),
+        ExprKind::Unary { operator, value } => {
+            let inner = try_eval_const(value)?;
+            match (*operator, inner) {
+                ("-", Value::Number(n)) if (-n).is_finite() => Some(Value::Number(-n)),
+                ("!" | "not", val) => Some(Value::Bool(!is_truthy(&val))),
+                _ => None,
+            }
+        }
+        ExprKind::Binary {
+            operator,
+            left,
+            right,
+        } => {
+            let l = try_eval_const(left)?;
+            let r = try_eval_const(right)?;
+            match (*operator, l, r) {
+                ("+", Value::Number(a), Value::Number(b)) if (a + b).is_finite() => {
+                    Some(Value::Number(a + b))
+                }
+                ("-", Value::Number(a), Value::Number(b)) if (a - b).is_finite() => {
+                    Some(Value::Number(a - b))
+                }
+                ("*", Value::Number(a), Value::Number(b)) if (a * b).is_finite() => {
+                    Some(Value::Number(a * b))
+                }
+                ("/", Value::Number(a), Value::Number(b)) if b != 0.0 && (a / b).is_finite() => {
+                    Some(Value::Number(a / b))
+                }
+                ("%", Value::Number(a), Value::Number(b)) if b != 0.0 => {
+                    Some(Value::Number(exact_remainder(a, b)))
+                }
+                ("+", Value::String(a), Value::String(b)) => Some(Value::String(format!("{a}{b}"))),
+                ("==", l, r) => Some(Value::Bool(l == r)),
+                ("!=", l, r) => Some(Value::Bool(l != r)),
+                ("<", Value::Number(a), Value::Number(b)) => Some(Value::Bool(a < b)),
+                ("<=", Value::Number(a), Value::Number(b)) => Some(Value::Bool(a <= b)),
+                (">", Value::Number(a), Value::Number(b)) => Some(Value::Bool(a > b)),
+                (">=", Value::Number(a), Value::Number(b)) => Some(Value::Bool(a >= b)),
+                ("&&", l, r) => Some(Value::Bool(is_truthy(&l) && is_truthy(&r))),
+                ("||", l, r) => Some(Value::Bool(is_truthy(&l) || is_truthy(&r))),
+                _ => None,
+            }
+        }
+        ExprKind::If {
+            condition,
+            then_value,
+            else_value,
+        } => {
+            let cond = try_eval_const(condition)?;
+            if is_truthy(&cond) {
+                try_eval_const(then_value)
+            } else {
+                try_eval_const(else_value)
+            }
+        }
+        _ => None,
+    }
 }
 
 struct LoopContext {
@@ -932,6 +1043,17 @@ impl<'s> Compiler<'s> {
                     self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
             }
+            StmtKind::Region { budget, body, .. } => {
+                if let Some(budget_expr) = budget {
+                    self.compile_expr(budget_expr)?;
+                    self.current()
+                        .chunk
+                        .emit(Opcode::AssertRegionBudget, budget_expr.span);
+                }
+                self.current().push_scope();
+                self.compile_block(&body.stmts, keep_result)?;
+                self.current().pop_scope();
+            }
             StmtKind::Show(expr) | StmtKind::Expr(expr) => {
                 self.compile_expr(expr)?;
                 if !keep_result {
@@ -947,8 +1069,30 @@ impl<'s> Compiler<'s> {
         Ok(())
     }
 
+    fn emit_constant_value(&mut self, val: Value<'static>, span: Span) {
+        match val {
+            Value::Null => {
+                self.current().chunk.emit(Opcode::Null, span);
+            }
+            Value::Bool(true) => {
+                self.current().chunk.emit(Opcode::True, span);
+            }
+            Value::Bool(false) => {
+                self.current().chunk.emit(Opcode::False, span);
+            }
+            v => {
+                let idx = self.current().chunk.add_constant(v);
+                self.current().chunk.emit(Opcode::Constant(idx), span);
+            }
+        }
+    }
+
     fn compile_expr(&mut self, expr: &Expr<'s>) -> Result<(), RuntimeError> {
         let span = expr.span;
+        if let Some(const_val) = try_eval_const(expr) {
+            self.emit_constant_value(const_val, span);
+            return Ok(());
+        }
         match &expr.kind {
             ExprKind::Try(value) => {
                 self.compile_expr(value)?;
@@ -1757,6 +1901,15 @@ impl Vm {
                     }
                     self.stack[idx] = val;
                 }
+                Opcode::StoreLocal(slot) => {
+                    let val = self.stack.pop().unwrap_or(Value::Null);
+                    let stack_base = self.frames[frame_idx].stack_base;
+                    let idx = stack_base + slot as usize;
+                    if idx >= self.stack.len() {
+                        self.stack.resize(idx + 1, Value::Null);
+                    }
+                    self.stack[idx] = val;
+                }
                 Opcode::GetUpvalue(idx) => {
                     let cell = self.frames[frame_idx].closure.upvalues[idx as usize].clone();
                     let val = match &*cell.borrow() {
@@ -1769,6 +1922,21 @@ impl Vm {
                 }
                 Opcode::SetUpvalue(idx) => {
                     let val = self.stack.last().cloned().unwrap_or(Value::Null);
+                    let cell = self.frames[frame_idx].closure.upvalues[idx as usize].clone();
+                    let mut borrow = cell.borrow_mut();
+                    match &mut *borrow {
+                        Upvalue::Open(slot) => {
+                            let slot = *slot;
+                            if slot >= self.stack.len() {
+                                self.stack.resize(slot + 1, Value::Null);
+                            }
+                            self.stack[slot] = val;
+                        }
+                        Upvalue::Closed(v) => *v = val,
+                    }
+                }
+                Opcode::StoreUpvalue(idx) => {
+                    let val = self.stack.pop().unwrap_or(Value::Null);
                     let cell = self.frames[frame_idx].closure.upvalues[idx as usize].clone();
                     let mut borrow = cell.borrow_mut();
                     match &mut *borrow {
@@ -2490,6 +2658,21 @@ impl Vm {
                         self.stack.resize(local_idx + 1, Value::Null);
                     }
                     self.stack[local_idx] = Value::BytecodeIterator(Rc::new(RefCell::new(iter)));
+                }
+                Opcode::AssertRegionBudget => {
+                    let val = self.stack.pop().unwrap();
+                    match val {
+                        Value::Number(number)
+                            if number.is_finite()
+                                && number >= 0.0
+                                && number.fract() == 0.0
+                                && number <= usize::MAX as f64 => {}
+                        _ => {
+                            return Err(
+                                self.error(span, "Region budget must be a non-negative integer")
+                            );
+                        }
+                    }
                 }
                 Opcode::IterNext {
                     iter_slot,

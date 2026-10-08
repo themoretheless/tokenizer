@@ -214,3 +214,47 @@ fn test_for_show_stmt() {
         Value::Number(123.0)
     );
 }
+
+#[test]
+fn test_region_basic() {
+    let source = "region scratch { mut t = 40; t + 2 }";
+    assert_eq!(evaluate_bytecode(source, 100).unwrap(), Value::Number(42.0));
+}
+
+#[test]
+fn test_region_with_budget() {
+    let source = "region scratch (1024) { 10 + 20 }";
+    assert_eq!(evaluate_bytecode(source, 100).unwrap(), Value::Number(30.0));
+}
+
+#[test]
+fn test_region_budget_error() {
+    let source = "region scratch (-5) { 10 }";
+    let err = evaluate_bytecode(source, 100).unwrap_err();
+    assert!(
+        err.message
+            .contains("Region budget must be a non-negative integer")
+    );
+}
+
+#[test]
+fn test_region_escaping_closure() {
+    let source = "mut g = () => 0\nregion r { mut n = 40\ng = () => n += 2 }\ng()\ng()\n";
+    assert_eq!(evaluate_bytecode(source, 500).unwrap(), Value::Number(44.0));
+}
+
+#[test]
+fn test_constant_folding_and_store_local() {
+    use themoretheless_tokenizer_rush::bytecode::{BytecodeProgram, Opcode};
+    let source = "let x = 1 + 2 * 3\nx";
+    let prog = BytecodeProgram::compile(source).unwrap();
+    // 1 + 2 * 3 is folded into a single constant (7.0)
+    // and storing x uses StoreLocal instead of SetLocal + Pop!
+    assert!(
+        prog.chunk
+            .code
+            .iter()
+            .any(|op| matches!(op, Opcode::StoreLocal(_)))
+    );
+    assert_eq!(prog.execute(100).unwrap(), Value::Number(7.0));
+}
