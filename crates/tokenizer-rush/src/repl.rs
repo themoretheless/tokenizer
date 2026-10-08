@@ -401,6 +401,7 @@ fn format_value_display(value: &Value<'_>, out: &mut String, depth: usize) {
         Value::Polygon(_) => out.push_str("<Polygon>"),
         Value::Matrix(_) => out.push_str("<Matrix4>"),
         Value::Quaternion(_) => out.push_str("<Quaternion>"),
-        Value::Sequence(_) => out.push_str("<sequence>"),
+        Value::Sequence(_) | Value::BytecodeSequence(_) => out.push_str("<sequence>"),
+        Value::BytecodeIterator(_) => out.push_str("<iterator>"),
     }
 }

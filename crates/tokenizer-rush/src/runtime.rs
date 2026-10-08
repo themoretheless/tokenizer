@@ -185,6 +185,8 @@ pub enum Value<'s> {
     Tuple(Vec<Value<'s>>),
     Function(Rc<Closure<'s>>),
     BytecodeFunction(Rc<crate::bytecode::BytecodeClosure>),
+    BytecodeSequence(Rc<crate::bytecode::BytecodeSequence>),
+    BytecodeIterator(Rc<RefCell<crate::bytecode::BytecodeIterator>>),
     Builtin(Builtin),
     Host(Rc<HostFunction>),
 }
@@ -274,6 +276,8 @@ impl<'s> Value<'s> {
             Value::Host(h) => Some(Value::Host(h.clone())),
             Value::HostObject(o) => Some(Value::HostObject(o.clone())),
             Value::BytecodeFunction(f) => Some(Value::BytecodeFunction(f.clone())),
+            Value::BytecodeSequence(s) => Some(Value::BytecodeSequence(s.clone())),
+            Value::BytecodeIterator(i) => Some(Value::BytecodeIterator(i.clone())),
             _ => None,
         }
     }
@@ -407,6 +411,12 @@ pub(crate) fn format_value_for_display(value: &Value<'_>, out: &mut String, dept
                 out.push_str("<function>");
             }
         }
+        Value::BytecodeSequence(_) => {
+            out.push_str("<sequence>");
+        }
+        Value::BytecodeIterator(_) => {
+            out.push_str("<iterator>");
+        }
         Value::Builtin(b) => {
             let _ = write!(out, "<builtin {:?}>", b);
         }
@@ -432,6 +442,35 @@ pub(crate) fn format_value_for_display(value: &Value<'_>, out: &mut String, dept
 pub struct Sequence<'s> {
     source: SequenceSource<'s>,
     stages: SequenceStages<'s>,
+}
+
+impl<'s> Sequence<'s> {
+    pub(crate) fn to_bytecode_sequence(&self) -> Option<crate::bytecode::BytecodeSequence> {
+        let source = match &self.source {
+            SequenceSource::Range { start, end, step } => {
+                crate::bytecode::BytecodeSequenceSource::Range {
+                    start: *start,
+                    end: *end,
+                    step: *step,
+                }
+            }
+            SequenceSource::List(buf) => {
+                let items: Option<Vec<Value<'static>>> =
+                    buf.iter().map(|v| v.to_static()).collect();
+                crate::bytecode::BytecodeSequenceSource::List(items?)
+            }
+            SequenceSource::Host(_) => return None,
+        };
+        let mut stages = Vec::with_capacity(self.stages.len());
+        for stage in self.stages.iter() {
+            stages.push(crate::bytecode::BytecodeSequenceStage {
+                callback: stage.callback.to_static()?,
+                filter: stage.filter,
+                span: stage.span,
+            });
+        }
+        Some(crate::bytecode::BytecodeSequence { source, stages })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2364,6 +2403,51 @@ impl<'s> Runtime<'_, 's> {
     fn sequence_cursor(&mut self, value: Value<'s>, span: Span) -> Result<SequenceCursor<'s>> {
         let sequence = match value {
             Value::Sequence(sequence) => sequence,
+            Value::BytecodeSequence(seq) => {
+                let source = match &seq.source {
+                    crate::bytecode::BytecodeSequenceSource::Range { start, end, step } => {
+                        SequenceSource::Range {
+                            start: *start,
+                            end: *end,
+                            step: *step,
+                        }
+                    }
+                    crate::bytecode::BytecodeSequenceSource::List(items) => SequenceSource::List(
+                        memory::Buffer::from_iter(&self.memory, items.iter().cloned()).map_err(
+                            |e| RuntimeError {
+                                stack: Vec::new(),
+                                location: None,
+                                module: self.module.map(str::to_owned),
+                                span,
+                                message: format!(
+                                    "Runtime sequence source allocation failed: {e:?}"
+                                ),
+                            },
+                        )?,
+                    ),
+                };
+                let mut stages = SequenceStages::default();
+                for stage in &seq.stages {
+                    stages
+                        .append(
+                            &self.memory,
+                            SequenceStage {
+                                callback: stage.callback.clone(),
+                                filter: stage.filter,
+                                span: stage.span,
+                                module: self.module,
+                            },
+                        )
+                        .map_err(|e| RuntimeError {
+                            stack: Vec::new(),
+                            location: None,
+                            module: self.module.map(str::to_owned),
+                            span,
+                            message: format!("Runtime sequence stage allocation failed: {e:?}"),
+                        })?;
+                }
+                Rc::new(Sequence { source, stages })
+            }
             Value::Range { start, end, step } => Rc::new(Sequence {
                 source: SequenceSource::Range { start, end, step },
                 stages: SequenceStages::default(),
@@ -2531,6 +2615,8 @@ impl<'s> Runtime<'_, 's> {
             match (left, right) {
                 (
                     Value::Sequence(_)
+                    | Value::BytecodeSequence(_)
+                    | Value::BytecodeIterator(_)
                     | Value::Function(_)
                     | Value::BytecodeFunction(_)
                     | Value::Host(_)
@@ -2540,6 +2626,8 @@ impl<'s> Runtime<'_, 's> {
                 | (
                     _,
                     Value::Sequence(_)
+                    | Value::BytecodeSequence(_)
+                    | Value::BytecodeIterator(_)
                     | Value::Function(_)
                     | Value::BytecodeFunction(_)
                     | Value::Host(_)
@@ -4203,7 +4291,7 @@ impl<'s> Runtime<'_, 's> {
             if matches!(builtin, Builtin::Map | Builtin::Filter)
                 && matches!(
                     arguments.first(),
-                    Some(Value::Range { .. } | Value::Sequence(_))
+                    Some(Value::Range { .. } | Value::Sequence(_) | Value::BytecodeSequence(_))
                 )
             {
                 let [source, callback] = arguments.as_ref() else {

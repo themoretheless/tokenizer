@@ -59,6 +59,197 @@ impl PartialEq for BytecodeClosure {
     }
 }
 
+/// A repeatable sequence with deferred transformation stages in bytecode VM.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BytecodeSequence {
+    pub source: BytecodeSequenceSource,
+    pub stages: Vec<BytecodeSequenceStage>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum BytecodeSequenceSource {
+    List(Vec<Value<'static>>),
+    Range { start: f64, end: f64, step: f64 },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BytecodeSequenceStage {
+    pub callback: Value<'static>,
+    pub filter: bool,
+    pub span: Span,
+}
+
+/// Active cursor iterating over a list, range, or sequence in bytecode VM.
+#[derive(Clone, Debug, PartialEq)]
+pub enum BytecodeIterator {
+    List {
+        items: Vec<Value<'static>>,
+        index: usize,
+    },
+    Range {
+        start: f64,
+        end: f64,
+        step: f64,
+        index: usize,
+        previous: Option<f64>,
+    },
+    Sequence {
+        source_iter: Box<BytecodeIterator>,
+        stages: Vec<BytecodeSequenceStage>,
+        finished: bool,
+    },
+}
+
+impl BytecodeIterator {
+    pub fn new(value: &Value<'static>, span: Span) -> Result<Self, RuntimeError> {
+        match value {
+            Value::List(items) => Ok(BytecodeIterator::List {
+                items: items.clone(),
+                index: 0,
+            }),
+            Value::Range { start, end, step } => {
+                if *step == 0.0 {
+                    return Err(RuntimeError {
+                        module: None,
+                        span,
+                        message: "Range step must be nonzero".into(),
+                        stack: Vec::new(),
+                        location: None,
+                    });
+                }
+                if !start.is_finite() || !end.is_finite() || !step.is_finite() {
+                    return Err(RuntimeError {
+                        module: None,
+                        span,
+                        message: "Range arguments must be finite".into(),
+                        stack: Vec::new(),
+                        location: None,
+                    });
+                }
+                Ok(BytecodeIterator::Range {
+                    start: *start,
+                    end: *end,
+                    step: *step,
+                    index: 0,
+                    previous: None,
+                })
+            }
+            Value::BytecodeSequence(seq) => {
+                let source_iter = match &seq.source {
+                    BytecodeSequenceSource::List(items) => BytecodeIterator::List {
+                        items: items.clone(),
+                        index: 0,
+                    },
+                    BytecodeSequenceSource::Range { start, end, step } => BytecodeIterator::Range {
+                        start: *start,
+                        end: *end,
+                        step: *step,
+                        index: 0,
+                        previous: None,
+                    },
+                };
+                Ok(BytecodeIterator::Sequence {
+                    source_iter: Box::new(source_iter),
+                    stages: seq.stages.clone(),
+                    finished: false,
+                })
+            }
+            Value::Sequence(seq) => {
+                if let Some(b_seq) = seq.to_bytecode_sequence() {
+                    return Self::new(&Value::BytecodeSequence(Rc::new(b_seq)), span);
+                }
+                Err(RuntimeError {
+                    module: None,
+                    span,
+                    message: "Host sequence not supported in bytecode yet".into(),
+                    stack: Vec::new(),
+                    location: None,
+                })
+            }
+            _ => Err(RuntimeError {
+                module: None,
+                span,
+                message: "Expected a list or sequence".into(),
+                stack: Vec::new(),
+                location: None,
+            }),
+        }
+    }
+
+    pub fn next(
+        &mut self,
+        vm: &mut Vm,
+        span: Span,
+    ) -> Result<Option<Value<'static>>, RuntimeError> {
+        match self {
+            BytecodeIterator::List { items, index } => {
+                if *index < items.len() {
+                    let item = items[*index].clone();
+                    *index += 1;
+                    Ok(Some(item))
+                } else {
+                    Ok(None)
+                }
+            }
+            BytecodeIterator::Range {
+                start,
+                end,
+                step,
+                index,
+                previous,
+            } => {
+                let current = (*index as f64).mul_add(*step, *start);
+                if *previous == Some(current) || !current.is_finite() {
+                    return Err(vm.error(span, "Range cannot advance finitely"));
+                }
+                if if *step > 0.0 {
+                    current >= *end
+                } else {
+                    current <= *end
+                } {
+                    return Ok(None);
+                }
+                *previous = Some(current);
+                *index += 1;
+                Ok(Some(Value::Number(current)))
+            }
+            BytecodeIterator::Sequence {
+                source_iter,
+                stages,
+                finished,
+            } => {
+                if *finished {
+                    return Ok(None);
+                }
+                'candidate: loop {
+                    if vm.fuel == 0 {
+                        return Err(vm.error(span, "Execution limit exceeded"));
+                    }
+                    vm.fuel -= 1;
+
+                    let Some(mut item) = source_iter.next(vm, span)? else {
+                        *finished = true;
+                        return Ok(None);
+                    };
+
+                    for stage in stages.iter() {
+                        let res =
+                            vm.invoke_callable(&stage.callback, &[item.clone()], stage.span)?;
+                        if stage.filter {
+                            if !is_truthy(&res) {
+                                continue 'candidate;
+                            }
+                        } else {
+                            item = res;
+                        }
+                    }
+                    return Ok(Some(item));
+                }
+            }
+        }
+    }
+}
+
 /// Opcodes executed by the stack-based Bytecode Virtual Machine.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Opcode {
@@ -168,6 +359,12 @@ pub enum Opcode {
         variant_idx: Option<u32>,
         arity: usize,
     },
+    /// Initialize iterator for iterable on top of stack and store at local slot.
+    IterInit(u32),
+    /// Advance iterator at local slot: pushes next item, or jumps to exit target.
+    IterNext { iter_slot: u32, exit_jump: usize },
+    /// Try-propagation `?`: unwrap `Some`/`Ok` or early-return `None`/`Err`.
+    TryPropagate,
     /// Return from execution.
     Return,
 }
@@ -215,6 +412,9 @@ impl Chunk {
         match &mut self.code[instruction_idx] {
             Opcode::Jump(t) | Opcode::JumpIfFalse(t) | Opcode::JumpIfTrue(t) => {
                 *t = target;
+            }
+            Opcode::IterNext { exit_jump, .. } => {
+                *exit_jump = target;
             }
             _ => panic!("Expected jump instruction at index {instruction_idx}"),
         }
@@ -545,6 +745,47 @@ impl<'s> Compiler<'s> {
                     self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
             }
+            StmtKind::For {
+                binding,
+                iterable,
+                body,
+            } => {
+                self.compile_expr(iterable)?;
+                let iter_slot = self.current().declare_temp_local();
+                self.current()
+                    .chunk
+                    .emit(Opcode::IterInit(iter_slot), stmt.span);
+                let start_ip = self.current().chunk.code.len();
+                let exit_jump = self.current().chunk.emit(
+                    Opcode::IterNext {
+                        iter_slot,
+                        exit_jump: 0,
+                    },
+                    stmt.span,
+                );
+                self.current().loops.push(LoopContext {
+                    start_ip,
+                    break_jumps: Vec::new(),
+                });
+                self.current().push_scope();
+                let binding_slot = self.current().declare_local(binding.text);
+                self.current()
+                    .chunk
+                    .emit(Opcode::SetLocal(binding_slot), binding.span);
+                self.current().chunk.emit(Opcode::Pop, binding.span);
+                self.compile_block(&body.stmts, false)?;
+                self.current().pop_scope();
+                self.current().chunk.emit(Opcode::Jump(start_ip), stmt.span);
+                let loop_ctx = self.current().loops.pop().unwrap();
+                let exit_target = self.current().chunk.code.len();
+                self.current().chunk.patch_jump(exit_jump, exit_target);
+                for brk in loop_ctx.break_jumps {
+                    self.current().chunk.patch_jump(brk, exit_target);
+                }
+                if keep_result {
+                    self.current().chunk.emit(Opcode::Null, stmt.span);
+                }
+            }
             StmtKind::Break => {
                 if self.current().loops.is_empty() {
                     return Err(self.error(stmt.span, "break outside of loop"));
@@ -691,7 +932,7 @@ impl<'s> Compiler<'s> {
                     self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
             }
-            StmtKind::Expr(expr) => {
+            StmtKind::Show(expr) | StmtKind::Expr(expr) => {
                 self.compile_expr(expr)?;
                 if !keep_result {
                     self.current().chunk.emit(Opcode::Pop, stmt.span);
@@ -709,6 +950,10 @@ impl<'s> Compiler<'s> {
     fn compile_expr(&mut self, expr: &Expr<'s>) -> Result<(), RuntimeError> {
         let span = expr.span;
         match &expr.kind {
+            ExprKind::Try(value) => {
+                self.compile_expr(value)?;
+                self.current().chunk.emit(Opcode::TryPropagate, span);
+            }
             ExprKind::Number(text) => {
                 let clean = text.replace('_', "");
                 let n: f64 = clean
@@ -1396,29 +1641,31 @@ impl Vm {
                 ),
             ));
         }
-        let prev_frames = std::mem::take(&mut self.frames);
-        let prev_stack = std::mem::take(&mut self.stack);
 
-        let stack_base = 0;
+        let target_depth = self.frames.len();
+        let callee_slot = self.stack.len();
+        self.stack.push(Value::Null);
+        let stack_base = self.stack.len();
+        self.stack.extend_from_slice(args);
         let local_count = closure.function.chunk.local_count;
-        let mut stack = Vec::with_capacity(local_count.max(args.len()));
-        stack.extend_from_slice(args);
-        if stack.len() < local_count {
-            stack.resize(local_count, Value::Null);
+        if local_count > args.len() {
+            self.stack.resize(stack_base + local_count, Value::Null);
         }
-        self.stack = stack;
-        self.frames = vec![CallFrame {
+        self.frames.push(CallFrame {
             closure: closure.clone(),
             ip: 0,
             stack_base,
-        }];
+        });
 
-        let result = self.execute_loop();
-
-        self.frames = prev_frames;
-        self.stack = prev_stack;
-
-        result
+        match self.execute_to_depth(target_depth) {
+            Ok(val) => Ok(val),
+            Err(e) => {
+                self.close_upvalues(stack_base);
+                self.frames.truncate(target_depth);
+                self.stack.truncate(callee_slot);
+                Err(e)
+            }
+        }
     }
 
     fn close_upvalues(&mut self, from_slot: usize) {
@@ -1436,8 +1683,8 @@ impl Vm {
         });
     }
 
-    fn execute_loop(&mut self) -> Result<Value<'static>, RuntimeError> {
-        while !self.frames.is_empty() {
+    fn execute_to_depth(&mut self, target_depth: usize) -> Result<Value<'static>, RuntimeError> {
+        while self.frames.len() > target_depth {
             let frame_idx = self.frames.len() - 1;
             let ip = self.frames[frame_idx].ip;
 
@@ -1458,7 +1705,12 @@ impl Vm {
                 let ret_val = self.stack.pop().unwrap_or(Value::Null);
                 let exiting = self.frames.pop().unwrap();
                 self.close_upvalues(exiting.stack_base);
-                if self.frames.is_empty() {
+                if self.frames.len() == target_depth {
+                    if exiting.stack_base > 0 {
+                        self.stack.truncate(exiting.stack_base - 1);
+                    } else {
+                        self.stack.clear();
+                    }
                     return Ok(ret_val);
                 }
                 if exiting.stack_base > 0 {
@@ -1594,6 +1846,14 @@ impl Vm {
                                     fields.insert(field_name, val);
                                     None
                                 }
+                                Value::UserData(data) if data.variant.is_none() => {
+                                    if let Some(Value::Record(fields)) = data.values.first_mut() {
+                                        fields.insert(field_name, val);
+                                        None
+                                    } else {
+                                        Some("Cannot mutate member on value")
+                                    }
+                                }
                                 _ => Some("Cannot mutate member on value"),
                             }
                         }
@@ -1601,6 +1861,14 @@ impl Vm {
                             Value::Record(fields) => {
                                 fields.insert(field_name, val);
                                 None
+                            }
+                            Value::UserData(data) if data.variant.is_none() => {
+                                if let Some(Value::Record(fields)) = data.values.first_mut() {
+                                    fields.insert(field_name, val);
+                                    None
+                                } else {
+                                    Some("Cannot mutate member on value")
+                                }
                             }
                             _ => Some("Cannot mutate member on value"),
                         },
@@ -1683,6 +1951,10 @@ impl Vm {
                             let res = a.iter().zip(&b).map(|(x, y)| x + y).collect();
                             self.stack.push(Value::Vector(res));
                         }
+                        (Value::List(mut a), Value::List(b)) => {
+                            a.extend(b);
+                            self.stack.push(Value::List(a));
+                        }
                         _ => return Err(self.error(span, "Invalid operands for +")),
                     }
                 }
@@ -1762,11 +2034,55 @@ impl Vm {
                 Opcode::Equal => {
                     let right = self.stack.pop().unwrap();
                     let left = self.stack.pop().unwrap();
+                    if matches!(
+                        (&left, &right),
+                        (
+                            Value::BytecodeSequence(_)
+                                | Value::BytecodeIterator(_)
+                                | Value::Sequence(_)
+                                | Value::Function(_)
+                                | Value::BytecodeFunction(_),
+                            _
+                        ) | (
+                            _,
+                            Value::BytecodeSequence(_)
+                                | Value::BytecodeIterator(_)
+                                | Value::Sequence(_)
+                                | Value::Function(_)
+                                | Value::BytecodeFunction(_)
+                        )
+                    ) {
+                        return Err(
+                            self.error(span, "Functions and lazy sequences cannot be compared")
+                        );
+                    }
                     self.stack.push(Value::Bool(left == right));
                 }
                 Opcode::NotEqual => {
                     let right = self.stack.pop().unwrap();
                     let left = self.stack.pop().unwrap();
+                    if matches!(
+                        (&left, &right),
+                        (
+                            Value::BytecodeSequence(_)
+                                | Value::BytecodeIterator(_)
+                                | Value::Sequence(_)
+                                | Value::Function(_)
+                                | Value::BytecodeFunction(_),
+                            _
+                        ) | (
+                            _,
+                            Value::BytecodeSequence(_)
+                                | Value::BytecodeIterator(_)
+                                | Value::Sequence(_)
+                                | Value::Function(_)
+                                | Value::BytecodeFunction(_)
+                        )
+                    ) {
+                        return Err(
+                            self.error(span, "Functions and lazy sequences cannot be compared")
+                        );
+                    }
                     self.stack.push(Value::Bool(left != right));
                 }
                 Opcode::Less => {
@@ -1911,6 +2227,19 @@ impl Vm {
                                 );
                             }
                         }
+                        Value::UserData(data) if data.variant.is_none() => {
+                            if let Some(Value::Record(fields)) = data.values.first() {
+                                if let Some(val) = fields.get(&field_name) {
+                                    self.stack.push(val.clone());
+                                } else {
+                                    return Err(
+                                        self.error(span, format!("Field '{field_name}' not found"))
+                                    );
+                                }
+                            } else {
+                                return Err(self.error(span, "Cannot access member on value"));
+                            }
+                        }
                         Value::Vector(v) => {
                             let val = match field_name.as_str() {
                                 "x" if !v.is_empty() => v[0],
@@ -1942,6 +2271,13 @@ impl Vm {
                     match &mut self.stack[target_slot] {
                         Value::Record(fields) => {
                             fields.insert(field_name, val);
+                        }
+                        Value::UserData(data) if data.variant.is_none() => {
+                            if let Some(Value::Record(fields)) = data.values.first_mut() {
+                                fields.insert(field_name, val);
+                            } else {
+                                return Err(self.error(span, "Cannot mutate member on value"));
+                            }
                         }
                         _ => return Err(self.error(span, "Cannot mutate member on value")),
                     }
@@ -2146,11 +2482,73 @@ impl Vm {
                         values,
                     })));
                 }
+                Opcode::IterInit(slot) => {
+                    let val = self.stack.pop().unwrap();
+                    let iter = BytecodeIterator::new(&val, span)?;
+                    let local_idx = self.frames[frame_idx].stack_base + slot as usize;
+                    if local_idx >= self.stack.len() {
+                        self.stack.resize(local_idx + 1, Value::Null);
+                    }
+                    self.stack[local_idx] = Value::BytecodeIterator(Rc::new(RefCell::new(iter)));
+                }
+                Opcode::IterNext {
+                    iter_slot,
+                    exit_jump,
+                } => {
+                    let local_idx = self.frames[frame_idx].stack_base + iter_slot as usize;
+                    let iter_val = self.stack[local_idx].clone();
+                    match iter_val {
+                        Value::BytecodeIterator(cell) => {
+                            let next_item = cell.borrow_mut().next(self, span)?;
+                            match next_item {
+                                Some(item) => {
+                                    self.stack.push(item);
+                                }
+                                None => {
+                                    self.frames[frame_idx].ip = exit_jump;
+                                }
+                            }
+                        }
+                        _ => return Err(self.error(span, "Expected iterator in loop")),
+                    }
+                }
+                Opcode::TryPropagate => {
+                    let val = self.stack.pop().unwrap();
+                    match val {
+                        Value::Variant("Some" | "Ok", mut items) if items.len() == 1 => {
+                            self.stack.push(items.remove(0));
+                        }
+                        val @ Value::Variant("None" | "Err", _) => {
+                            let exiting = self.frames.pop().unwrap();
+                            self.close_upvalues(exiting.stack_base);
+                            if self.frames.len() == target_depth {
+                                if exiting.stack_base > 0 {
+                                    self.stack.truncate(exiting.stack_base - 1);
+                                } else {
+                                    self.stack.clear();
+                                }
+                                return Ok(val);
+                            }
+                            if exiting.stack_base > 0 {
+                                self.stack.truncate(exiting.stack_base - 1);
+                            } else {
+                                self.stack.clear();
+                            }
+                            self.stack.push(val);
+                        }
+                        _ => return Err(self.error(span, "? requires Option or Result")),
+                    }
+                }
                 Opcode::Return => {
                     let ret_val = self.stack.pop().unwrap_or(Value::Null);
                     let exiting = self.frames.pop().unwrap();
                     self.close_upvalues(exiting.stack_base);
-                    if self.frames.is_empty() {
+                    if self.frames.len() == target_depth {
+                        if exiting.stack_base > 0 {
+                            self.stack.truncate(exiting.stack_base - 1);
+                        } else {
+                            self.stack.clear();
+                        }
                         return Ok(ret_val);
                     }
                     if exiting.stack_base > 0 {
@@ -2296,47 +2694,215 @@ impl Vm {
                 if args.len() != 2 {
                     return Err(self.error(span, "map requires 2 arguments"));
                 }
-                let (Value::List(items), callback) = (&args[0], &args[1]) else {
-                    return Err(self.error(span, "map requires a list and a callback"));
-                };
-                let mut output = Vec::with_capacity(items.len());
-                for item in items {
-                    let res = self.invoke_callable(callback, std::slice::from_ref(item), span)?;
-                    output.push(res);
+                let (source, callback) = (&args[0], &args[1]);
+                match source {
+                    Value::Range { start, end, step } => {
+                        let seq = BytecodeSequence {
+                            source: BytecodeSequenceSource::Range {
+                                start: *start,
+                                end: *end,
+                                step: *step,
+                            },
+                            stages: vec![BytecodeSequenceStage {
+                                callback: callback.clone(),
+                                filter: false,
+                                span,
+                            }],
+                        };
+                        Ok(Value::BytecodeSequence(Rc::new(seq)))
+                    }
+                    Value::BytecodeSequence(seq) => {
+                        let mut stages = seq.stages.clone();
+                        stages.push(BytecodeSequenceStage {
+                            callback: callback.clone(),
+                            filter: false,
+                            span,
+                        });
+                        Ok(Value::BytecodeSequence(Rc::new(BytecodeSequence {
+                            source: seq.source.clone(),
+                            stages,
+                        })))
+                    }
+                    Value::List(items) => {
+                        let mut output = Vec::with_capacity(items.len());
+                        for item in items {
+                            let res =
+                                self.invoke_callable(callback, std::slice::from_ref(item), span)?;
+                            output.push(res);
+                        }
+                        Ok(Value::List(output))
+                    }
+                    _ => Err(self.error(span, "map requires a list or sequence and a callback")),
                 }
-                Ok(Value::List(output))
             }
             Builtin::Filter => {
                 if args.len() != 2 {
                     return Err(self.error(span, "filter requires 2 arguments"));
                 }
-                let (Value::List(items), callback) = (&args[0], &args[1]) else {
-                    return Err(self.error(span, "filter requires a list and a callback"));
-                };
-                let mut output = Vec::new();
-                for item in items {
-                    let res = self.invoke_callable(callback, std::slice::from_ref(item), span)?;
-                    if is_truthy(&res) {
-                        output.push(item.clone());
+                let (source, callback) = (&args[0], &args[1]);
+                match source {
+                    Value::Range { start, end, step } => {
+                        let seq = BytecodeSequence {
+                            source: BytecodeSequenceSource::Range {
+                                start: *start,
+                                end: *end,
+                                step: *step,
+                            },
+                            stages: vec![BytecodeSequenceStage {
+                                callback: callback.clone(),
+                                filter: true,
+                                span,
+                            }],
+                        };
+                        Ok(Value::BytecodeSequence(Rc::new(seq)))
                     }
+                    Value::BytecodeSequence(seq) => {
+                        let mut stages = seq.stages.clone();
+                        stages.push(BytecodeSequenceStage {
+                            callback: callback.clone(),
+                            filter: true,
+                            span,
+                        });
+                        Ok(Value::BytecodeSequence(Rc::new(BytecodeSequence {
+                            source: seq.source.clone(),
+                            stages,
+                        })))
+                    }
+                    Value::List(items) => {
+                        let mut output = Vec::new();
+                        for item in items {
+                            let res =
+                                self.invoke_callable(callback, std::slice::from_ref(item), span)?;
+                            if is_truthy(&res) {
+                                output.push(item.clone());
+                            }
+                        }
+                        Ok(Value::List(output))
+                    }
+                    _ => Err(self.error(span, "filter requires a list or sequence and a callback")),
                 }
-                Ok(Value::List(output))
             }
             Builtin::Fold => {
                 if args.len() != 3 {
                     return Err(self.error(span, "fold requires 3 arguments"));
                 }
-                let (Value::List(items), initial, callback) = (&args[0], &args[1], &args[2]) else {
-                    return Err(self.error(
+                let (source, initial, callback) = (&args[0], &args[1], &args[2]);
+                match source {
+                    Value::List(items) => {
+                        let mut acc = initial.clone();
+                        for item in items {
+                            acc = self.invoke_callable(callback, &[acc, item.clone()], span)?;
+                        }
+                        Ok(acc)
+                    }
+                    Value::Range { .. } | Value::BytecodeSequence(_) => {
+                        let mut iter = BytecodeIterator::new(source, span)?;
+                        let mut acc = initial.clone();
+                        while let Some(item) = iter.next(self, span)? {
+                            acc = self.invoke_callable(callback, &[acc, item], span)?;
+                        }
+                        Ok(acc)
+                    }
+                    _ => Err(self.error(
                         span,
                         "fold requires a list, an initial value and a callback",
-                    ));
-                };
-                let mut acc = initial.clone();
-                for item in items {
-                    acc = self.invoke_callable(callback, &[acc, item.clone()], span)?;
+                    )),
                 }
-                Ok(acc)
+            }
+            Builtin::Range | Builtin::RangeIter => {
+                let (start, end, step) = match args {
+                    [Value::Number(start), Value::Number(end)] => (*start, *end, 1.0),
+                    [
+                        Value::Number(start),
+                        Value::Number(end),
+                        Value::Number(step),
+                    ] => (*start, *end, *step),
+                    _ => return Err(self.error(span, "range expects start, end and optional step")),
+                };
+                if step == 0.0 {
+                    return Err(self.error(span, "Range step must be nonzero"));
+                }
+                if !start.is_finite() || !end.is_finite() || !step.is_finite() {
+                    return Err(self.error(span, "Range arguments must be finite"));
+                }
+                if builtin == Builtin::RangeIter {
+                    return Ok(Value::Range { start, end, step });
+                }
+                let mut values = Vec::new();
+                let mut current = start;
+                while if step > 0.0 {
+                    current < end
+                } else {
+                    current > end
+                } {
+                    if self.fuel == 0 {
+                        return Err(self.error(span, "Execution limit exceeded"));
+                    }
+                    self.fuel -= 1;
+                    values.push(Value::Number(current));
+                    let next = (values.len() as f64).mul_add(step, start);
+                    if !next.is_finite() || next == current {
+                        return Err(self.error(span, "Range cannot advance finitely"));
+                    }
+                    current = next;
+                }
+                Ok(Value::List(values))
+            }
+            Builtin::Iter => {
+                let Some(source) = args.first() else {
+                    return Err(self.error(span, "iter requires one list or sequence"));
+                };
+                match source {
+                    Value::List(items) => Ok(Value::BytecodeSequence(Rc::new(BytecodeSequence {
+                        source: BytecodeSequenceSource::List(items.clone()),
+                        stages: Vec::new(),
+                    }))),
+                    Value::Range { start, end, step } => {
+                        Ok(Value::BytecodeSequence(Rc::new(BytecodeSequence {
+                            source: BytecodeSequenceSource::Range {
+                                start: *start,
+                                end: *end,
+                                step: *step,
+                            },
+                            stages: Vec::new(),
+                        })))
+                    }
+                    Value::BytecodeSequence(seq) => Ok(Value::BytecodeSequence(seq.clone())),
+                    _ => Err(self.error(span, "iter requires one list or sequence")),
+                }
+            }
+            Builtin::Collect => {
+                if args.len() != 2 {
+                    return Err(
+                        self.error(span, "collect requires a sequence and maximum item count")
+                    );
+                }
+                let source = &args[0];
+                let Value::Number(limit) = &args[1] else {
+                    return Err(
+                        self.error(span, "collect requires a sequence and maximum item count")
+                    );
+                };
+                if !limit.is_finite()
+                    || *limit < 0.0
+                    || limit.fract() != 0.0
+                    || *limit >= usize::MAX as f64
+                {
+                    return Err(self.error(
+                        span,
+                        "Collection limit must be a nonnegative representable integer",
+                    ));
+                }
+                let max_count = *limit as usize;
+                let mut iter = BytecodeIterator::new(source, span)?;
+                let mut output = Vec::new();
+                for _ in 0..max_count {
+                    match iter.next(self, span)? {
+                        Some(item) => output.push(item),
+                        None => break,
+                    }
+                }
+                Ok(Value::List(output))
             }
             Builtin::Len => {
                 let Some(arg) = args.first() else {
