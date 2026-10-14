@@ -1,0 +1,13 @@
+[package]
+name = "themoretheless-tokenizer-forma"
+version = "0.7.0"
+edition = "2024"
+description = "Forma native scene parser"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/themoretheless/tokenizer"
+
+[lib]
+name = "themoretheless_tokenizer_forma"
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }

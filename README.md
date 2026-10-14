@@ -310,3 +310,11 @@ the [MIT license](LICENSE-MIT), at your option.
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in this project shall be dual licensed as above, without any
 additional terms or conditions.
+
+## Forma
+
+The complete Forma `.ui` frontend is Rust in `crates/tokenizer-forma`. Enable
+`forma` to call `themoretheless_tokenizer::forma::parse`; `scene::parse` preserves
+the existing renderer subset. Parsing, pure expressions, contracts and keyed
+markup expansion are shared with Studio through [`packages/forma`](packages/forma/README.md)
+WASM adapters. The generic HostLanguage registry is not wired for Forma yet.

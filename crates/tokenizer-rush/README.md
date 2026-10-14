@@ -103,6 +103,153 @@ unguarded coverage at compile time. Block-valued arms are not implemented.
 
 ## Rust API and compatibility
 
+## Memory regions
+
+```text
+mut keep = 0
+region scratch {
+    mut tmp = expensive_intermediate()
+    keep = summarize(tmp)
+}
+// tmp's cells were bulk-freed here; keep survived via promotion
+```
+
+A `region [name] { ... }` block allocates its mutable cells in a lexically
+scoped arena. When the block exits — normally, via `break` / `continue`, or
+via `return` — every cell still owned by the region is reclaimed in one bulk
+sweep instead of one-by-one reference counting. Values still reachable from
+outside (assigned to outer bindings, captured by escaping closures, or
+returned through outer cells) are promoted to the parent region and stay
+alive. Regions nest; an inner sweep never touches the outer arena. A static
+escape analysis that rejects dangling references at compile time is planned
+but not enforced yet.
+
+Analysis emits a non-fatal `region-escape` lint wherever a value that can
+**carry captured cells** — a closure, or a container/unknown shape that may
+hold one — leaves the region implicitly: assignment to an outer binding or
+`return`. Pure scalar copies (`keep = tmp + 1`, `return count`) move values,
+not cells, and are never reported; the runtime promotes the cells only when
+something actually captures them, and the lint marks exactly those spots.
+
+```text
+strict region scratch {
+    mut tmp = 41
+    keep = tmp + 1            // scalar copy: fine, no promote needed
+    keep = promote(tmp + 1)   // explicit form: also fine
+    // g = () => tmp          // cell-carrying escape: region-escape error
+}
+```
+
+A `strict region` opts into the future semantics today: implicit escapes of
+cell-carrying values become hard `region-escape` errors, and the only way out
+is the explicit `promote(value)` wrapper (identity at runtime — promotion
+itself is always automatic). Compound assignments (`s += ...`) are exempt:
+they write a freshly computed value into an existing outer cell, so no region
+data can flow out. Strictness is per region and composes — data of a strict
+region cannot escape even through a surrounding lax region, while lax-region
+data passing under a strict one keeps the non-fatal lint.
+
+```text
+region scratch (1024) {
+    // at most 1024 live scratch cells at any moment
+}
+```
+
+A region may declare a **live-cell budget** in parentheses — any numeric
+expression evaluated once at entry, requiring a non-negative integer. The
+budget counts cells *alive at the same time*, not total allocations: scratch
+cells freed by inner scopes stop counting, so a loop inside a budgeted region
+is fine. Exceeding the ceiling fails with `Region cell budget exceeded`.
+Cells promoted to a parent region at exit count against the parent's budget,
+so an escaping burst cannot silently move the overflow outward.
+
+Regions compose with coroutines honestly: a `yield` inside a region suspends
+the task *without* ending the region — its frame is parked with the coroutine
+and restored on resume, so scratch cells keep their values across the
+suspension and the sweep happens only when the block actually finishes
+(normally, or via `break` / `return` unwinding). Interleaved tasks keep
+isolated region stacks; a budget overflow terminates the task with
+`Region cell budget exceeded` and unwinds its regions safely.
+
+```rust
+let script = program.instantiate(limits, &token, &[], &[], &[], &[])?;
+for stats in script.region_stats() {
+    println!("{:?}: peak {} live, {} promoted", stats.name, stats.peak_live, stats.promoted);
+}
+```
+
+`ScriptInstance::region_stats()` reports per-name metrics aggregated across
+every entry, coroutine runs included: `entries`, total `allocated`,
+`reused_slots` (free-list hits), `peak_live` (the observed ceiling — size
+budgets from it), and `promoted` (how many cells escaped via promotion; a
+high number means the region is not actually bounding lifetimes).
+`RegionStats::suggested_budget()` turns the observed peak into a budget
+recommendation — the smallest power of two above `peak_live`, i.e. at least
+2x headroom; treat it as a starting point and rerun under realistic load.
+
+The CLI closes the loop: `rush script.r --region-report` prints per-region
+stats and a ready-to-paste `region name (budget)` suggestion to stderr after
+a successful run, and flags regions whose cells escape via promotion.
+
+```text
+mut tmp = load_big_table()
+keep = move(tmp)   // tmp's cell is now empty; reading tmp is an error
+```
+
+`move(binding)` relocates without promoting: it takes the value out of a
+mutable binding's cell and leaves the cell empty. Analysis treats it as an
+explicit relocation (no `region-escape` even in strict regions) and tracks
+the emptied binding — a later read fails with `moved-value`, a double move is
+rejected, and a plain reassignment (`tmp = fresh()`) revives the cell.
+Closures that captured the binding observe the empty (`null`) cell; a user
+binding named `move` shadows the form.
+
+Loops get arenas for free: every `for` / `while` iteration runs inside an
+**implicit per-iteration region**, so scratch cells allocated in the body are
+bulk-swept when the iteration ends — no explicit `region` wrapper needed.
+Cells captured by escaping closures promote out of the iteration exactly as
+in an explicit region. This is not just convenient but faster: the bulk
+sweep beats per-cell release, so cell-heavy loop bodies gain roughly 15-20%
+in the interpreter; region exit scans only the frame's own cell list rather
+than the whole cell table, which also speeds up explicit `region` blocks.
+Iteration arenas have no budget and aggregate under anonymous region stats.
+
+Function calls get arenas too: every call runs its body inside an **implicit
+per-call region**, so a function's local scratch cells are bulk-swept when
+the call returns instead of lingering until some outer scope ends. A closure
+that captures a local and outlives the call promotes that cell into the
+caller's region automatically — factory functions like
+`fn make() { mut n = 10; return () => n += 1 }` just work. The win is most
+visible in recursion: each frame's cells die with the frame, so deep
+recursion no longer accumulates every intermediate cell until the outermost
+sweep. Calls made on the coroutine frame machine are covered as well, and
+the per-call overhead is a single frame push/pop plus one bulk pass over the
+frame's own cells.
+
+Finally, regions are **first-class values**: `arena(name, budget?)` returns a
+plain descriptor record, and `arena_run(handle, callback)` executes the
+callback inside a fresh frame of that region — the script itself decides when
+the sweep happens (per frame in a game loop, per request in a handler):
+
+```text
+const frame = arena("frame", 4096)
+arena_run(frame, () => tick_world())   // scratch dies in bulk here
+```
+
+Inside `arena_run` the arena *replaces* the callback's implicit per-call
+region, so its budget bounds everything the callback allocates, and cells
+captured by escaping closures promote to the caller's region as usual.
+`arena_stats(handle)` reads the same aggregated metrics as
+`ScriptInstance::region_stats()` — `entries`, `allocated`, `reused_slots`,
+`peak_live`, `promoted`, `suggested_budget` — so a script can introspect and
+adapt its own arenas. The descriptor is just data (`{name, budget}`), which
+makes arenas easy to store, pass around and even construct by hand. Like
+`map`/`filter` callbacks, an `arena_run` callback is driven synchronously and
+therefore must not `yield`; analysis rejects suspending callbacks at compile
+time, while non-suspending runs compose with coroutines freely.
+
+## Rust API and compatibility
+
 ```rust
 use themoretheless_tokenizer_rush::{parse, StmtKind};
 let parsed = parse("fn main() { return 1; } // demo\n");
@@ -1323,3 +1470,141 @@ and reference capture. Playground supports the same checked single-document rena
 order, once per poll. Cancellation and scheduler drop remove subscriptions and close task
 iterators. Events are unbuffered and payloads use ordinary instance handlers. See the
 language contract for exact scheduling and cancellation semantics.
+
+### Typed declarative models
+
+`ModelProgram` uses the Rush parser, strict contracts and ordinary evaluator.
+`param` declares an overridable input; `node` declares an immutable derived value;
+exactly one `show` expression selects the output. Immutable `let` bindings and
+ordinary typed functions can also participate in the dependency graph. Forward
+references between model bindings are allowed; cycles and unresolved names fail
+compilation before evaluation. Parameter defaults cannot depend on other model
+bindings. Imported interfaces are checked before model initialization.
+
+```rush
+node result = scale(3)
+fn scale(x: number) -> number { return x * width }
+param width: number = 2
+show result
+```
+
+Run a model with `rush --model model.r width=4`. The result is `Number(12.0)`.
+The Rust API keeps a `ModelInstance` alive between updates:
+`set_parameter(name, value, limits)` returns the names recomputed in dependency
+order. Only transitive dependents run, including function declarations whose
+captures changed. Equal scalar parameters skip recomputation. Changes to inputs,
+derived bindings, captured mutable cells and the output roll back on evaluation
+failure; errors retain their source position and call frames. The host supplies
+execution limits and cancellation, as with ordinary scripts.
+
+This API tracks dependencies between named model bindings. It does not cache
+individual operations inside a node, persist geometry subshape identities or
+provide automatic purity checking of procedural functions. Stateful functions
+retain ordinary Rush semantics on successful updates. CAD's ModelGraph Text
+frontend remains a separate adapter; its full geometry vocabulary is not yet
+implemented by this typed model API.
+
+Public AST consumers must handle `StmtKind::Show` and the `DeclarationRole`
+field on declarations. Formatting preserves the `param` and `node` keywords.
+
+### Native shell automation (`sys`)
+
+The native CLI supplies a typed `sys` module automatically. An embedding Rust
+host registers `sys::SysHost::registrations` through `Program::instantiate` and
+provides `Program::compile(sys::MODULE_SOURCE)` as module `sys`. Browser/WASM
+builds do not expose these services.
+
+```rush
+import sys
+fn main() -> Result[bool, str] {
+    let (code, output, errors) = sys.run('git', ['status', '--short'], '')?
+    assert(code == 0, errors)
+    sys.out(output)?
+    return Ok(true)
+}
+main()
+```
+
+Use `rush --quiet script.r -- arg1 arg2` for automation without the CLI's final
+value display. `sys.args()` contains arguments after `--`; numeric input overrides
+retain the existing `name=number` syntax before `--`. A final `Err` makes the CLI
+exit with status 1. Unix shebangs are supported and preserved by the formatter,
+including `#!/usr/bin/env -S rush --quiet` where `env -S` is available.
+
+- `run(program: str, args: list[str], input: str)` and
+  `pipe(commands: list[list[str]], input: str)` return
+  `Result[tuple[number, str, str], str]`: exit code, UTF-8 stdout and stderr.
+  Arguments are literal; invoke `sh` explicitly when shell expansion is wanted.
+  Pipelines use OS pipes and return the rightmost failing stage's code, or the
+  last stage's code when all succeed. Unix signal termination uses a negative
+  signal number. Nonzero exits are successful process results; spawn/I/O errors,
+  timeout and excessive output return `Err`.
+- `read`, `write`, `list_dir`, `mkdir`, `remove`, `rmdir`, `exists` and `cd`
+  return typed `Result` values. `read` accepts regular UTF-8 files. `remove`
+  removes a file; `rmdir` removes an empty directory. Directory entries are
+  sorted names. Relative paths and commands use the host's current directory.
+- `env(name)` returns `Option[str]`. `set_env(name, value)` sets an override
+  for this host and its child processes, without mutating the application's
+  process-wide environment. `cwd()` returns the host's directory.
+- `input()` reads UTF-8 stdin to EOF; `out(text)` and `err(text)` write the
+  corresponding streams. These return `Result` values.
+
+Default host limits are 1 MiB for individual file/input/output buffers,
+32 pipeline stages and 30 seconds per process or stdio operation. Combined
+pipeline stderr also has the byte limit. Hosts configure `SysLimits`; CLI users
+can set `--process-timeout-ms N`. Cancellation is an execution error, and Unix
+Ctrl+C/SIGTERM cancels the token, kills child process groups and reaps direct
+children. CLI signal exit codes are 130/143. Descendants that deliberately leave
+those groups require their own lifecycle management. Windows currently kills
+only direct children; its blocking stdio and CLI signal handling do not have
+Unix cancellation parity. The API captures bounded text, not arbitrary binary
+streams or background job handles.
+
+See `examples/automation/uppercase.r` for an actual stdin-to-pipeline-to-stdout
+script.
+
+For new scripts, `sys.exec` and `sys.pipeline` return
+`Result[sys.ProcessOutput, str]`. The nominal `ProcessOutput` type has
+`code: number`, `stdout: str`, and `stderr: str` fields, checked across modules
+before execution. Existing tuple-returning `run` and `pipe` remain compatible.
+
+```rush
+import sys
+fn main() -> Result[bool, str] {
+    let output: sys.ProcessOutput = sys.exec('git', ['status', '--short'], '')?
+    return match sys.checked(output) {
+        Ok(success) => sys.out(success.stdout),
+        Err(failure) => Err(failure.stderr)
+    }
+}
+main()
+```
+
+`checked(output)` returns `Result[ProcessOutput, ProcessOutput]`: successful
+exits are `Ok`, and nonzero exits are `Err` with their original code and both
+streams. Spawn/I/O failures remain the outer `Err[str]` from `exec` or `pipeline`.
+The example converts a failed exit into `Err[str]`, giving the CLI a failing
+status. The internal tuple conversion helper is private to `sys`.
+
+`sys.exec_with(program, args, input, options)` and
+`sys.pipeline_with(commands, input, options)` accept typed `sys.CommandOptions`:
+
+```rush
+let options = sys.CommandOptions({
+    cwd: Some('build'),
+    env: [('MODE', 'test')]
+})
+```
+
+`cwd: Option[str]` selects a directory relative to the host's current directory
+(or an absolute directory). `None()` inherits the host directory.
+`env: list[tuple[str, str]]` overlays the child environment; duplicate names use
+the last value. Every stage of a configured pipeline receives these options.
+The host's directory, environment overrides and subsequent ordinary commands
+are unchanged. `sys.command_options()` supplies `None()` and an empty overlay.
+Existing host timeout, cancellation and output limits apply to configured
+commands too. Invalid environment names/values and oversized overlays return
+`Err[str]` before spawning; invalid directories produce a normal spawn error.
+
+See `examples/automation/isolated-command.r` for a POSIX example that prints a
+command-local environment value while preserving the host value.

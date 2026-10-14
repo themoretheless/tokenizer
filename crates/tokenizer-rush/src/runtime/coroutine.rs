@@ -4,6 +4,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CoroutineId(u64);
+impl CoroutineId {
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum CoroutineState<'s> {
@@ -28,13 +33,18 @@ pub(super) enum Frame<'s> {
         cursor: SequenceCursor<'s>,
         environment: Environment<'s>,
     },
+    /// Marker below a region body block: when it surfaces, the region exits.
+    /// Survives suspension, so the sweep waits for the coroutine to finish
+    /// the region instead of ending it at the first yield.
+    Region { region: u32, span: Span },
 }
 impl<'s> Frame<'s> {
-    pub(super) fn environment(&self) -> &Environment<'s> {
+    pub(super) fn environment(&self) -> Option<&Environment<'s>> {
         match self {
             Self::Block { environment, .. }
             | Self::While { environment, .. }
-            | Self::For { environment, .. } => environment,
+            | Self::For { environment, .. } => Some(environment),
+            Self::Region { .. } => None,
         }
     }
     pub(super) fn sequence(&self) -> Option<&Rc<Sequence<'s>>> {
@@ -48,6 +58,8 @@ impl<'s> Frame<'s> {
 pub(super) struct Coroutine<'s> {
     pub(super) function: Rc<Closure<'s>>,
     pub(super) frames: Vec<Frame<'s>>,
+    /// Region frames parked while the task is suspended at a yield.
+    pub(super) regions: Vec<RegionFrame>,
 }
 impl<'s> Coroutine<'s> {
     fn push(&mut self, frame: Frame<'s>, runtime: &Runtime<'_, 's>, span: Span) -> Result<()> {
@@ -57,7 +69,12 @@ impl<'s> Coroutine<'s> {
         self.frames.push(frame);
         Ok(())
     }
-    fn loop_control(&mut self, leave: bool, runtime: &Runtime<'_, 's>, span: Span) -> Result<()> {
+    fn loop_control(
+        &mut self,
+        leave: bool,
+        runtime: &mut Runtime<'_, 's>,
+        span: Span,
+    ) -> Result<()> {
         while let Some(frame) = self.frames.last() {
             if matches!(frame, Frame::While { .. } | Frame::For { .. }) {
                 if leave {
@@ -65,9 +82,21 @@ impl<'s> Coroutine<'s> {
                 }
                 return Ok(());
             }
-            self.frames.pop();
+            let frame = self.frames.pop().unwrap();
+            if let Frame::Region { region, span } = frame {
+                runtime.exit_region(region, span)?;
+            }
         }
         runtime.error(span, "Coroutine loop control has no enclosing loop")
+    }
+    /// Pop all remaining frames on return, sweeping any regions they opened.
+    fn unwind(&mut self, runtime: &mut Runtime<'_, 's>) -> Result<()> {
+        while let Some(frame) = self.frames.pop() {
+            if let Frame::Region { region, span } = frame {
+                runtime.exit_region(region, span)?;
+            }
+        }
+        Ok(())
     }
     fn advance(&mut self, runtime: &mut Runtime<'_, 's>, span: Span) -> Result<CoroutineState<'s>> {
         loop {
@@ -76,6 +105,12 @@ impl<'s> Coroutine<'s> {
                 return Ok(CoroutineState::Complete(Value::Null));
             };
             match frame {
+                Frame::Region { region, span } => {
+                    let (region, span) = (*region, *span);
+                    runtime.exit_region(region, span)?;
+                    self.frames.pop();
+                    continue;
+                }
                 Frame::While {
                     condition,
                     body,
@@ -86,12 +121,18 @@ impl<'s> Coroutine<'s> {
                         return runtime.error(condition.span, "Condition must be boolean");
                     };
                     if enter {
+                        // Implicit per-iteration arena, swept when the pushed
+                        // body block finishes (or the task unwinds).
+                        let statements = body.clone();
+                        let body_environment = environment
+                            .try_clone()
+                            .map_err(|e| runtime.environment_error(span, e))?;
+                        let region = runtime.enter_region(None, None);
+                        self.push(Frame::Region { region, span }, runtime, span)?;
                         let frame = Frame::Block {
-                            statements: body.clone(),
+                            statements,
                             next: 0,
-                            environment: environment
-                                .try_clone()
-                                .map_err(|e| runtime.environment_error(span, e))?,
+                            environment: body_environment,
                         };
                         self.push(frame, runtime, span)?;
                     } else {
@@ -106,16 +147,19 @@ impl<'s> Coroutine<'s> {
                     environment,
                 } => {
                     if let Some(value) = runtime.sequence_next(cursor, span)? {
-                        let mut environment = environment
+                        let mut body_environment = environment
                             .try_clone()
                             .map_err(|e| runtime.environment_error(span, e))?;
-                        environment
+                        body_environment
                             .insert(binding.text, value)
                             .map_err(|e| runtime.environment_error(span, e))?;
+                        let statements = body.clone();
+                        let region = runtime.enter_region(None, None);
+                        self.push(Frame::Region { region, span }, runtime, span)?;
                         let frame = Frame::Block {
-                            statements: body.clone(),
+                            statements,
                             next: 0,
-                            environment,
+                            environment: body_environment,
                         };
                         self.push(frame, runtime, span)?;
                     } else {
@@ -195,10 +239,31 @@ impl<'s> Coroutine<'s> {
                         }
                         StmtKind::Break => self.loop_control(true, runtime, statement.span)?,
                         StmtKind::Continue => self.loop_control(false, runtime, statement.span)?,
+                        StmtKind::Region {
+                            name, budget, body, ..
+                        } => {
+                            let budget =
+                                runtime.eval_region_budget(budget.as_ref(), environment)?;
+                            let region_name = name.as_ref().map(|name| name.text);
+                            let body_environment = environment
+                                .try_clone()
+                                .map_err(|e| runtime.environment_error(statement.span, e))?;
+                            let body_statements = body.stmts.clone();
+                            let span = statement.span;
+                            let region = runtime.enter_region(budget, region_name);
+                            self.push(Frame::Region { region, span }, runtime, span)?;
+                            let frame = Frame::Block {
+                                statements: body_statements,
+                                next: 0,
+                                environment: body_environment,
+                            };
+                            self.push(frame, runtime, span)?;
+                        }
                         _ => {
                             let (value, flow) =
                                 runtime.statements(std::slice::from_ref(statement), environment)?;
                             if flow == Flow::Return {
+                                self.unwind(runtime)?;
                                 return Ok(CoroutineState::Complete(value));
                             }
                         }
@@ -209,7 +274,7 @@ impl<'s> Coroutine<'s> {
     }
 }
 impl<'a, 's> ScriptInstance<'a, 's> {
-    fn coroutine_limits(&mut self, limits: ExecutionLimits) -> Result<()> {
+    pub(super) fn coroutine_limits(&mut self, limits: ExecutionLimits) -> Result<()> {
         if limits.max_depth > 64 {
             return self
                 .runtime
@@ -238,7 +303,7 @@ impl<'a, 's> ScriptInstance<'a, 's> {
                 .runtime
                 .error(self.span, "Coroutine requires a Rush function");
         };
-        let FunctionBody::Block(body) = &function.body else {
+        let FunctionBody::Block(body) = &*function.body else {
             return self
                 .runtime
                 .error(self.span, "Coroutine requires a named function body");
@@ -283,9 +348,14 @@ impl<'a, 's> ScriptInstance<'a, 's> {
                     location: None,
                 })?,
         );
-        self.runtime
-            .coroutines
-            .insert(id, Coroutine { function, frames });
+        self.runtime.coroutines.insert(
+            id,
+            Coroutine {
+                function,
+                frames,
+                regions: Vec::new(),
+            },
+        );
         if let Err(error) = self.enforce_memory_limit() {
             self.runtime.coroutines.remove(&id);
             self.runtime.reclaim_cells();
@@ -309,6 +379,11 @@ impl<'a, 's> ScriptInstance<'a, 's> {
             task.function.references.clone(),
         );
         self.runtime.module = task.function.module;
+        // A coroutine that yielded inside a region parked its frames here;
+        // restore them so allocations land in the right arena again.
+        let region_base = self.runtime.region_stack.len();
+        self.runtime
+            .restore_regions(std::mem::take(&mut task.regions));
         let result = task.advance(&mut self.runtime, self.span);
         let result = if result.is_err() {
             if let Some(value) = self.runtime.early_return.take() {
@@ -319,6 +394,13 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         } else {
             result
         };
+        if matches!(result, Ok(CoroutineState::Yielded(_))) {
+            // Suspended inside regions: park their frames with the task.
+            task.regions = self.runtime.take_regions_above(region_base);
+        } else {
+            // Completed or terminated: no region of this task may linger.
+            self.runtime.truncate_regions(region_base);
+        }
         let result = match result {
             Ok(CoroutineState::Complete(value))
                 if task
@@ -332,7 +414,7 @@ impl<'a, 's> ScriptInstance<'a, 's> {
             }
             result => result,
         };
-        let function_span = match &task.function.body {
+        let function_span = match &*task.function.body {
             FunctionBody::Block(body) => body.span,
             _ => self.span,
         };

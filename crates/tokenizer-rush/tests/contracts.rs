@@ -240,12 +240,18 @@ fn lexical_snapshots_mutable_cells_and_assignment_scope_are_explicit() {
     let source = "const x = 1\nconst f = () => x\nfn g() { const x = 2; return f() }\ng()";
     assert_eq!(evaluate(source, 300).unwrap(), Value::Number(1.));
     assert!(evaluate("fn f() { return later }\nlet later = 3\nf()", 300).is_err());
-    for source in ["mut xs = [1]\nxs[0] = 2", "mut row = {x:1}\nrow.x = 2"] {
+    for source in [
+        "mut xs = [1]\nxs[0] = 2\nxs[0]",
+        "mut row = {x:1}\nrow.x = 2\nrow.x",
+    ] {
+        assert_eq!(evaluate(source, 300).unwrap(), Value::Number(2.));
+    }
+    for source in ["let xs = [1]\nxs[0] = 2", "let row = {x:1}\nrow.x = 2"] {
         assert!(
             evaluate(source, 300)
                 .unwrap_err()
                 .message
-                .contains("Only variable assignment")
+                .contains("Assignment requires a mutable variable")
         );
     }
     assert_eq!(
