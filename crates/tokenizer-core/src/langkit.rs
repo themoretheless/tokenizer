@@ -7,7 +7,6 @@ use crate::{
     Diagnostic, HostDiagnostic, HostSpan, HostToken, HostTokenization, Span, verify_lossless_spans,
 };
 use std::borrow::Cow;
-use std::collections::HashSet;
 
 /// One highlight run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -106,11 +105,11 @@ impl Default for CLikeProfile {
 #[must_use]
 pub fn highlight_c_like(source: &str, profile: &CLikeProfile) -> Highlighted {
     let bytes = source.as_bytes();
-    let mut out = Highlighted::default();
+    let mut out = Highlighted {
+        tokens: Vec::with_capacity(bytes.len() / 4),
+        diagnostics: Vec::new(),
+    };
     let mut i = 0usize;
-    let keywords: HashSet<&str> = profile.keywords.iter().copied().collect();
-    let types: HashSet<&str> = profile.types.iter().copied().collect();
-    let builtins: HashSet<&str> = profile.builtins.iter().copied().collect();
 
     while i < bytes.len() {
         let b = bytes[i];
@@ -271,11 +270,11 @@ pub fn highlight_c_like(source: &str, profile: &CLikeProfile) -> Highlighted {
                 i += 1;
             }
             let text = &source[start..i];
-            let kind = if keywords.contains(text) {
+            let kind = if profile.keywords.contains(&text) {
                 "keyword"
-            } else if types.contains(text) {
+            } else if profile.types.contains(&text) {
                 "type"
-            } else if builtins.contains(text) {
+            } else if profile.builtins.contains(&text) {
                 "builtin"
             } else {
                 "identifier"
@@ -378,7 +377,10 @@ pub fn find_close_tag(source: &str, from: usize, name: &str) -> Option<usize> {
 #[must_use]
 pub fn highlight_markup(source: &str, htmlish: bool) -> Highlighted {
     let bytes = source.as_bytes();
-    let mut out = Highlighted::default();
+    let mut out = Highlighted {
+        tokens: Vec::with_capacity(bytes.len() / 6),
+        diagnostics: Vec::new(),
+    };
     let mut i = 0usize;
 
     while i < bytes.len() {
@@ -426,8 +428,12 @@ pub fn highlight_markup(source: &str, htmlish: bool) -> Highlighted {
             {
                 i += 1;
             }
-            let raw_text_name = source[name_start..i].to_ascii_lowercase();
-            let raw_text = htmlish && !closing && HTML_RAW_TEXT.contains(&raw_text_name.as_str());
+            let raw_text_name = &source[name_start..i];
+            let raw_text = htmlish
+                && !closing
+                && HTML_RAW_TEXT
+                    .iter()
+                    .any(|t| t.eq_ignore_ascii_case(raw_text_name));
             // closing or open tag
             while i < bytes.len() && bytes[i] != b'>' {
                 // string attrs
@@ -456,7 +462,7 @@ pub fn highlight_markup(source: &str, htmlish: bool) -> Highlighted {
             // `</script`, exactly as a browser reads it.
             if raw_text {
                 let body_start = i;
-                match find_close_tag(source, body_start, &raw_text_name) {
+                match find_close_tag(source, body_start, raw_text_name) {
                     Some(close) => {
                         if close > body_start {
                             push(&mut out, "text", body_start, close);

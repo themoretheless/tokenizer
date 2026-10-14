@@ -3,7 +3,6 @@ use crate::bytecode::opcode::{BytecodeFunction, Chunk, Opcode, UpvalueDescriptor
 use crate::runtime::builtins::lookup_builtin;
 use crate::runtime::ops::{eval_binary_values, eval_unary_value, is_truthy};
 use crate::{Builtin, Expr, ExprKind, InterpolationPart, RuntimeError, Stmt, StmtKind, Value};
-use std::collections::HashMap;
 use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
 
@@ -75,59 +74,94 @@ struct LoopContext {
     break_jumps: Vec<usize>,
 }
 
-struct CompilerState {
+#[derive(Clone, Copy)]
+struct Local<'s> {
+    name: &'s str,
+    depth: u32,
+    slot: u32,
+}
+
+struct CompilerState<'s> {
     name: Option<String>,
     arity: usize,
     chunk: Chunk,
-    scopes: Vec<HashMap<String, u32>>,
+    locals: Vec<Local<'s>>,
+    scope_depth: u32,
     local_count: u32,
     upvalues: Vec<UpvalueDescriptor>,
     loops: Vec<LoopContext>,
 }
 
-impl CompilerState {
+impl<'s> CompilerState<'s> {
     fn new(name: Option<String>, arity: usize) -> Self {
         Self {
             name,
             arity,
             chunk: Chunk::new(),
-            scopes: vec![HashMap::new()],
+            locals: Vec::with_capacity(16),
+            scope_depth: 0,
             local_count: arity as u32,
             upvalues: Vec::new(),
             loops: Vec::new(),
         }
     }
 
+    #[inline]
     fn resolve_local(&self, name: &str) -> Option<u32> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(&slot) = scope.get(name) {
-                return Some(slot);
-            }
-        }
-        None
+        self.locals
+            .iter()
+            .rev()
+            .find(|l| l.name == name)
+            .map(|l| l.slot)
     }
 
-    fn declare_local(&mut self, name: &str) -> u32 {
+    #[inline]
+    fn declare_local(&mut self, name: &'s str) -> u32 {
         let slot = self.local_count;
         self.local_count += 1;
-        if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), slot);
+        let depth = self.scope_depth;
+        if let Some(existing) = self
+            .locals
+            .iter_mut()
+            .rev()
+            .take_while(|l| l.depth == depth)
+            .find(|l| l.name == name)
+        {
+            existing.slot = slot;
+        } else {
+            self.locals.push(Local { name, depth, slot });
         }
         slot
     }
 
+    #[inline]
+    fn declare_param(&mut self, name: &'s str, slot: u32) {
+        self.locals.push(Local {
+            name,
+            depth: 0,
+            slot,
+        });
+    }
+
+    #[inline]
     fn declare_temp_local(&mut self) -> u32 {
         let slot = self.local_count;
         self.local_count += 1;
         slot
     }
 
+    #[inline]
     fn push_scope(&mut self) {
-        self.scopes.push(HashMap::new());
+        self.scope_depth += 1;
     }
 
+    #[inline]
     fn pop_scope(&mut self) {
-        self.scopes.pop();
+        let depth = self.scope_depth;
+        while self.locals.last().is_some_and(|l| l.depth == depth) {
+            self.locals.pop();
+        }
+        self.scope_depth -= 1;
     }
 
     fn add_upvalue(&mut self, desc: UpvalueDescriptor) -> u32 {
@@ -150,23 +184,21 @@ enum VariableResolution {
 }
 
 pub(crate) struct Compiler<'s> {
-    states: Vec<CompilerState>,
-    _phantom: std::marker::PhantomData<&'s ()>,
+    states: Vec<CompilerState<'s>>,
 }
 
 impl<'s> Compiler<'s> {
     pub(crate) fn new() -> Self {
         Self {
             states: vec![CompilerState::new(Some("<main>".into()), 0)],
-            _phantom: std::marker::PhantomData,
         }
     }
 
-    fn current(&mut self) -> &mut CompilerState {
+    fn current(&mut self) -> &mut CompilerState<'s> {
         self.states.last_mut().expect("Compiler state stack empty")
     }
 
-    fn current_ref(&self) -> &CompilerState {
+    fn current_ref(&self) -> &CompilerState<'s> {
         self.states.last().expect("Compiler state stack empty")
     }
 
@@ -274,7 +306,7 @@ impl<'s> Compiler<'s> {
                 self.push_state(Some(name.text.to_string()), parameters.len());
                 for (i, p) in parameters.iter().enumerate() {
                     if let Some(p_name) = extract_pattern_name(&p.pattern) {
-                        self.current().scopes[0].insert(p_name.to_string(), i as u32);
+                        self.current().declare_param(p_name, i as u32);
                     }
                 }
                 self.compile_block(&body.stmts, false)?;
@@ -668,6 +700,18 @@ impl<'s> Compiler<'s> {
                                     .emit(Opcode::LocalMulImm(slot, imm), span);
                                 return Ok(());
                             }
+                            "%" if imm != 0.0 => {
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::LocalModImm(slot, imm), span);
+                                return Ok(());
+                            }
+                            "==" => {
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::LocalEqualImm(slot, imm), span);
+                                return Ok(());
+                            }
                             "<=" => {
                                 self.current()
                                     .chunk
@@ -692,6 +736,16 @@ impl<'s> Compiler<'s> {
                         "*" => {
                             self.compile_expr(left)?;
                             self.current().chunk.emit(Opcode::MulImm(imm), span);
+                            return Ok(());
+                        }
+                        "%" if imm != 0.0 => {
+                            self.compile_expr(left)?;
+                            self.current().chunk.emit(Opcode::ModImm(imm), span);
+                            return Ok(());
+                        }
+                        "==" => {
+                            self.compile_expr(left)?;
+                            self.current().chunk.emit(Opcode::EqualImm(imm), span);
                             return Ok(());
                         }
                         "<" => {
@@ -720,6 +774,32 @@ impl<'s> Compiler<'s> {
                     }
                 }
 
+                // Symmetric superinstruction fast-paths when left operand is a compile-time numeric constant
+                if matches!(*operator, "+" | "*" | "==")
+                    && let Some(Value::Number(imm)) = try_eval_const(left)
+                {
+                    if let ExprKind::Name(right_name) = &right.kind
+                        && let VariableResolution::Local(slot) =
+                            self.resolve_variable(right_name.text)
+                    {
+                        let op = match *operator {
+                            "+" => Opcode::LocalAddImm(slot, imm),
+                            "*" => Opcode::LocalMulImm(slot, imm),
+                            _ => Opcode::LocalEqualImm(slot, imm),
+                        };
+                        self.current().chunk.emit(op, span);
+                        return Ok(());
+                    }
+                    self.compile_expr(right)?;
+                    let op = match *operator {
+                        "+" => Opcode::AddImm(imm),
+                        "*" => Opcode::MulImm(imm),
+                        _ => Opcode::EqualImm(imm),
+                    };
+                    self.current().chunk.emit(op, span);
+                    return Ok(());
+                }
+
                 self.compile_expr(left)?;
                 self.compile_expr(right)?;
                 match *operator {
@@ -745,20 +825,28 @@ impl<'s> Compiler<'s> {
             } => match &target.kind {
                 ExprKind::Name(name) => {
                     let res = self.resolve_variable(name.text);
-                    if *operator == "+="
-                        && let VariableResolution::Local(slot) = res
-                    {
-                        if let Some(Value::Number(imm)) = try_eval_const(value) {
+                    if let VariableResolution::Local(slot) = res {
+                        if *operator == "+=" {
+                            if let Some(Value::Number(imm)) = try_eval_const(value) {
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::AddAssignLocalImm(slot, imm), span);
+                                return Ok(());
+                            }
+                            self.compile_expr(value)?;
                             self.current()
                                 .chunk
-                                .emit(Opcode::AddAssignLocalImm(slot, imm), span);
+                                .emit(Opcode::AddAssignLocal(slot), span);
                             return Ok(());
                         }
-                        self.compile_expr(value)?;
-                        self.current()
-                            .chunk
-                            .emit(Opcode::AddAssignLocal(slot), span);
-                        return Ok(());
+                        if *operator == "-="
+                            && let Some(Value::Number(imm)) = try_eval_const(value)
+                        {
+                            self.current()
+                                .chunk
+                                .emit(Opcode::AddAssignLocalImm(slot, -imm), span);
+                            return Ok(());
+                        }
                     }
 
                     if *operator == "=" {
@@ -951,7 +1039,7 @@ impl<'s> Compiler<'s> {
                 self.push_state(None, parameters.len());
                 for (i, p) in parameters.iter().enumerate() {
                     if let Some(p_name) = extract_pattern_name(p) {
-                        self.current().scopes[0].insert(p_name.to_string(), i as u32);
+                        self.current().declare_param(p_name, i as u32);
                     }
                 }
                 self.compile_expr(body)?;
@@ -982,6 +1070,7 @@ impl<'s> Compiler<'s> {
             }
             ExprKind::Pipeline { input, stages } => {
                 self.compile_expr(input)?;
+                let mut shared_tmp_slot: Option<u32> = None;
                 for stage in stages {
                     match &stage.kind {
                         ExprKind::Call { callee, arguments } => {
@@ -1000,7 +1089,8 @@ impl<'s> Compiler<'s> {
                                 );
                                 continue;
                             }
-                            let tmp_slot = self.current().declare_temp_local();
+                            let tmp_slot = *shared_tmp_slot
+                                .get_or_insert_with(|| self.current().declare_temp_local());
                             self.current()
                                 .chunk
                                 .emit(Opcode::StoreLocal(tmp_slot), stage.span);
@@ -1024,7 +1114,8 @@ impl<'s> Compiler<'s> {
                                     .emit(Opcode::CallBuiltin(builtin, 1), stage.span);
                                 continue;
                             }
-                            let tmp_slot = self.current().declare_temp_local();
+                            let tmp_slot = *shared_tmp_slot
+                                .get_or_insert_with(|| self.current().declare_temp_local());
                             self.current()
                                 .chunk
                                 .emit(Opcode::StoreLocal(tmp_slot), stage.span);
@@ -1035,7 +1126,8 @@ impl<'s> Compiler<'s> {
                             self.current().chunk.emit(Opcode::Call(1), stage.span);
                         }
                         _ => {
-                            let tmp_slot = self.current().declare_temp_local();
+                            let tmp_slot = *shared_tmp_slot
+                                .get_or_insert_with(|| self.current().declare_temp_local());
                             self.current()
                                 .chunk
                                 .emit(Opcode::StoreLocal(tmp_slot), stage.span);
@@ -1138,6 +1230,9 @@ impl<'s> Compiler<'s> {
                 let jmp = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
                 fail_jumps.push(jmp);
                 for (i, subpattern) in patterns.iter().enumerate() {
+                    if matches!(&subpattern.kind, ExprKind::Name(n) if n.text == "_") {
+                        continue;
+                    }
                     self.current()
                         .chunk
                         .emit(Opcode::GetLocal(target_slot), span);
@@ -1172,6 +1267,9 @@ impl<'s> Compiler<'s> {
                         .emit(Opcode::CheckRecordField(field_idx), span);
                     let jmp = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
                     fail_jumps.push(jmp);
+                    if matches!(&subpattern.kind, ExprKind::Name(n) if n.text == "_") {
+                        continue;
+                    }
                     self.current()
                         .chunk
                         .emit(Opcode::GetLocal(target_slot), span);
@@ -1199,6 +1297,9 @@ impl<'s> Compiler<'s> {
                 let jmp = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
                 fail_jumps.push(jmp);
                 for (i, arg_pattern) in arguments.iter().enumerate() {
+                    if matches!(&arg_pattern.kind, ExprKind::Name(n) if n.text == "_") {
+                        continue;
+                    }
                     self.current()
                         .chunk
                         .emit(Opcode::GetLocal(target_slot), span);
@@ -1213,6 +1314,14 @@ impl<'s> Compiler<'s> {
                 }
             }
             _ => {
+                if let Some(Value::Number(imm)) = try_eval_const(pattern) {
+                    self.current()
+                        .chunk
+                        .emit(Opcode::LocalEqualImm(target_slot, imm), span);
+                    let jmp = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
+                    fail_jumps.push(jmp);
+                    return Ok(());
+                }
                 self.current()
                     .chunk
                     .emit(Opcode::GetLocal(target_slot), span);
@@ -1249,6 +1358,9 @@ impl<'s> Compiler<'s> {
                     .chunk
                     .emit(Opcode::AssertTuple(items.len()), span);
                 for (i, item) in items.iter().enumerate() {
+                    if matches!(&item.kind, ExprKind::Name(n) if n.text == "_") {
+                        continue;
+                    }
                     self.current()
                         .chunk
                         .emit(Opcode::GetLocal(target_slot), span);
@@ -1279,6 +1391,10 @@ impl<'s> Compiler<'s> {
                     self.current()
                         .chunk
                         .emit(Opcode::RecordGetAssert(field_idx), span);
+                    if matches!(&subpattern.kind, ExprKind::Name(n) if n.text == "_") {
+                        self.current().chunk.emit(Opcode::Pop, span);
+                        continue;
+                    }
                     let field_slot = self.current().declare_temp_local();
                     self.current()
                         .chunk

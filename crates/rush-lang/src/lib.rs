@@ -377,10 +377,7 @@ impl Interpreter {
             let len = usize::from(self.pushback_len);
             self.pushback_len = 0;
             let mut scratch = [0u8; MAX_BODY_LINE];
-            if let (Some(dst), Some(src)) = (
-                scratch.get_mut(..len),
-                self.pushback.get(..len),
-            ) {
+            if let (Some(dst), Some(src)) = (scratch.get_mut(..len), self.pushback.get(..len)) {
                 dst.copy_from_slice(src);
             }
             let text = str::from_utf8(scratch.get(..len).unwrap_or(&[])).unwrap_or("");
@@ -575,7 +572,10 @@ impl Interpreter {
             return Ok(Step::Skip);
         }
         let subject = str::from_utf8(
-            frame.subject.get(..usize::from(frame.subject_len)).unwrap_or(&[]),
+            frame
+                .subject
+                .get(..usize::from(frame.subject_len))
+                .unwrap_or(&[]),
         )
         .unwrap_or("");
         if !match_patterns(patterns, subject) {
@@ -614,12 +614,10 @@ impl Interpreter {
             }
         };
         let var = &mut self.vars[index];
-        var.name = [0; MAX_NAME];
         var.name_len = name.len() as u8;
         if let Some(slot) = var.name.get_mut(..name.len()) {
             slot.copy_from_slice(name.as_bytes());
         }
-        var.value = [0; MAX_VALUE];
         var.value_len = value.len() as u8;
         if let Some(slot) = var.value.get_mut(..value.len()) {
             slot.copy_from_slice(value.as_bytes());
@@ -672,8 +670,8 @@ impl Interpreter {
     fn assign_expand(&mut self, name: &str, value: &str) -> Result<(), RushError> {
         let mut buf = [0u8; MAX_VALUE];
         let len = self.expand_to(value, &mut buf)?;
-        let text = str::from_utf8(buf.get(..len).unwrap_or(&[]))
-            .map_err(|_| RushError::ValueTooLong)?;
+        let text =
+            str::from_utf8(buf.get(..len).unwrap_or(&[])).map_err(|_| RushError::ValueTooLong)?;
         self.set_var(name, text)
     }
 
@@ -683,7 +681,13 @@ impl Interpreter {
         self.capture.map_or(0, |cap| usize::from(cap.indent))
     }
 
-    fn start_fn_capture(&mut self, trimmed: &str, indent: usize, active: bool, nested: bool) -> Result<Step<'static>, RushError> {
+    fn start_fn_capture(
+        &mut self,
+        trimmed: &str,
+        indent: usize,
+        active: bool,
+        nested: bool,
+    ) -> Result<Step<'static>, RushError> {
         if nested {
             return Err(RushError::NestedControl);
         }
@@ -731,7 +735,13 @@ impl Interpreter {
         Ok(Step::Skip)
     }
 
-    fn start_for_capture(&mut self, trimmed: &str, indent: usize, active: bool, nested: bool) -> Result<Step<'static>, RushError> {
+    fn start_for_capture(
+        &mut self,
+        trimmed: &str,
+        indent: usize,
+        active: bool,
+        nested: bool,
+    ) -> Result<Step<'static>, RushError> {
         if nested {
             return Err(RushError::NestedControl);
         }
@@ -851,24 +861,14 @@ impl Interpreter {
             Some(word) => word,
             None => return Ok(()),
         };
-        let mut var_buf = [0u8; MAX_NAME];
-        let mut word_buf = [0u8; MAX_VALUE];
-        let var_len = var.len().min(MAX_NAME);
-        let word_len = word.len().min(MAX_VALUE);
-        if let (Some(v), Some(w)) = (
-            var_buf.get_mut(..var_len),
-            word_buf.get_mut(..word_len),
-        ) {
-            v.copy_from_slice(var.as_bytes());
-            w.copy_from_slice(word.as_bytes());
-        }
-        let var = str::from_utf8(var_buf.get(..var_len).unwrap_or(&[])).unwrap_or("");
-        let word = str::from_utf8(word_buf.get(..word_len).unwrap_or(&[])).unwrap_or("");
         self.set_var(var, word)
     }
 
     /// Pull the next replayable line from the pending stack into `out`.
-    fn take_pending_line(&mut self, out: &mut [u8; MAX_BODY_LINE]) -> Result<Option<usize>, RushError> {
+    fn take_pending_line(
+        &mut self,
+        out: &mut [u8; MAX_BODY_LINE],
+    ) -> Result<Option<usize>, RushError> {
         loop {
             if self.pending_len == 0 {
                 return Ok(None);
@@ -895,7 +895,8 @@ impl Interpreter {
             }
             if frame.is_loop {
                 frame.word_index += 1;
-                let has_more = nth_word(frame.words_text(), usize::from(frame.word_index)).is_some();
+                let has_more =
+                    nth_word(frame.words_text(), usize::from(frame.word_index)).is_some();
                 if has_more {
                     frame.pc = 0;
                     self.bind_loop_word()?;
@@ -956,24 +957,15 @@ impl Interpreter {
             )
             .unwrap_or("");
             let value = if param < argc {
-                str::from_utf8(args[param].get(..usize::from(arg_lens[param])).unwrap_or(&[]))
-                    .unwrap_or("")
+                str::from_utf8(
+                    args[param]
+                        .get(..usize::from(arg_lens[param]))
+                        .unwrap_or(&[]),
+                )
+                .unwrap_or("")
             } else {
                 ""
             };
-            let mut name_buf = [0u8; MAX_NAME];
-            let mut value_buf = [0u8; MAX_VALUE];
-            let name_len = name.len().min(MAX_NAME);
-            let value_len = value.len().min(MAX_VALUE);
-            if let (Some(n), Some(v)) = (
-                name_buf.get_mut(..name_len),
-                value_buf.get_mut(..value_len),
-            ) {
-                n.copy_from_slice(name.as_bytes());
-                v.copy_from_slice(value.as_bytes());
-            }
-            let name = str::from_utf8(name_buf.get(..name_len).unwrap_or(&[])).unwrap_or("");
-            let value = str::from_utf8(value_buf.get(..value_len).unwrap_or(&[])).unwrap_or("");
             self.set_var(name, value)?;
         }
         Ok(())
@@ -985,7 +977,6 @@ impl Interpreter {
         if line.len() > MAX_SEGMENT {
             return Err(RushError::SegmentTooLong);
         }
-        self.chain = [0; MAX_SEGMENT];
         if let Some(slot) = self.chain.get_mut(..line.len()) {
             slot.copy_from_slice(line.as_bytes());
         }

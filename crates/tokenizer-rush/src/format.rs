@@ -19,22 +19,27 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
                 .map_or_else(|| "Invalid Rush syntax".into(), |d| d.message.to_string()),
         });
     }
-    let output = Writer::new(comments(&parsed)).module(&parsed.module.items);
+    let parsed_comments = comments(&parsed);
+    let output =
+        Writer::with_capacity(source.len(), parsed_comments.clone()).module(&parsed.module.items);
     let reparsed = parse(&output);
+    let reparsed_comments = comments(&reparsed);
     if !reparsed.is_valid()
-        || Writer::new(vec![]).module(&parsed.module.items)
-            != Writer::new(vec![]).module(&reparsed.module.items)
-        || !comments(&parsed)
+        || Writer::with_capacity(source.len(), vec![]).module(&parsed.module.items)
+            != Writer::with_capacity(output.len(), vec![]).module(&reparsed.module.items)
+        || !parsed_comments
             .iter()
             .map(|comment| comment.text)
-            .eq(comments(&reparsed).iter().map(|comment| comment.text))
+            .eq(reparsed_comments.iter().map(|comment| comment.text))
     {
         return Err(FormatError {
             span: parsed.module.span,
             message: "Formatter could not preserve the program".into(),
         });
     }
-    if Writer::new(comments(&reparsed)).module(&reparsed.module.items) != output {
+    if Writer::with_capacity(output.len(), reparsed_comments).module(&reparsed.module.items)
+        != output
+    {
         return Err(FormatError {
             span: parsed.module.span,
             message: "Formatter could not produce a stable layout".into(),
@@ -69,6 +74,7 @@ impl std::fmt::Display for FormatError {
 }
 impl std::error::Error for FormatError {}
 
+#[derive(Clone)]
 struct Comment<'s> {
     span: Span,
     text: &'s str,
@@ -81,9 +87,9 @@ struct Writer<'s> {
     next: usize,
 }
 impl<'s> Writer<'s> {
-    fn new(comments: Vec<Comment<'s>>) -> Self {
+    fn with_capacity(capacity: usize, comments: Vec<Comment<'s>>) -> Self {
         Self {
-            output: String::new(),
+            output: String::with_capacity(capacity),
             indent: 0,
             comments,
             next: 0,
@@ -91,7 +97,13 @@ impl<'s> Writer<'s> {
     }
     fn text(&mut self, text: &str) {
         if self.output.ends_with('\n') && !text.is_empty() {
-            self.output.push_str(&"    ".repeat(self.indent));
+            const SPACES: &str = "                                                                ";
+            let mut rem = self.indent * 4;
+            while rem > 0 {
+                let chunk = rem.min(SPACES.len());
+                self.output.push_str(&SPACES[..chunk]);
+                rem -= chunk;
+            }
         }
         self.output.push_str(text);
     }

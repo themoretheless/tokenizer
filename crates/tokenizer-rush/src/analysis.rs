@@ -2287,10 +2287,7 @@ impl<'s> Checker<'s> {
                 {
                     return self.builtin_aliases.get(&binding.1.start).copied();
                 }
-                crate::builtin_catalog()
-                    .iter()
-                    .find(|(entry, _)| *entry == name.text)
-                    .map(|(_, builtin)| *builtin)
+                crate::runtime::builtins::lookup_builtin(name.text)
             }
             ExprKind::If {
                 then_value,

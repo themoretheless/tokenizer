@@ -410,42 +410,48 @@ impl<'c> Vm<'c> {
                 }
                 Opcode::Add => {
                     let right = self.stack.pop().unwrap();
-                    let left = self.stack.pop().unwrap();
-                    if let (Value::Number(a), Value::Number(b)) = (&left, &right) {
-                        let n = a + b;
+                    if let (Some(Value::Number(a)), Value::Number(b)) =
+                        (self.stack.last_mut(), &right)
+                    {
+                        let n = *a + *b;
                         if n.is_finite() {
-                            self.stack.push(Value::Number(n));
+                            *a = n;
                             continue;
                         }
                     }
+                    let left = self.stack.pop().unwrap();
                     let res =
                         eval_binary_values("+", left, right).map_err(|m| self.error(span, m))?;
                     self.stack.push(res);
                 }
                 Opcode::Sub => {
                     let right = self.stack.pop().unwrap();
-                    let left = self.stack.pop().unwrap();
-                    if let (Value::Number(a), Value::Number(b)) = (&left, &right) {
-                        let n = a - b;
+                    if let (Some(Value::Number(a)), Value::Number(b)) =
+                        (self.stack.last_mut(), &right)
+                    {
+                        let n = *a - *b;
                         if n.is_finite() {
-                            self.stack.push(Value::Number(n));
+                            *a = n;
                             continue;
                         }
                     }
+                    let left = self.stack.pop().unwrap();
                     let res =
                         eval_binary_values("-", left, right).map_err(|m| self.error(span, m))?;
                     self.stack.push(res);
                 }
                 Opcode::Mul => {
                     let right = self.stack.pop().unwrap();
-                    let left = self.stack.pop().unwrap();
-                    if let (Value::Number(a), Value::Number(b)) = (&left, &right) {
-                        let n = a * b;
+                    if let (Some(Value::Number(a)), Value::Number(b)) =
+                        (self.stack.last_mut(), &right)
+                    {
+                        let n = *a * *b;
                         if n.is_finite() {
-                            self.stack.push(Value::Number(n));
+                            *a = n;
                             continue;
                         }
                     }
+                    let left = self.stack.pop().unwrap();
                     let res =
                         eval_binary_values("*", left, right).map_err(|m| self.error(span, m))?;
                     self.stack.push(res);
@@ -472,6 +478,12 @@ impl<'c> Vm<'c> {
                     self.stack.push(res);
                 }
                 Opcode::Neg => {
+                    if let Some(Value::Number(n)) = self.stack.last_mut()
+                        && (-*n).is_finite()
+                    {
+                        *n = -*n;
+                        continue;
+                    }
                     let val = self.stack.pop().unwrap();
                     let res = eval_unary_value("-", val, false).map_err(|m| self.error(span, m))?;
                     self.stack.push(res);
@@ -482,8 +494,9 @@ impl<'c> Vm<'c> {
                     self.stack.push(res);
                 }
                 Opcode::Not => {
-                    let val = self.stack.pop().unwrap();
-                    self.stack.push(Value::Bool(!is_truthy(&val)));
+                    if let Some(slot) = self.stack.last_mut() {
+                        *slot = Value::Bool(!is_truthy(slot));
+                    }
                 }
                 Opcode::Equal => {
                     let right = self.stack.pop().unwrap();
@@ -501,36 +514,44 @@ impl<'c> Vm<'c> {
                 }
                 Opcode::Less => {
                     let right = self.stack.pop().unwrap();
-                    let left = self.stack.pop().unwrap();
-                    match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => self.stack.push(Value::Bool(a < b)),
+                    match (self.stack.last_mut(), right) {
+                        (Some(slot @ Value::Number(_)), Value::Number(b)) => {
+                            if let Value::Number(a) = *slot {
+                                *slot = Value::Bool(a < b);
+                            }
+                        }
                         _ => return Err(self.error(span, "Invalid operands for <")),
                     }
                 }
                 Opcode::LessEqual => {
                     let right = self.stack.pop().unwrap();
-                    let left = self.stack.pop().unwrap();
-                    match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => {
-                            self.stack.push(Value::Bool(a <= b))
+                    match (self.stack.last_mut(), right) {
+                        (Some(slot @ Value::Number(_)), Value::Number(b)) => {
+                            if let Value::Number(a) = *slot {
+                                *slot = Value::Bool(a <= b);
+                            }
                         }
                         _ => return Err(self.error(span, "Invalid operands for <=")),
                     }
                 }
                 Opcode::Greater => {
                     let right = self.stack.pop().unwrap();
-                    let left = self.stack.pop().unwrap();
-                    match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => self.stack.push(Value::Bool(a > b)),
+                    match (self.stack.last_mut(), right) {
+                        (Some(slot @ Value::Number(_)), Value::Number(b)) => {
+                            if let Value::Number(a) = *slot {
+                                *slot = Value::Bool(a > b);
+                            }
+                        }
                         _ => return Err(self.error(span, "Invalid operands for >")),
                     }
                 }
                 Opcode::GreaterEqual => {
                     let right = self.stack.pop().unwrap();
-                    let left = self.stack.pop().unwrap();
-                    match (left, right) {
-                        (Value::Number(a), Value::Number(b)) => {
-                            self.stack.push(Value::Bool(a >= b))
+                    match (self.stack.last_mut(), right) {
+                        (Some(slot @ Value::Number(_)), Value::Number(b)) => {
+                            if let Value::Number(a) = *slot {
+                                *slot = Value::Bool(a >= b);
+                            }
                         }
                         _ => return Err(self.error(span, "Invalid operands for >=")),
                     }
@@ -544,14 +565,31 @@ impl<'c> Vm<'c> {
                     _ => return Err(self.error(span, "Invalid operands for -")),
                 },
                 Opcode::MulImm(imm) => {
-                    let left = self.stack.pop().unwrap();
-                    match left {
-                        Value::Number(a) => self.stack.push(Value::Number(a * imm)),
-                        other => {
-                            let res = eval_binary_values("*", other, Value::Number(imm))
-                                .map_err(|m| self.error(span, m))?;
-                            self.stack.push(res);
+                    if let Some(Value::Number(a)) = self.stack.last_mut() {
+                        *a *= imm;
+                    } else {
+                        let left = self.stack.pop().unwrap();
+                        let res = eval_binary_values("*", left, Value::Number(imm))
+                            .map_err(|m| self.error(span, m))?;
+                        self.stack.push(res);
+                    }
+                }
+                Opcode::ModImm(imm) => match self.stack.last_mut() {
+                    Some(Value::Number(a)) => {
+                        *a = crate::runtime::ops::exact_remainder(*a, imm);
+                    }
+                    _ => return Err(self.error(span, "Invalid operands for %")),
+                },
+                Opcode::EqualImm(imm) => {
+                    if let Some(slot @ Value::Number(_)) = self.stack.last_mut() {
+                        if let Value::Number(a) = *slot {
+                            *slot = Value::Bool(a == imm);
                         }
+                    } else {
+                        let left = self.stack.pop().unwrap();
+                        let res = eval_binary_values("==", left, Value::Number(imm))
+                            .map_err(|m| self.error(span, m))?;
+                        self.stack.push(res);
                     }
                 }
                 Opcode::LessImm(imm) => match self.stack.last_mut() {
@@ -610,6 +648,28 @@ impl<'c> Vm<'c> {
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for *")),
+                    }
+                }
+                Opcode::LocalModImm(slot, imm) => {
+                    let idx = self.frames[frame_idx].stack_base + slot as usize;
+                    match self.stack.get(idx) {
+                        Some(Value::Number(a)) => {
+                            let rem = crate::runtime::ops::exact_remainder(*a, imm);
+                            self.stack.push(Value::Number(rem));
+                        }
+                        _ => return Err(self.error(span, "Invalid operands for %")),
+                    }
+                }
+                Opcode::LocalEqualImm(slot, imm) => {
+                    let idx = self.frames[frame_idx].stack_base + slot as usize;
+                    match self.stack.get(idx) {
+                        Some(Value::Number(a)) => self.stack.push(Value::Bool(*a == imm)),
+                        Some(other) => {
+                            let res = eval_binary_values("==", other.clone(), Value::Number(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for ==")),
                     }
                 }
                 Opcode::LocalLessEqualImm(slot, imm) => {
@@ -1367,7 +1427,13 @@ impl<'c> Vm<'c> {
                 if builtin == Builtin::RangeIter {
                     return Ok(Value::Range { start, end, step });
                 }
-                let mut values = Vec::new();
+                let est = ((end - start) / step).ceil();
+                let cap = if est.is_finite() && est > 0.0 {
+                    (est as usize).min(self.fuel.saturating_add(1)).min(65_536)
+                } else {
+                    0
+                };
+                let mut values = Vec::with_capacity(cap);
                 let mut current = start;
                 while if step > 0.0 {
                     current < end

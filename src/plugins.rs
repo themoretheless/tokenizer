@@ -62,7 +62,7 @@ mod json_host {
             let mut tokens = Vec::with_capacity(result.tokens().len());
             for token in result.tokens() {
                 tokens.push(HostToken {
-                    kind: Cow::Owned(debug_kebab(token.kind)),
+                    kind: Cow::Borrowed(syntax_kind_str(token.kind)),
                     span: token.span.into(),
                     error: token.has_error(),
                 });
@@ -98,7 +98,7 @@ mod json_host {
             let mut tokens = Vec::with_capacity(result.tokens.len());
             for token in &result.tokens {
                 tokens.push(HostToken {
-                    kind: Cow::Owned(debug_kebab(token.kind)),
+                    kind: Cow::Borrowed(semantic_kind_str(token.kind)),
                     span: token.span.into(),
                     error: matches!(
                         token.kind,
@@ -129,6 +129,46 @@ mod json_host {
             opts: &HostAnalysisOptions,
         ) -> Result<Vec<HostDiagnostic>, HostError> {
             Ok(self.semantic_tokens(source, opts)?.diagnostics)
+        }
+    }
+
+    const fn syntax_kind_str(kind: themoretheless_tokenizer_json::SyntaxKind) -> &'static str {
+        use themoretheless_tokenizer_json::SyntaxKind;
+        match kind {
+            SyntaxKind::Whitespace => "whitespace",
+            SyntaxKind::Bom => "bom",
+            SyntaxKind::LineComment => "line-comment",
+            SyntaxKind::BlockComment => "block-comment",
+            SyntaxKind::LeftBrace => "left-brace",
+            SyntaxKind::RightBrace => "right-brace",
+            SyntaxKind::LeftBracket => "left-bracket",
+            SyntaxKind::RightBracket => "right-bracket",
+            SyntaxKind::Comma => "comma",
+            SyntaxKind::Colon => "colon",
+            SyntaxKind::String => "string",
+            SyntaxKind::Identifier => "identifier",
+            SyntaxKind::Number => "number",
+            SyntaxKind::True => "true",
+            SyntaxKind::False => "false",
+            SyntaxKind::Null => "null",
+            SyntaxKind::Error => "error",
+            _ => "error",
+        }
+    }
+
+    const fn semantic_kind_str(kind: themoretheless_tokenizer_json::SemanticKind) -> &'static str {
+        use themoretheless_tokenizer_json::SemanticKind;
+        match kind {
+            SemanticKind::Property => "property",
+            SemanticKind::String => "string",
+            SemanticKind::Number => "number",
+            SemanticKind::Boolean => "boolean",
+            SemanticKind::Null => "null",
+            SemanticKind::Punctuation => "punctuation",
+            SemanticKind::Comment => "comment",
+            SemanticKind::Whitespace => "whitespace",
+            SemanticKind::Invalid => "invalid",
+            _ => "invalid",
         }
     }
 }
@@ -531,12 +571,12 @@ pub fn analyze_host(
             .ok_or_else(|| HostError::UnknownLanguage {
                 language: language.to_owned(),
             })?;
-    let dialect = if dialect.is_empty() {
-        engine.descriptor().default_dialect.as_str()
+    let dialect_cow = if dialect.is_empty() {
+        Cow::Borrowed(engine.descriptor().default_dialect.as_str())
     } else {
-        dialect
+        Cow::Owned(dialect.to_owned())
     };
-    let opts = HostAnalysisOptions::new(Cow::Owned(dialect.to_owned()));
+    let opts = HostAnalysisOptions::new(dialect_cow);
     if opts.limits.exceeds_input_bytes(source.len()) {
         return Err(HostError::InputTooLarge {
             max: opts.limits.max_input_bytes,
@@ -544,18 +584,6 @@ pub fn analyze_host(
         });
     }
     engine.tokenize_layer(source, &opts, layer)
-}
-
-fn debug_kebab(value: impl std::fmt::Debug) -> String {
-    let value = format!("{value:?}");
-    let mut result = String::with_capacity(value.len() + 4);
-    for (index, character) in value.chars().enumerate() {
-        if character.is_ascii_uppercase() && index != 0 {
-            result.push('-');
-        }
-        result.push(character.to_ascii_lowercase());
-    }
-    result
 }
 
 #[cfg(test)]

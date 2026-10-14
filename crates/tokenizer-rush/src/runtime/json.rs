@@ -56,9 +56,19 @@ fn convert_json_value(value: JsonValue<'_>) -> Result<Value<'static>, String> {
 
 /// Serialize a Rush `Value` into a JSON string.
 pub fn stringify(value: &Value<'_>) -> Result<String, String> {
-    let mut out = String::new();
+    let mut out = String::with_capacity(64);
     encode_value(value, &mut out)?;
     Ok(out)
+}
+
+#[inline]
+fn write_json_number(n: f64, out: &mut String) {
+    use std::fmt::Write as _;
+    if n.fract() == 0.0 && n >= (i64::MIN as f64) && n <= (i64::MAX as f64) {
+        let _ = write!(out, "{}", n as i64);
+    } else {
+        let _ = write!(out, "{}", n);
+    }
 }
 
 fn encode_value(value: &Value<'_>, out: &mut String) -> Result<(), String> {
@@ -69,17 +79,14 @@ fn encode_value(value: &Value<'_>, out: &mut String) -> Result<(), String> {
             if !n.is_finite() {
                 return Err("Non-finite number cannot be serialized to JSON".into());
             }
-            if n.fract() == 0.0 && *n >= (i64::MIN as f64) && *n <= (i64::MAX as f64) {
-                out.push_str(&format!("{:.0}", n));
-            } else {
-                out.push_str(&n.to_string());
-            }
+            write_json_number(*n, out);
         }
         Value::Angle(a) => {
             if !a.is_finite() {
                 return Err("Non-finite angle cannot be serialized to JSON".into());
             }
-            out.push_str(&a.to_string());
+            use std::fmt::Write as _;
+            let _ = write!(out, "{}", a);
         }
         Value::String(s) => escape_json_str(s, out),
         Value::List(items) | Value::Tuple(items) => {
@@ -101,7 +108,8 @@ fn encode_value(value: &Value<'_>, out: &mut String) -> Result<(), String> {
                 if !c.is_finite() {
                     return Err("Non-finite vector component cannot be serialized to JSON".into());
                 }
-                out.push_str(&c.to_string());
+                use std::fmt::Write as _;
+                let _ = write!(out, "{}", c);
             }
             out.push(']');
         }
@@ -148,21 +156,41 @@ fn encode_value(value: &Value<'_>, out: &mut String) -> Result<(), String> {
 
 fn escape_json_str(s: &str, out: &mut String) {
     out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\x08' => out.push_str("\\b"),
-            '\x0C' => out.push_str("\\f"),
+    let bytes = s.as_bytes();
+    if !bytes.iter().any(|&b| b < b' ' || b == b'"' || b == b'\\') {
+        out.push_str(s);
+        out.push('"');
+        return;
+    }
+    let mut last = 0;
+    for (idx, c) in s.char_indices() {
+        let escaped = match c {
+            '"' => "\\\"",
+            '\\' => "\\\\",
+            '\n' => "\\n",
+            '\r' => "\\r",
+            '\t' => "\\t",
+            '\x08' => "\\b",
+            '\x0C' => "\\f",
             c if c < ' ' => {
+                if last < idx {
+                    out.push_str(&s[last..idx]);
+                }
                 use std::fmt::Write as _;
                 let _ = write!(out, "\\u{:04x}", c as u32);
+                last = idx + c.len_utf8();
+                continue;
             }
-            c => out.push(c),
+            _ => continue,
+        };
+        if last < idx {
+            out.push_str(&s[last..idx]);
         }
+        out.push_str(escaped);
+        last = idx + c.len_utf8();
+    }
+    if last < s.len() {
+        out.push_str(&s[last..]);
     }
     out.push('"');
 }

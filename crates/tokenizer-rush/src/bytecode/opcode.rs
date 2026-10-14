@@ -121,6 +121,10 @@ pub enum Opcode {
     SubImm(f64),
     /// Multiply top-of-stack number by immediate f64 in-place.
     MulImm(f64),
+    /// Modulo top-of-stack number by immediate f64 in-place.
+    ModImm(f64),
+    /// Compare top-of-stack `== imm` in-place.
+    EqualImm(f64),
     /// Compare top-of-stack `< imm` in-place.
     LessImm(f64),
     /// Compare top-of-stack `<= imm` in-place.
@@ -135,6 +139,10 @@ pub enum Opcode {
     LocalSubImm(u32, f64),
     /// Push `local[slot] * imm`.
     LocalMulImm(u32, f64),
+    /// Push `local[slot] % imm`.
+    LocalModImm(u32, f64),
+    /// Push `local[slot] == imm`.
+    LocalEqualImm(u32, f64),
     /// Push `local[slot] <= imm`.
     LocalLessEqualImm(u32, f64),
     /// Add top-of-stack to `local[slot]` and leave result on stack.
