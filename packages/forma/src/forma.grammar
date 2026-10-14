@@ -1,0 +1,96 @@
+@top Document { (Component | Attribute | Design | Node)* }
+@skip { space | LineComment | BlockComment }
+@precedence { call, typed, member @left, prefix, multiply @left, add @left, compare @left, equal @left, and @left, or @left, nullish @left, conditional @right }
+
+Component { component ComponentName (":" ComponentName)? Block }
+Design { design ComponentName "{" (DesignOverride | DesignState)* "}" }
+DesignOverride { TypeName Block }
+DesignState { state String Block }
+Attribute { "#[" AttributeName Arguments? "]" }
+Block { "{" (Node | If | For | Property | Attribute | Override | PropDeclaration | EventDeclaration | EnumDeclaration | Forward | GroupMatch)* "}" }
+Override { override (PropertyName | String) (Block ";"? | ":" Value+ ";" | from String (Block ";"? | ";")) }
+PropDeclaration { required? prop PropertyName ":" TypeReference ("=" Value+)? ";" }
+EventDeclaration { event PropertyName "(" (Parameter ("," Parameter)* ","?)? ")" ";" }
+Parameter { PropertyName ":" TypeReference }
+TypeReference { TypeName "?"? }
+EnumDeclaration { enum TypeName "{" (TypeName ("," TypeName)* ","?)? "}" ";"? }
+Forward { forward props "{" (PropertyName ("," PropertyName)* ","?)? "}" ";" }
+Node { TypeName Block }
+If { if Value ChildBlock (else (If | ChildBlock))? }
+For { for PropertyName in Value key Value ChildBlock (empty ChildBlock)? }
+ChildBlock { "{" (Node | If | For)* "}" }
+Property { PropertyName (":" Value+ | Binding Path | EventArrow Call) ";" }
+Value {
+  String | Number | Color | Boolean | Null | Star | Dash | Array | Object | Match | Call | Path | TypedValue | Parenthesized |
+  UnaryExpression | BinaryExpression | ConditionalExpression | MemberExpression
+}
+Parenthesized { "(" Value ")" }
+UnaryExpression { ("!" | "+" | Dash) !prefix Value }
+BinaryExpression {
+  Value !multiply (Star | "/" | "%") Value |
+  Value !add ("+" | Dash) Value |
+  Value !compare Comparison Value |
+  Value !equal Equality Value |
+  Value !and "&&" Value |
+  Value !or "||" Value |
+  Value !nullish "??" Value
+}
+ConditionalExpression { Value !conditional "?" Value ":" Value }
+MemberExpression { Value !member (("." | "?.") PropertyName | "[" Value "]" | "?." "[" Value "]") }
+TypedValue { TypeName !typed Block }
+Array { "[" (Value ("," Value)* ","?)? "]" }
+Object { "{" (PropertyName ":" Value+ ";")* "}" }
+Call { Path !call Arguments }
+Arguments { "(" (Value ("," Value)* ","?)? ")" }
+Match { match Subject "{" Branch* "}" }
+GroupMatch { match Subject "{" GroupBranch* "}" ";"? }
+Subject { Value | Tuple }
+Tuple { "(" Value ("," Value)+ ")" }
+Branch { Pattern MatchArrow Value+ ";" }
+GroupBranch { Pattern MatchArrow "{" Property* "}" ";"? }
+Pattern { Wildcard | Boolean | Null | String | Number | Path | Dash Number | Comparison Number | "(" Pattern ("," Pattern)+ ")" }
+Path { Identifier | TypeName }
+ComponentName { TypeName }
+PropertyName { Identifier }
+AttributeName { Identifier | design }
+component { @specialize<Identifier, "component"> }
+design { @specialize<Identifier, "design"> }
+match { @specialize<Identifier, "match"> }
+override { @specialize<Identifier, "override"> }
+from { @specialize<Identifier, "from"> }
+prop { @specialize<Identifier, "prop"> }
+required { @specialize<Identifier, "required"> }
+event { @specialize<Identifier, "event"> }
+enum { @specialize<Identifier, "enum"> }
+forward { @specialize<Identifier, "forward"> }
+props { @specialize<Identifier, "props"> }
+if { @specialize<Identifier, "if"> }
+else { @specialize<Identifier, "else"> }
+for { @specialize<Identifier, "for"> }
+in { @specialize<Identifier, "in"> }
+key { @extend<Identifier, "key"> }
+state { @extend<Identifier, "state"> }
+empty { @specialize<Identifier, "empty"> }
+Boolean { @specialize<Identifier, "true"> | @specialize<Identifier, "false"> }
+Null { @specialize<Identifier, "null"> }
+Wildcard { @specialize<Identifier, "_"> }
+
+@external tokens strings from "./forma-tokens.js" { String }
+
+@tokens {
+  space { $[ \t\n\r]+ }
+  LineComment { "//" ![\n]* }
+  BlockComment { "/*" (![*] | "*" ![/])* "*/" }
+  Number { $[0-9]+ ("." $[0-9]+)? ("px" | "ms" | "deg" | "%" | "fr" | "*")? }
+  Color { "#" $[0-9a-fA-F]+ }
+  TypeName { $[A-Z] $[a-zA-Z0-9_.]* }
+  Identifier { $[a-z_] $[a-zA-Z0-9_.]* }
+  Binding { "<->" }
+  EventArrow { "->" }
+  MatchArrow { "=>" }
+  Comparison { "<=" | ">=" | "<" | ">" }
+  Equality { "==" | "!=" | "===" | "!==" }
+  Star { "*" }
+  Dash { "-" }
+  @precedence { LineComment, BlockComment, "/" }
+}

@@ -210,3 +210,96 @@ impl Drop for CoroutineScheduler<'_, '_, '_> {
         self.cancel_all();
     }
 }
+
+/// An owned scheduler suitable for browser and application handles.
+/// Calls preserve task state without keeping a borrow of the script alive.
+pub struct OwnedCoroutineScheduler {
+    instance: instance::OwnedScriptInstance,
+    tasks: HashMap<CoroutineId, ScheduledTask>,
+    now: Duration,
+    order: u64,
+}
+impl OwnedCoroutineScheduler {
+    pub fn new(source: impl Into<String>, limits: ExecutionLimits) -> Result<Self> {
+        Ok(Self {
+            instance: instance::OwnedScriptInstance::new(source, limits)?,
+            tasks: HashMap::new(),
+            now: Duration::ZERO,
+            order: 0,
+        })
+    }
+    fn with_scheduler<R>(
+        &mut self,
+        f: impl for<'a> FnOnce(&mut CoroutineScheduler<'_, 'a, 'a>) -> R,
+    ) -> R {
+        let tasks = std::mem::take(&mut self.tasks);
+        let now = self.now;
+        let order = self.order;
+        let (result, tasks, now, order) = self.instance.with_instance(|instance| {
+            let mut scheduler = CoroutineScheduler {
+                instance,
+                tasks,
+                now,
+                order,
+            };
+            let result = f(&mut scheduler);
+            let tasks = std::mem::take(&mut scheduler.tasks);
+            (result, tasks, scheduler.now, scheduler.order)
+        });
+        self.tasks = tasks;
+        self.now = now;
+        self.order = order;
+        result
+    }
+    pub fn spawn(
+        &mut self,
+        name: &str,
+        arguments: &[Value<'static>],
+        limits: ExecutionLimits,
+    ) -> Result<CoroutineId> {
+        self.with_scheduler(|s| s.spawn(name, arguments, limits))
+    }
+    pub fn emit(&mut self, event: &str) -> Result<usize> {
+        self.with_scheduler(|s| s.emit(event))
+    }
+    pub fn cancel(&mut self, id: CoroutineId) -> bool {
+        self.with_scheduler(|s| s.cancel(id))
+    }
+    pub fn cancel_all(&mut self) {
+        self.with_scheduler(|s| s.cancel_all())
+    }
+    pub fn is_empty(&self) -> bool {
+        self.tasks.is_empty()
+    }
+    pub fn next_deadline(&self) -> Option<Duration> {
+        self.tasks
+            .values()
+            .filter_map(|t| match t.waiting {
+                Waiting::Ready(at) | Waiting::Timer(at) => Some(at),
+                Waiting::Event(_) => None,
+            })
+            .min()
+    }
+    pub fn poll(
+        &mut self,
+        now: Duration,
+        limits: ExecutionLimits,
+    ) -> Result<Vec<ScheduledStep<'static>>> {
+        self.with_scheduler(|s| {
+            s.poll(now, limits)?
+                .into_iter()
+                .map(|step| {
+                    let state = match step.state {
+                        ScheduledState::Complete(value) => ScheduledState::Complete(
+                            instance::owned_value(value)
+                                .map_err(|message| s.error::<()>(&message).unwrap_err())?,
+                        ),
+                        ScheduledState::Waiting(request) => ScheduledState::Waiting(request),
+                        ScheduledState::Failed(error) => ScheduledState::Failed(error),
+                    };
+                    Ok(ScheduledStep { id: step.id, state })
+                })
+                .collect()
+        })
+    }
+}

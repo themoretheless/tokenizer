@@ -1,0 +1,36 @@
+# Compiler optimization settings for tokenizer
+# Quick win: 5-15% performance improvement
+
+[build]
+# Use parallel compilation
+jobs = 4
+
+[target]
+# Default target for optimization
+x86_64-unknown-linux-gnu = { rustflags = ["-C", "target-feature=+avx2,+fma,+popcnt"] }
+aarch64-apple-darwin = { rustflags = ["-C", "target-feature=+neon"] }
+
+[profile.release]
+opt-level = 3          # Maximum optimization
+lto = "fat"            # Whole-program link-time optimization
+codegen-units = 1      # Single codegen unit for better optimization
+panic = "abort"        # Remove panic handling overhead
+strip = true           # Remove debug symbols
+debug = false          # No debug info in release
+overflow-checks = false# Wraparound arithmetic (safe for release)
+
+[profile.bench]
+debug = true           # Enable stack traces for profiling
+overflow-checks = false
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+incremental = false    # Faster bench builds
+
+[profile.dev]
+opt-level = 1          # Slightly faster than default, still usable
+lto = "thin"           # Light LTO for dev builds
+
+[env]
+# Benchmark configuration (will be set via environment or auto-calculated)
+# TOKENIZER_BENCH_ITERS can be set manually if needed

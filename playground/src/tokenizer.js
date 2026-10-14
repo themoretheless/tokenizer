@@ -83,3 +83,12 @@ export async function renameRush(source, offset, replacement) {
   if (typeof module.rename_rush !== 'function') throw new Error('Rebuild WASM to enable Rush rename')
   return JSON.parse(module.rename_rush(source, offset, replacement))
 }
+
+export async function scheduleRush(source, name, options = {}) {
+  await catalogWithWasm()
+  const module = await wasmModulePromise
+  const { driveRushScheduler } = await import('./rush-schedule.js')
+  const scheduler = new module.RushScheduler(source)
+  try { scheduler.spawn(name) } catch (error) { scheduler.free(); throw error }
+  return driveRushScheduler(scheduler, options)
+}
