@@ -168,23 +168,49 @@ pub(crate) fn eval_math_builtin<'s>(
     arguments: &[Value<'s>],
 ) -> Result<Value<'s>, &'static str> {
     if matches!(builtin, Builtin::Vec2 | Builtin::Vec3 | Builtin::Vec4) {
-        let dimension = match builtin {
-            Builtin::Vec2 => 2,
-            Builtin::Vec3 => 3,
-            _ => 4,
-        };
-        if arguments.len() != dimension {
-            return Err("Incorrect vector dimension");
-        }
-        let mut values = Vec::with_capacity(dimension);
-        for v in arguments {
-            if let Value::Number(n) = v {
-                values.push(*n);
-            } else {
-                return Err("Vector components must be numbers");
+        return match (builtin, arguments) {
+            (Builtin::Vec2, [Value::Number(x), Value::Number(y)]) => {
+                if x.is_finite() && y.is_finite() {
+                    Ok(Value::Vector(vec![*x, *y]))
+                } else {
+                    Err("Non-finite vector result")
+                }
             }
-        }
-        return check_vector_finite(values);
+            (Builtin::Vec3, [Value::Number(x), Value::Number(y), Value::Number(z)]) => {
+                if x.is_finite() && y.is_finite() && z.is_finite() {
+                    Ok(Value::Vector(vec![*x, *y, *z]))
+                } else {
+                    Err("Non-finite vector result")
+                }
+            }
+            (
+                Builtin::Vec4,
+                [
+                    Value::Number(x),
+                    Value::Number(y),
+                    Value::Number(z),
+                    Value::Number(w),
+                ],
+            ) => {
+                if x.is_finite() && y.is_finite() && z.is_finite() && w.is_finite() {
+                    Ok(Value::Vector(vec![*x, *y, *z, *w]))
+                } else {
+                    Err("Non-finite vector result")
+                }
+            }
+            _ => {
+                let dimension = match builtin {
+                    Builtin::Vec2 => 2,
+                    Builtin::Vec3 => 3,
+                    _ => 4,
+                };
+                if arguments.len() != dimension {
+                    Err("Incorrect vector dimension")
+                } else {
+                    Err("Vector components must be numbers")
+                }
+            }
+        };
     }
 
     match (builtin, arguments) {
@@ -303,11 +329,14 @@ pub(crate) fn eval_math_builtin<'s>(
         (Builtin::Noise, [Value::Number(x), Value::Number(seed)]) => crate::noise::noise(*x, *seed)
             .ok_or("noise requires a bounded coordinate and nonnegative exact integer seed")?,
         (Builtin::Cross, [Value::Vector(a), Value::Vector(b)]) if a.len() == 3 && b.len() == 3 => {
-            return check_vector_finite(vec![
-                a[1] * b[2] - a[2] * b[1],
-                a[2] * b[0] - a[0] * b[2],
-                a[0] * b[1] - a[1] * b[0],
-            ]);
+            let x = a[1] * b[2] - a[2] * b[1];
+            let y = a[2] * b[0] - a[0] * b[2];
+            let z = a[0] * b[1] - a[1] * b[0];
+            return if x.is_finite() && y.is_finite() && z.is_finite() {
+                Ok(Value::Vector(vec![x, y, z]))
+            } else {
+                Err("Non-finite vector result")
+            };
         }
         (Builtin::Lerp, [Value::Vector(a), Value::Vector(b), Value::Number(t)])
             if a.len() == b.len() =>
@@ -345,7 +374,12 @@ pub(crate) fn eval_math_builtin<'s>(
             t * t * (3.0 - 2.0 * t)
         }
         (Builtin::Dot, [Value::Vector(a), Value::Vector(b)]) if a.len() == b.len() => {
-            a.iter().zip(b).map(|(a, b)| a * b).sum()
+            match (a.as_slice(), b.as_slice()) {
+                ([a0, a1], [b0, b1]) => a0 * b0 + a1 * b1,
+                ([a0, a1, a2], [b0, b1, b2]) => a0 * b0 + a1 * b1 + a2 * b2,
+                ([a0, a1, a2, a3], [b0, b1, b2, b3]) => a0 * b0 + a1 * b1 + a2 * b2 + a3 * b3,
+                _ => a.iter().zip(b).map(|(a, b)| a * b).sum(),
+            }
         }
         (Builtin::Length | Builtin::Normalize, [Value::Vector(v)]) => {
             if builtin == Builtin::Normalize {
@@ -399,13 +433,23 @@ pub(crate) fn eval_pure_builtin<'s>(
             let [Value::String(s)] = args else {
                 return Err("to_lower requires a string".into());
             };
-            Ok(Value::String(s.to_lowercase()))
+            let lowered = if s.is_ascii() {
+                s.to_ascii_lowercase()
+            } else {
+                s.to_lowercase()
+            };
+            Ok(Value::String(lowered))
         }
         Builtin::ToUpper => {
             let [Value::String(s)] = args else {
                 return Err("to_upper requires a string".into());
             };
-            Ok(Value::String(s.to_uppercase()))
+            let uppered = if s.is_ascii() {
+                s.to_ascii_uppercase()
+            } else {
+                s.to_uppercase()
+            };
+            Ok(Value::String(uppered))
         }
         Builtin::StartsWith => {
             let [Value::String(s), Value::String(prefix)] = args else {
@@ -459,7 +503,7 @@ pub(crate) fn eval_pure_builtin<'s>(
             let [Value::List(items), Value::String(sep)] = args else {
                 return Err("join requires a list and a separator".into());
             };
-            let mut out = String::new();
+            let mut out = String::with_capacity(items.len() * (4 + sep.len()));
             for (i, item) in items.iter().enumerate() {
                 if i > 0 {
                     out.push_str(sep);
@@ -473,7 +517,13 @@ pub(crate) fn eval_pure_builtin<'s>(
                 return Err("len requires one argument".into());
             };
             let count = match arg {
-                Value::String(s) => s.chars().count(),
+                Value::String(s) => {
+                    if s.is_ascii() {
+                        s.len()
+                    } else {
+                        s.chars().count()
+                    }
+                }
                 Value::List(l) | Value::Tuple(l) => l.len(),
                 Value::Record(r) => r.len(),
                 Value::Vector(v) => v.len(),

@@ -58,9 +58,10 @@ impl Quaternion {
             (1.0 - t, t)
         } else {
             let angle = dot.clamp(-1.0, 1.0).acos();
+            let inv_sin = 1.0 / angle.sin();
             (
-                ((1.0 - t) * angle).sin() / angle.sin(),
-                (t * angle).sin() / angle.sin(),
+                ((1.0 - t) * angle).sin() * inv_sin,
+                (t * angle).sin() * inv_sin,
             )
         };
         Self::unit(std::array::from_fn(|i| self.0[i] * left + end[i] * right))

@@ -108,24 +108,36 @@ pub fn analyze_with(source: &str, limits: InputLimits) -> Parse<'_> {
 }
 
 fn semantic(parsed: &Parse<'_>, syntax: bool) -> SemanticTokenization {
-    let roles: std::collections::HashMap<_, _> = parsed.roles.iter().copied().collect();
-    SemanticTokenization {
-        tokens: parsed
+    let tokens = if syntax || parsed.roles.is_empty() {
+        parsed
             .lexed
             .tokens
             .iter()
             .map(|token| SemanticToken {
                 span: token.span,
-                kind: if syntax {
-                    token.kind.as_str()
-                } else {
-                    roles
-                        .get(&token.span)
-                        .copied()
-                        .unwrap_or(token.kind.as_str())
-                },
+                kind: token.kind.as_str(),
             })
-            .collect(),
+            .collect()
+    } else {
+        let mut roles = std::collections::HashMap::with_capacity(parsed.roles.len());
+        for &(span, role) in &parsed.roles {
+            roles.insert(span, role);
+        }
+        parsed
+            .lexed
+            .tokens
+            .iter()
+            .map(|token| SemanticToken {
+                span: token.span,
+                kind: roles
+                    .get(&token.span)
+                    .copied()
+                    .unwrap_or(token.kind.as_str()),
+            })
+            .collect()
+    };
+    SemanticTokenization {
+        tokens,
         diagnostics: parsed.diagnostics.clone(),
     }
 }

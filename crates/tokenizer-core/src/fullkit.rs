@@ -295,21 +295,21 @@ impl SemanticTokenization {
 
 // ─── Lex ─────────────────────────────────────────────────────────────────────
 
+#[inline]
+fn contains_ascii_case_insensitive(list: &[&str], needle: &str) -> bool {
+    let len = needle.len();
+    list.iter()
+        .any(|&item| item.len() == len && item.eq_ignore_ascii_case(needle))
+}
+
 #[must_use]
 pub fn lex_full(source: &str, profile: &FullProfile) -> Lexed {
     let bytes = source.as_bytes();
-    let mut out = Lexed::default();
+    let mut out = Lexed {
+        tokens: Vec::with_capacity(bytes.len() / 4),
+        diagnostics: Vec::new(),
+    };
     let mut i = 0usize;
-    let kw: std::collections::HashSet<String> = profile
-        .keywords
-        .iter()
-        .map(|k| k.to_ascii_lowercase())
-        .collect();
-    let ty: std::collections::HashSet<String> = profile
-        .types
-        .iter()
-        .map(|k| k.to_ascii_lowercase())
-        .collect();
 
     while i < bytes.len() {
         let b = bytes[i];
@@ -462,10 +462,9 @@ pub fn lex_full(source: &str, profile: &FullProfile) -> Lexed {
                 i += 1;
             }
             let text = &source[start..i];
-            let lower = text.to_ascii_lowercase();
-            let kind = if kw.contains(&lower) {
+            let kind = if contains_ascii_case_insensitive(profile.keywords, text) {
                 SyntaxKind::Keyword
-            } else if ty.contains(&lower) {
+            } else if contains_ascii_case_insensitive(profile.types, text) {
                 SyntaxKind::TypeIdent
             } else {
                 SyntaxKind::Identifier
@@ -545,22 +544,18 @@ fn check_delimiters(source: &str, out: &mut Lexed) {
 }
 
 /// Which bracket group a punctuation string belongs to, and whether it opens it.
+#[inline]
 fn delimiter_role(text: &str) -> Option<(usize, bool)> {
-    let c = text.chars().next()?;
-    if text.len() > c.len_utf8() {
-        return None;
+    match text.as_bytes() {
+        b"{" => Some((0, true)),
+        b"(" => Some((1, true)),
+        b"[" => Some((2, true)),
+        b"}" => Some((0, false)),
+        b")" => Some((1, false)),
+        b"]" => Some((2, false)),
+        _ => None,
     }
-    if let Some(group) = OPEN_DELIMITERS.iter().position(|open| *open == c) {
-        return Some((group, true));
-    }
-    CLOSE_DELIMITERS
-        .iter()
-        .position(|close| *close == c)
-        .map(|group| (group, false))
 }
-
-const OPEN_DELIMITERS: [char; 3] = ['{', '(', '['];
-const CLOSE_DELIMITERS: [char; 3] = ['}', ')', ']'];
 
 /// End offset just past the next unescaped backtick, or `None` if there is none.
 fn find_backtick_end(bytes: &[u8], mut i: usize) -> Option<usize> {

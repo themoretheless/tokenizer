@@ -29,15 +29,14 @@ fn shift(span: Span, offset: usize) -> Span {
 fn host_kind(
     source: &str,
     token: &LexToken,
-    keys: &[Span],
-    trailing: &[Span],
+    is_key: bool,
+    is_trailing: bool,
     semantic: bool,
 ) -> &'static str {
-    let text = token.text(source).unwrap_or("");
-    if token.kind == SyntaxKind::Comma && trailing.contains(&token.span) {
+    if token.kind == SyntaxKind::Comma && is_trailing {
         return "trailing-comma";
     }
-    if keys.contains(&token.span) {
+    if is_key {
         if semantic {
             return "property";
         }
@@ -68,9 +67,16 @@ fn host_kind(
         }
         SyntaxKind::String => "string",
         SyntaxKind::Number if token.flags.contains(TokenFlags::HEX_NUMBER) => "hex-number",
-        SyntaxKind::Number if text.ends_with("Infinity") => "infinity",
-        SyntaxKind::Number if text.ends_with("NaN") => "nan",
-        SyntaxKind::Number => "number",
+        SyntaxKind::Number => {
+            let text = token.text(source).unwrap_or("");
+            if text.ends_with("Infinity") {
+                "infinity"
+            } else if text.ends_with("NaN") {
+                "nan"
+            } else {
+                "number"
+            }
+        }
         SyntaxKind::True => "true",
         SyntaxKind::False => "false",
         SyntaxKind::Null => "null",
@@ -81,14 +87,30 @@ fn host_kind(
 fn push_parse(parsed: &Parse<'_>, offset: usize, tokens: &mut Vec<HostToken>, semantic: bool) {
     let source = parsed.source();
     let keys = parsed.property_spans();
+    let mut key_cursor = 0;
     let trailing = parsed.trailing_comma_spans();
+    let mut trailing_cursor = 0;
     for token in parsed.lexed().tokens() {
+        while keys
+            .get(key_cursor)
+            .is_some_and(|span| span.end <= token.span.start)
+        {
+            key_cursor += 1;
+        }
+        while trailing
+            .get(trailing_cursor)
+            .is_some_and(|span| span.end <= token.span.start)
+        {
+            trailing_cursor += 1;
+        }
+        let is_key = keys.get(key_cursor).copied() == Some(token.span);
+        let is_trailing = trailing.get(trailing_cursor).copied() == Some(token.span);
         let error = token.has_error();
         tokens.push(HostToken {
             kind: Cow::Borrowed(if error {
                 "error"
             } else {
-                host_kind(source, token, keys, trailing, semantic)
+                host_kind(source, token, is_key, is_trailing, semantic)
             }),
             span: HostSpan::from(shift(token.span, offset)),
             error,

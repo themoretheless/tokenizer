@@ -64,11 +64,7 @@ fn variables_expand_and_status_tracks() {
     let executed = ok("who = $USER\necho hello $who\nnosuchcmd\necho $STATUS\n");
     assert_eq!(
         executed,
-        vec![
-            "echo hello $who",
-            "nosuchcmd",
-            "echo $STATUS",
-        ]
+        vec!["echo hello $who", "nosuchcmd", "echo $STATUS",]
     );
     // The driver resolves $who/$STATUS at parse time; the table holds them:
     let mut interp = Interpreter::new();
@@ -79,21 +75,21 @@ fn variables_expand_and_status_tracks() {
 
 #[test]
 fn if_else_blocks_follow_the_condition() {
-    let executed = ok(
-        "if $STATUS = 0:\n    echo if-ok\nelse:\n    echo else-bad\necho after\n",
-    );
+    let executed = ok("if $STATUS = 0:\n    echo if-ok\nelse:\n    echo else-bad\necho after\n");
     assert_eq!(executed, vec!["echo if-ok", "echo after"]);
 
-    let (executed, outcome) = run("badcmd\nif $STATUS = 0:\n    echo no\nelse:\n    echo yes\n", &[1]);
+    let (executed, outcome) = run(
+        "badcmd\nif $STATUS = 0:\n    echo no\nelse:\n    echo yes\n",
+        &[1],
+    );
     assert_eq!(outcome.map(|_| ()), Ok(()));
     assert_eq!(executed, vec!["badcmd", "echo yes"]);
 }
 
 #[test]
 fn nested_blocks_and_not() {
-    let executed = ok(
-        "if not $MISSING:\n    if 2 > 1:\n        echo deep\n    echo mid\necho top\n",
-    );
+    let executed =
+        ok("if not $MISSING:\n    if 2 > 1:\n        echo deep\n    echo mid\necho top\n");
     assert_eq!(executed, vec!["echo deep", "echo mid", "echo top"]);
 }
 
@@ -146,7 +142,8 @@ fn quoted_operators_do_not_split() {
 
 #[test]
 fn fn_defines_and_calls_with_params() {
-    let executed = ok("fn twice word:\n    echo $word\n    echo $word again\ntwice hi\necho done\n");
+    let executed =
+        ok("fn twice word:\n    echo $word\n    echo $word again\ntwice hi\necho done\n");
     assert_eq!(
         executed,
         vec!["echo $word", "echo $word again", "echo done"]
@@ -185,7 +182,10 @@ fn match_selects_the_first_matching_arm() {
         vec!["echo other"]
     );
     // No matching arm and no wildcard: nothing runs, no error.
-    assert_eq!(ok("match nope:\n    \"ruofs\" => echo native\n"), Vec::<String>::new());
+    assert_eq!(
+        ok("match nope:\n    \"ruofs\" => echo native\n"),
+        Vec::<String>::new()
+    );
     // First match wins.
     assert_eq!(
         ok("match a:\n    a => echo one\n    a | _ => echo two\n"),
@@ -211,7 +211,10 @@ fn match_errors_are_stable() {
 
     let mut interp = Interpreter::new();
     assert_eq!(interp.step("match a:"), Ok(Step::Skip));
-    assert_eq!(interp.step("    echo no-arrow"), Err(RushError::BadMatchArm));
+    assert_eq!(
+        interp.step("    echo no-arrow"),
+        Err(RushError::BadMatchArm)
+    );
 
     let mut interp = Interpreter::new();
     assert_eq!(interp.step("match a:"), Ok(Step::Skip));

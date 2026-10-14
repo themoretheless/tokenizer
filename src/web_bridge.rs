@@ -74,11 +74,22 @@ fn success_payload(
     source: &str,
     result: &HostTokenization,
 ) -> String {
-    let mut output = format!(
-        "{{\"language\":{},\"mode\":{},\"layer\":{},\"valid\":{},\"sourceBytes\":{},\"tokens\":[",
-        json_string(language),
-        json_string(mode),
-        json_string(layer),
+    let mut output = String::with_capacity(
+        source
+            .len()
+            .saturating_mul(4)
+            .saturating_add(result.tokens.len().saturating_mul(48))
+            .max(256),
+    );
+    output.push_str("{\"language\":");
+    push_json_string(&mut output, language);
+    output.push_str(",\"mode\":");
+    push_json_string(&mut output, mode);
+    output.push_str(",\"layer\":");
+    push_json_string(&mut output, layer);
+    let _ = write!(
+        output,
+        ",\"valid\":{},\"sourceBytes\":{},\"tokens\":[",
         result.valid,
         source.len()
     );
@@ -157,7 +168,7 @@ fn success_payload(
                 if index > 0 {
                     output.push(',');
                 }
-                output.push_str(&json_string(member));
+                push_json_string(&mut output, member);
             }
             output.push_str("]}");
         }
@@ -171,10 +182,11 @@ fn success_payload(
                 output.push(',');
             }
             let arity = builtin.arity();
+            output.push_str("{\"name\":");
+            push_json_string(&mut output, name);
             let _ = write!(
                 output,
-                "{{\"name\":{},\"minArgs\":{},\"maxArgs\":{}}}",
-                json_string(name),
+                ",\"minArgs\":{},\"maxArgs\":{}}}",
                 arity.start(),
                 arity.end()
             );
@@ -185,36 +197,35 @@ fn success_payload(
             if index != 0 {
                 output.push(',');
             }
+            output.push_str("{\"name\":");
+            push_json_string(&mut output, &binding.name);
             let _ = write!(
                 output,
-                "{{\"name\":{},\"kind\":\"binding\",\"start\":{},\"end\":{},\"depth\":{},\"definition\":{{\"start\":{},\"end\":{}}}}}",
-                json_string(&binding.name),
+                ",\"kind\":\"binding\",\"start\":{},\"end\":{},\"depth\":{},\"definition\":{{\"start\":{},\"end\":{}}},\"members\":[",
                 binding.visible.start,
                 binding.visible.end,
                 binding.depth,
                 binding.definition.start,
                 binding.definition.end
             );
-            output.pop();
-            output.push_str(",\"members\":[");
             for (index, member) in binding.members.iter().enumerate() {
                 if index > 0 {
                     output.push(',');
                 }
-                output.push_str(&json_string(member));
+                push_json_string(&mut output, member);
             }
             output.push_str("],\"memberPaths\":{");
             for (index, (path, members)) in binding.member_paths.iter().enumerate() {
                 if index > 0 {
                     output.push(',');
                 }
-                output.push_str(&json_string(path));
+                push_json_string(&mut output, path);
                 output.push_str(":[");
                 for (index, member) in members.iter().enumerate() {
                     if index > 0 {
                         output.push(',');
                     }
-                    output.push_str(&json_string(member));
+                    push_json_string(&mut output, member);
                 }
                 output.push(']');
             }
@@ -256,7 +267,8 @@ fn success_payload(
 #[must_use]
 pub fn catalog() -> String {
     let engines = builtin_registry();
-    let mut out = String::from("{\"count\":");
+    let mut out = String::with_capacity(engines.len().saturating_mul(256).max(512));
+    out.push_str("{\"count\":");
     let _ = write!(out, "{},\"engines\":[", engines.len());
     for (index, engine) in engines.iter().enumerate() {
         if index != 0 {
@@ -395,27 +407,48 @@ fn push_diagnostic(output: &mut String, code: &str, message: &str, start: usize,
 }
 
 fn json_string(value: &str) -> String {
-    let mut output = String::new();
+    let mut output = String::with_capacity(value.len() + 2);
     push_json_string(&mut output, value);
     output
 }
 
 fn push_json_string(output: &mut String, value: &str) {
     output.push('"');
-    for character in value.chars() {
-        match character {
-            '"' => output.push_str("\\\""),
-            '\\' => output.push_str("\\\\"),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            '\u{08}' => output.push_str("\\b"),
-            '\u{0c}' => output.push_str("\\f"),
+    if !value.bytes().any(|b| b < 0x20 || b == b'"' || b == b'\\') {
+        output.push_str(value);
+        output.push('"');
+        return;
+    }
+    let mut chunk_start = 0;
+    for (idx, character) in value.char_indices() {
+        let escaped = match character {
+            '"' => Some("\\\""),
+            '\\' => Some("\\\\"),
+            '\n' => Some("\\n"),
+            '\r' => Some("\\r"),
+            '\t' => Some("\\t"),
+            '\u{08}' => Some("\\b"),
+            '\u{0c}' => Some("\\f"),
             character if character <= '\u{1f}' => {
+                if chunk_start < idx {
+                    output.push_str(&value[chunk_start..idx]);
+                }
                 let _ = write!(output, "\\u{:04x}", character as u32);
+                chunk_start = idx + character.len_utf8();
+                continue;
             }
-            character => output.push(character),
+            _ => None,
+        };
+        if let Some(esc) = escaped {
+            if chunk_start < idx {
+                output.push_str(&value[chunk_start..idx]);
+            }
+            output.push_str(esc);
+            chunk_start = idx + character.len_utf8();
         }
+    }
+    if chunk_start < value.len() {
+        output.push_str(&value[chunk_start..]);
     }
     output.push('"');
 }
@@ -494,7 +527,7 @@ pub fn execute_rush(source: &str) -> String {
 fn bounded_rush_output<E>(
     write: impl FnOnce(&mut StringOutput) -> Result<(), E>,
 ) -> Result<String, E> {
-    let mut output = StringOutput(String::new());
+    let mut output = StringOutput(String::with_capacity(256));
     write(&mut output)?;
     Ok(output.0)
 }
@@ -520,44 +553,6 @@ fn rush_export_error(code: &str, message: &str) -> String {
         json_string(code),
         json_string(message)
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn preserves_unicode_text_and_byte_spans() {
-        let output = tokenization_json(r#"{"city":"Тбилиси"}"#, "strict", "semantic");
-        assert!(output.contains("\"valid\":true"));
-        assert!(output.contains("\"language\":\"json\""));
-        assert!(output.contains("\"kind\":\"property\""));
-        assert!(output.contains("Тбилиси"));
-    }
-
-    #[test]
-    fn catalog_reports_family_and_preset_per_engine() {
-        let output = catalog();
-        assert!(output.contains("\"id\":\"json\""));
-        assert!(output.contains("\"family\":\"format\""));
-        assert!(output.contains("\"presets\":[\"formats\"]"));
-        assert!(output.contains("\"capabilities\":[\"lex\",\"parse\",\"semantic\",\"cst\",\"navigate\",\"visitor\",\"validate\"]"));
-    }
-
-    #[test]
-    fn escapes_source_fragments() {
-        let output = tokenization_json("\"a\\\"b\\n\"", "strict", "syntax");
-        assert!(output.contains("\\\""));
-        assert!(output.contains("\\n"));
-    }
-
-    #[cfg(feature = "url")]
-    #[test]
-    fn tokenizes_url_language() {
-        let output = tokenization("url", "https://example.com", "default", "syntax");
-        assert!(output.contains("\"language\":\"url\""));
-        assert!(output.contains("u-scheme"));
-    }
 }
 
 /// Stateful browser/application boundary for scheduled Rush functions.
@@ -637,5 +632,43 @@ impl RushSchedule {
         }
         write!(output, "],\"empty\":{}}}", self.scheduler.is_empty()).unwrap();
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_unicode_text_and_byte_spans() {
+        let output = tokenization_json(r#"{"city":"Тбилиси"}"#, "strict", "semantic");
+        assert!(output.contains("\"valid\":true"));
+        assert!(output.contains("\"language\":\"json\""));
+        assert!(output.contains("\"kind\":\"property\""));
+        assert!(output.contains("Тбилиси"));
+    }
+
+    #[test]
+    fn catalog_reports_family_and_preset_per_engine() {
+        let output = catalog();
+        assert!(output.contains("\"id\":\"json\""));
+        assert!(output.contains("\"family\":\"format\""));
+        assert!(output.contains("\"presets\":[\"formats\"]"));
+        assert!(output.contains("\"capabilities\":[\"lex\",\"parse\",\"semantic\",\"cst\",\"navigate\",\"visitor\",\"validate\"]"));
+    }
+
+    #[test]
+    fn escapes_source_fragments() {
+        let output = tokenization_json("\"a\\\"b\\n\"", "strict", "syntax");
+        assert!(output.contains("\\\""));
+        assert!(output.contains("\\n"));
+    }
+
+    #[cfg(feature = "url")]
+    #[test]
+    fn tokenizes_url_language() {
+        let output = tokenization("url", "https://example.com", "default", "syntax");
+        assert!(output.contains("\"language\":\"url\""));
+        assert!(output.contains("u-scheme"));
     }
 }

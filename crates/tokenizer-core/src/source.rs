@@ -217,8 +217,20 @@ impl<'source> LineIndex<'source> {
 fn measure(text: &str, encoding: ColumnEncoding) -> usize {
     match encoding {
         ColumnEncoding::Utf8Bytes => text.len(),
-        ColumnEncoding::UnicodeScalars => text.chars().count(),
-        ColumnEncoding::Utf16CodeUnits => text.encode_utf16().count(),
+        ColumnEncoding::UnicodeScalars => {
+            if text.is_ascii() {
+                text.len()
+            } else {
+                text.chars().count()
+            }
+        }
+        ColumnEncoding::Utf16CodeUnits => {
+            if text.is_ascii() {
+                text.len()
+            } else {
+                text.encode_utf16().count()
+            }
+        }
     }
 }
 

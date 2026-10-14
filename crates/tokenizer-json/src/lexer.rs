@@ -426,7 +426,7 @@ pub fn lex_with(source: &str, options: LexerOptions) -> Lexed<'_> {
         source,
         options,
         cursor: 0,
-        tokens: Vec::new(),
+        tokens: Vec::with_capacity((source.len() / 4).min(options.max_tokens)),
         diagnostics: Vec::new(),
         diagnostics_truncated: false,
         truncated: false,
@@ -487,8 +487,10 @@ impl<'source> Lexer<'source> {
             debug_assert!(self.cursor > start, "the lexer must always make progress");
         }
 
-        self.diagnostics
-            .sort_by_key(|diagnostic| (diagnostic.span.start, diagnostic.span.end));
+        if self.diagnostics.len() > 1 {
+            self.diagnostics
+                .sort_by_key(|diagnostic| (diagnostic.span.start, diagnostic.span.end));
+        }
         Lexed {
             source: self.source,
             tokens: self.tokens,
@@ -559,6 +561,7 @@ impl<'source> Lexer<'source> {
                         self.cursor,
                     );
                 }
+                0x20..=0x7f => self.cursor += 1,
                 _ => self.cursor = next_boundary(self.source, self.cursor),
             }
         }

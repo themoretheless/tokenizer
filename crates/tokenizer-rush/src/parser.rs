@@ -6,33 +6,51 @@ struct Token {
     raw: LexToken,
     indent: usize,
     tabs: bool,
+    newline: bool,
 }
 
 pub(crate) fn run(source: &str, lexed: Lexed, valid: bool, limits: InputLimits) -> Parse<'_> {
-    let mut starts = vec![0];
-    for (i, byte) in source.bytes().enumerate() {
-        if byte == b'\n' || (byte == b'\r' && source.as_bytes().get(i + 1) != Some(&b'\n')) {
-            starts.push(i + 1);
+    let bytes = source.as_bytes();
+    let mut tokens = Vec::with_capacity(lexed.tokens.len());
+    let mut line_indent = 0usize;
+    let mut line_tabs = false;
+    let mut at_line_start = true;
+    let mut saw_newline = true;
+
+    for raw in &lexed.tokens {
+        if raw.kind.is_trivia() {
+            let slice = &bytes[raw.span.start..raw.span.end];
+            let mut i = 0;
+            while i < slice.len() {
+                let b = slice[i];
+                if b == b'\n' || (b == b'\r' && slice.get(i + 1) != Some(&b'\n')) {
+                    line_indent = 0;
+                    line_tabs = false;
+                    at_line_start = true;
+                    saw_newline = true;
+                } else if at_line_start {
+                    if b == b' ' {
+                        line_indent += 1;
+                    } else if b == b'\t' {
+                        line_indent += 1;
+                        line_tabs = true;
+                    } else if b != b'\r' {
+                        at_line_start = false;
+                    }
+                }
+                i += 1;
+            }
+        } else {
+            at_line_start = false;
+            tokens.push(Token {
+                raw: *raw,
+                indent: line_indent,
+                tabs: line_tabs,
+                newline: saw_newline,
+            });
+            saw_newline = false;
         }
     }
-    let tokens = lexed
-        .tokens
-        .iter()
-        .filter(|t| !t.kind.is_trivia())
-        .map(|raw| {
-            let line = starts.partition_point(|&start| start <= raw.span.start) - 1;
-            let prefix = &source[starts[line]..raw.span.start];
-            let indent = prefix
-                .bytes()
-                .take_while(|b| matches!(b, b' ' | b'\t'))
-                .count();
-            Token {
-                raw: *raw,
-                indent,
-                tabs: prefix[..indent].contains('\t'),
-            }
-        })
-        .collect();
     let mut parser = Parser {
         source,
         tokens,
@@ -73,25 +91,32 @@ struct Parser<'s> {
 }
 
 impl<'s> Parser<'s> {
+    #[inline]
     fn peek(&self) -> Option<Token> {
         self.tokens.get(self.pos).copied()
     }
+    #[inline]
     fn text(&self) -> &'s str {
         self.peek().map_or("", |t| &self.source[t.raw.span.range()])
     }
+    #[inline]
     fn text_at(&self, offset: usize) -> &'s str {
         self.tokens
             .get(self.pos + offset)
             .map_or("", |t| &self.source[t.raw.span.range()])
     }
+    #[inline]
     fn at(&self, s: &str) -> bool {
-        self.peek().is_some() && self.text() == s
+        self.peek()
+            .is_some_and(|t| &self.source[t.raw.span.range()] == s)
     }
+    #[inline]
     fn bump(&mut self) -> Option<Token> {
         let t = self.peek()?;
         self.pos += 1;
         Some(t)
     }
+    #[inline]
     fn eat(&mut self, s: &str) -> bool {
         if self.at(s) {
             self.bump();
@@ -100,23 +125,25 @@ impl<'s> Parser<'s> {
             false
         }
     }
+    #[inline]
     fn span(&self) -> Span {
         self.peek()
             .map_or(Span::new(self.source.len(), self.source.len()), |t| {
                 t.raw.span
             })
     }
+    #[inline]
     fn end(&self) -> usize {
         self.pos
             .checked_sub(1)
             .map_or(0, |i| self.tokens[i].raw.span.end)
     }
+    #[inline]
     fn newline(&self) -> bool {
         if self.pos == 0 {
             return true;
         }
-        self.peek()
-            .is_some_and(|t| self.source[self.end()..t.raw.span.start].contains(['\n', '\r']))
+        self.peek().is_some_and(|t| t.newline)
     }
     fn error(&mut self, code: &'static str, message: &'static str) {
         self.error_at(self.span(), code, message);

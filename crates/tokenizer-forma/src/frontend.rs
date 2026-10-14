@@ -83,7 +83,7 @@ pub fn tokenize(source: &str) -> R<Vec<Token>> {
             message: "Превышен предел размера исходника".into(),
         });
     }
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(source.len() / 5);
     let mut i = 0;
     let mut utf16 = 0;
     while i < source.len() {
@@ -96,9 +96,13 @@ pub fn tokenize(source: &str) -> R<Vec<Token>> {
         } else if source[i..].starts_with("//") {
             i = source[i..].find('\n').map_or(source.len(), |n| i + n);
             skip = true
-        } else if source[i..].starts_with("/*") && source[i + 2..].contains("*/") {
-            i += source[i + 2..].find("*/").unwrap() + 4;
-            skip = true
+        } else if source[i..].starts_with("/*") {
+            if let Some(end_offset) = source[i + 2..].find("*/") {
+                i += end_offset + 4;
+                skip = true;
+            } else {
+                i += 1;
+            }
         } else if c == '\'' || c == '"' {
             i = string_end(source, i, 0)?
         } else if let Some(op) = [
@@ -110,8 +114,8 @@ pub fn tokenize(source: &str) -> R<Vec<Token>> {
             i += op.len()
         } else if c == '#' {
             let end = source[i + 1..]
-                .chars()
-                .take_while(|c| c.is_ascii_hexdigit())
+                .bytes()
+                .take_while(|b| b.is_ascii_hexdigit())
                 .count();
             if (3..=8).contains(&end) && !source[i + 1 + end..].chars().next().is_some_and(ident) {
                 i += 1 + end
@@ -146,7 +150,10 @@ pub fn tokenize(source: &str) -> R<Vec<Token>> {
         } else if c.is_ascii_alphabetic() || c == '_' {
             i += 1;
             loop {
-                while i < source.len() && ident(source[i..].chars().next().unwrap()) {
+                while i < source.len()
+                    && (source.as_bytes()[i].is_ascii_alphanumeric()
+                        || source.as_bytes()[i] == b'_')
+                {
                     i += 1
                 }
                 if i + 1 < source.len()
@@ -170,10 +177,16 @@ pub fn tokenize(source: &str) -> R<Vec<Token>> {
                 ),
             });
         }
-        let end = utf16 + source[from..i].encode_utf16().count();
+        let slice = &source[from..i];
+        let utf16_len = if slice.is_ascii() {
+            slice.len()
+        } else {
+            slice.encode_utf16().count()
+        };
+        let end = utf16 + utf16_len;
         if !skip {
             out.push(Token {
-                text: source[from..i].into(),
+                text: slice.into(),
                 start: utf16,
                 end,
             });

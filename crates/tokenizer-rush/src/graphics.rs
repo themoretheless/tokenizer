@@ -34,7 +34,7 @@ impl Polygon {
     }
     /// Export a filled polygon with a padded viewBox. Self-intersections use even-odd fill.
     pub fn to_svg(&self) -> Result<String, &'static str> {
-        let mut svg = String::new();
+        let mut svg = String::with_capacity(160 + self.points.len() * 24);
         self.write_svg(&mut svg)?;
         Ok(svg)
     }

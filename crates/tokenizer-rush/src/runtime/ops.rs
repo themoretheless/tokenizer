@@ -155,12 +155,24 @@ pub(crate) fn eval_binary_values<'s>(
 
     match (left, right, operator) {
         (Value::String(mut a), Value::String(b), "+") => {
-            a.push_str(&b);
-            Ok(Value::String(a))
+            if a.is_empty() {
+                Ok(Value::String(b))
+            } else if b.is_empty() {
+                Ok(Value::String(a))
+            } else {
+                a.push_str(&b);
+                Ok(Value::String(a))
+            }
         }
         (Value::List(mut a), Value::List(b), "+") => {
-            a.extend(b);
-            Ok(Value::List(a))
+            if a.is_empty() {
+                Ok(Value::List(b))
+            } else if b.is_empty() {
+                Ok(Value::List(a))
+            } else {
+                a.extend(b);
+                Ok(Value::List(a))
+            }
         }
         (Value::Angle(a), Value::Angle(b), "+") => {
             let r = a + b;
@@ -269,7 +281,7 @@ pub(crate) fn format_value_for_display(value: &Value<'_>, out: &mut String, dept
         Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
         Value::Number(n) => {
             if n.fract() == 0.0 && *n >= (i64::MIN as f64) && *n <= (i64::MAX as f64) {
-                let _ = write!(out, "{:.0}", n);
+                let _ = write!(out, "{}", *n as i64);
             } else {
                 let _ = write!(out, "{}", n);
             }
@@ -282,14 +294,22 @@ pub(crate) fn format_value_for_display(value: &Value<'_>, out: &mut String, dept
                 out.push_str(s);
             } else {
                 out.push('"');
-                for c in s.chars() {
-                    match c {
-                        '"' => out.push_str("\\\""),
-                        '\\' => out.push_str("\\\\"),
-                        '\n' => out.push_str("\\n"),
-                        '\r' => out.push_str("\\r"),
-                        '\t' => out.push_str("\\t"),
-                        _ => out.push(c),
+                if !s
+                    .as_bytes()
+                    .iter()
+                    .any(|&b| matches!(b, b'"' | b'\\' | b'\n' | b'\r' | b'\t'))
+                {
+                    out.push_str(s);
+                } else {
+                    for c in s.chars() {
+                        match c {
+                            '"' => out.push_str("\\\""),
+                            '\\' => out.push_str("\\\\"),
+                            '\n' => out.push_str("\\n"),
+                            '\r' => out.push_str("\\r"),
+                            '\t' => out.push_str("\\t"),
+                            _ => out.push(c),
+                        }
                     }
                 }
                 out.push('"');
