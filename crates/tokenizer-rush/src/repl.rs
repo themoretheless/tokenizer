@@ -1,9 +1,10 @@
 //! Interactive REPL session management and pretty printing for Rush.
+use crate::runtime::ops::format_value_for_display;
 use crate::{
     CancellationToken, ExecutionLimits, Program, RuntimeError, ScriptInstance, Value,
     sys::{MODULE_SOURCE as SYS_MODULE_SOURCE, SysHost, SysLimits},
 };
-use std::fmt::Write as _;
+use std::mem::ManuallyDrop;
 
 /// Outcome of evaluating an input chunk in the REPL.
 #[derive(Debug, PartialEq)]
@@ -30,8 +31,12 @@ pub enum ReplCommand {
 }
 
 /// Interactive REPL session holding persistent runtime state.
+///
+/// `instance` is wrapped in `ManuallyDrop` so that its destructor runs strictly
+/// *before* `allocated_sources`, `sys_ptr`, and `token_ptr` are deallocated in `reset()` and `Drop`.
 pub struct ReplSession {
-    instance: ScriptInstance<'static, 'static>,
+    instance: ManuallyDrop<ScriptInstance<'static, 'static>>,
+    sys_ptr: *mut Program<'static>,
     token_ptr: *mut CancellationToken,
     allocated_sources: Vec<*mut str>,
     multiline_buffer: String,
@@ -46,31 +51,39 @@ impl Default for ReplSession {
 impl ReplSession {
     /// Create a new interactive REPL session with standard environment and `sys` module.
     pub fn new() -> Result<Self, String> {
+        let sys_program =
+            Program::compile(SYS_MODULE_SOURCE).map_err(|e| format!("sys: {}", e.message))?;
+        let sys_ptr = Box::into_raw(Box::new(sys_program));
+        let sys_ref: &'static Program<'static> = unsafe { &*sys_ptr };
+
         let token_box = Box::new(CancellationToken::default());
         let token_ptr = Box::into_raw(token_box);
         let token_ref: &'static CancellationToken = unsafe { &*token_ptr };
 
-        let instance = Self::create_instance(token_ref)?;
-
-        Ok(Self {
-            instance,
-            token_ptr,
-            allocated_sources: Vec::new(),
-            multiline_buffer: String::new(),
-        })
+        match Self::create_instance(token_ref, sys_ref) {
+            Ok(instance) => Ok(Self {
+                instance: ManuallyDrop::new(instance),
+                sys_ptr,
+                token_ptr,
+                allocated_sources: Vec::new(),
+                multiline_buffer: String::new(),
+            }),
+            Err(e) => {
+                unsafe {
+                    drop(Box::from_raw(sys_ptr));
+                    drop(Box::from_raw(token_ptr));
+                }
+                Err(e)
+            }
+        }
     }
 
     fn create_instance(
         token: &'static CancellationToken,
+        sys_ref: &'static Program<'static>,
     ) -> Result<ScriptInstance<'static, 'static>, String> {
         let sys = SysHost::with_args(SysLimits::default(), Vec::new());
-        let sys_program =
-            Program::compile(SYS_MODULE_SOURCE).map_err(|e| format!("sys: {}", e.message))?;
         let empty_program = Program::compile("").map_err(|e| format!("init: {}", e.message))?;
-
-        // Leak the sys_program for static lifetime in REPL session
-        let sys_boxed = Box::new(sys_program);
-        let sys_ref: &'static Program<'static> = Box::leak(sys_boxed);
         let modules: [(&'static str, &'static Program<'static>); 1] = [("sys", sys_ref)];
 
         let limits = ExecutionLimits::new(1_000_000);
@@ -83,7 +96,11 @@ impl ReplSession {
     /// Reset the session environment to a clean state.
     pub fn reset(&mut self) -> Result<(), String> {
         let token_ref: &'static CancellationToken = unsafe { &*self.token_ptr };
-        self.instance = Self::create_instance(token_ref)?;
+        let sys_ref: &'static Program<'static> = unsafe { &*self.sys_ptr };
+        let new_instance = Self::create_instance(token_ref, sys_ref)?;
+        // Drop the old instance BEFORE freeing its borrowed allocated_sources.
+        let old_instance = std::mem::replace(&mut *self.instance, new_instance);
+        drop(old_instance);
         self.multiline_buffer.clear();
         for ptr in self.allocated_sources.drain(..) {
             unsafe {
@@ -172,34 +189,44 @@ impl ReplSession {
 
 impl Drop for ReplSession {
     fn drop(&mut self) {
-        if !self.token_ptr.is_null() {
-            unsafe {
-                drop(Box::from_raw(self.token_ptr));
-            }
-        }
-        for ptr in self.allocated_sources.drain(..) {
-            unsafe {
+        unsafe {
+            // Drop ScriptInstance first while borrowed sources, sys_ptr, and token_ptr are still valid.
+            ManuallyDrop::drop(&mut self.instance);
+            for ptr in self.allocated_sources.drain(..) {
                 drop(Box::from_raw(ptr));
+            }
+            if !self.sys_ptr.is_null() {
+                drop(Box::from_raw(self.sys_ptr));
+            }
+            if !self.token_ptr.is_null() {
+                drop(Box::from_raw(self.token_ptr));
             }
         }
     }
 }
 
-/// Check whether the current input buffer has balanced delimiters and complete strings.
+/// Check whether the current input buffer has balanced delimiters, complete strings, and closed block comments.
 pub fn is_input_complete(input: &str) -> bool {
     let mut depth: i32 = 0;
     let mut in_string = false;
     let mut escape = false;
-    let mut in_comment = false;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
     let mut quote_char = '"';
-    let mut prev_char = ' ';
 
-    for c in input.chars() {
-        if in_comment {
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_line_comment {
             if c == '\n' {
-                in_comment = false;
+                in_line_comment = false;
             }
-            prev_char = c;
+            continue;
+        }
+        if in_block_comment {
+            if c == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                in_block_comment = false;
+            }
             continue;
         }
         if in_string {
@@ -210,13 +237,19 @@ pub fn is_input_complete(input: &str) -> bool {
             } else if c == quote_char {
                 in_string = false;
             }
-            prev_char = c;
             continue;
         }
-        if c == '/' && prev_char == '/' {
-            in_comment = true;
-            prev_char = c;
-            continue;
+        if c == '/' {
+            if chars.peek() == Some(&'/') {
+                chars.next();
+                in_line_comment = true;
+                continue;
+            }
+            if chars.peek() == Some(&'*') {
+                chars.next();
+                in_block_comment = true;
+                continue;
+            }
         }
         match c {
             '"' | '\'' => {
@@ -227,10 +260,9 @@ pub fn is_input_complete(input: &str) -> bool {
             ')' | ']' | '}' => depth = (depth - 1).max(0),
             _ => {}
         }
-        prev_char = c;
     }
 
-    depth == 0 && !in_string
+    depth == 0 && !in_string && !in_block_comment
 }
 
 fn format_repl_error(error: &RuntimeError, source: &str) -> String {
@@ -255,153 +287,33 @@ fn format_repl_error(error: &RuntimeError, source: &str) -> String {
 }
 
 /// Pretty print a Rush `Value` for display in the interactive REPL.
+///
+/// Delegates to the shared `runtime::ops::format_value_for_display` at depth 1
+/// so top-level strings are quoted while all other values share identical formatting.
 pub fn pretty_print_value(value: &Value<'_>) -> String {
     let mut out = String::new();
-    format_value_display(value, &mut out, 0);
+    format_value_for_display(value, &mut out, 1);
     out
 }
 
-fn format_value_display(value: &Value<'_>, out: &mut String, depth: usize) {
-    if depth > 16 {
-        out.push_str("...");
-        return;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repl_block_comment_completeness() {
+        assert!(!is_input_complete("/* unclosed comment"));
+        assert!(is_input_complete(
+            "/* { unclosed brace inside comment */ 42"
+        ));
     }
-    match value {
-        Value::Null => out.push_str("null"),
-        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        Value::Number(n) => {
-            if n.fract() == 0.0 && *n >= (i64::MIN as f64) && *n <= (i64::MAX as f64) {
-                let _ = write!(out, "{:.0}", n);
-            } else {
-                let _ = write!(out, "{}", n);
-            }
-        }
-        Value::Angle(a) => {
-            let _ = write!(out, "{} rad", a);
-        }
-        Value::String(s) => {
-            out.push('"');
-            for c in s.chars() {
-                match c {
-                    '"' => out.push_str("\\\""),
-                    '\\' => out.push_str("\\\\"),
-                    '\n' => out.push_str("\\n"),
-                    '\r' => out.push_str("\\r"),
-                    '\t' => out.push_str("\\t"),
-                    _ => out.push(c),
-                }
-            }
-            out.push('"');
-        }
-        Value::List(items) => {
-            out.push('[');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                format_value_display(item, out, depth + 1);
-            }
-            out.push(']');
-        }
-        Value::Tuple(items) => {
-            out.push('(');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                format_value_display(item, out, depth + 1);
-            }
-            if items.len() == 1 {
-                out.push(',');
-            }
-            out.push(')');
-        }
-        Value::Record(fields) => {
-            out.push_str("{ ");
-            for (i, (k, v)) in fields.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                out.push_str(k);
-                out.push_str(": ");
-                format_value_display(v, out, depth + 1);
-            }
-            out.push_str(" }");
-        }
-        Value::Vector(comps) => {
-            match comps.len() {
-                2 => out.push_str("vec2("),
-                3 => out.push_str("vec3("),
-                4 => out.push_str("vec4("),
-                _ => out.push_str("vec("),
-            }
-            for (i, c) in comps.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                let _ = write!(out, "{}", c);
-            }
-            out.push(')');
-        }
-        Value::Variant(tag, payload) => {
-            out.push_str(tag);
-            if !payload.is_empty() {
-                out.push('(');
-                for (i, item) in payload.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    format_value_display(item, out, depth + 1);
-                }
-                out.push(')');
-            }
-        }
-        Value::UserData(data) => {
-            out.push_str(&data.type_name);
-            if let Some(var) = &data.variant {
-                out.push('.');
-                out.push_str(var);
-            }
-            out.push('(');
-            for (i, item) in data.values.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                format_value_display(item, out, depth + 1);
-            }
-            out.push(')');
-        }
-        Value::Function(f) => {
-            if let Some(name) = f.name() {
-                let _ = write!(out, "<function {}>", name);
-            } else {
-                out.push_str("<function>");
-            }
-        }
-        Value::BytecodeFunction(f) => {
-            if let Some(name) = f.function.name.as_deref() {
-                let _ = write!(out, "<function {}>", name);
-            } else {
-                out.push_str("<function>");
-            }
-        }
-        Value::Builtin(b) => {
-            let _ = write!(out, "<builtin {:?}>", b);
-        }
-        Value::Host(h) => {
-            let _ = write!(out, "<host function {}>", h.name);
-        }
-        Value::HostObject(o) => {
-            let _ = write!(out, "<host object {:?}>", o);
-        }
-        Value::Range { start, end, step } => {
-            let _ = write!(out, "range({}, {}, {})", start, end, step);
-        }
-        Value::Mesh(_) => out.push_str("<Mesh>"),
-        Value::Polygon(_) => out.push_str("<Polygon>"),
-        Value::Matrix(_) => out.push_str("<Matrix4>"),
-        Value::Quaternion(_) => out.push_str("<Quaternion>"),
-        Value::Sequence(_) | Value::BytecodeSequence(_) => out.push_str("<sequence>"),
-        Value::BytecodeIterator(_) => out.push_str("<iterator>"),
+
+    #[test]
+    fn repl_reset_and_drop_memory_safety() {
+        let mut session = ReplSession::new().unwrap();
+        assert_eq!(session.eval_line("let x = 10"), ReplOutcome::Void);
+        assert_eq!(session.eval_line("x + 5"), ReplOutcome::Value("15".into()));
+        session.reset().unwrap();
+        assert!(matches!(session.eval_line("x"), ReplOutcome::Error(_)));
     }
 }

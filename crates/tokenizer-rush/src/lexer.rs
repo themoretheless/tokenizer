@@ -1,16 +1,5 @@
 use themoretheless_tokenizer_core::{Diagnostic, InputLimits, LexToken, Lexed, Span, SyntaxKind};
 
-pub(crate) const KEYWORDS: &[&str] = &[
-    "param", "node", "show", "struct", "enum", "fn", "let", "const", "mut", "return", "yield",
-    "if", "else", "while", "for", "foreach", "in", "match", "break", "continue", "and", "or",
-    "not", "true", "false", "null", "region",
-    // Reserved until their grammar and semantics are specified.
-    "async", "await", "import", "export",
-];
-const TYPES: &[&str] = &[
-    "int", "f64", "str", "bool", "list", "map", "float", "string",
-];
-
 pub(crate) fn run(source: &str, limits: InputLimits) -> (Lexed, bool) {
     let mut out = Lexed::default();
     if limits.exceeds_input_bytes(source.len()) {
@@ -179,38 +168,62 @@ pub(crate) fn run(source: &str, limits: InputLimits) -> (Lexed, bool) {
             kind = SyntaxKind::NumberLit;
         } else if c.is_alphabetic() || c == '_' || c == '$' {
             i += c.len_utf8();
-            while i < source.len() {
-                let ch = source[i..].chars().next().unwrap();
-                if !ch.is_alphanumeric() && ch != '_' {
+            let bytes = source.as_bytes();
+            while i < bytes.len() {
+                let b = bytes[i];
+                if b.is_ascii_alphanumeric() || b == b'_' {
+                    i += 1;
+                } else if !b.is_ascii() {
+                    let ch = source[i..].chars().next().unwrap();
+                    if ch.is_alphanumeric() {
+                        i += ch.len_utf8();
+                    } else {
+                        break;
+                    }
+                } else {
                     break;
                 }
-                i += ch.len_utf8();
             }
             let text = &source[start..i];
             if text == "$" {
                 error = Some(("invalid-name", "Expected a name after $"));
             }
-            kind = if KEYWORDS.contains(&text) {
+            kind = if is_keyword(text) {
                 SyntaxKind::Keyword
-            } else if TYPES.contains(&text) {
+            } else if is_type_name(text) {
                 SyntaxKind::TypeIdent
             } else {
                 SyntaxKind::Identifier
             };
         } else {
-            let operator = [
-                "->", "=>", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", "**", "&&", "||",
-            ]
-            .into_iter()
-            .find(|op| rest.starts_with(op));
-            if let Some(op) = operator {
-                i += op.len();
+            let operator = match rest.as_bytes() {
+                [b'-', b'>', ..]
+                | [b'=', b'>', ..]
+                | [b'=', b'=', ..]
+                | [b'!', b'=', ..]
+                | [b'<', b'=', ..]
+                | [b'>', b'=', ..]
+                | [b'+', b'=', ..]
+                | [b'-', b'=', ..]
+                | [b'*', b'=', ..]
+                | [b'/', b'=', ..]
+                | [b'%', b'=', ..]
+                | [b'*', b'*', ..]
+                | [b'&', b'&', ..]
+                | [b'|', b'|', ..] => Some(2usize),
+                _ => None,
+            };
+            if let Some(op_len) = operator {
+                i += op_len;
                 kind = SyntaxKind::Operator;
             } else {
                 i += c.len_utf8();
-                kind = if "()[]{}.,:;".contains(c) {
+                kind = if matches!(c, '(' | ')' | '[' | ']' | '{' | '}' | '.' | ',' | ':' | ';') {
                     SyntaxKind::Punctuation
-                } else if "+-*/%=<>!|?".contains(c) {
+                } else if matches!(
+                    c,
+                    '+' | '-' | '*' | '/' | '%' | '=' | '<' | '>' | '!' | '|' | '?'
+                ) {
                     SyntaxKind::Operator
                 } else {
                     error = Some(("invalid-character", "Unexpected character in Rush source"));
@@ -231,4 +244,50 @@ pub(crate) fn run(source: &str, limits: InputLimits) -> (Lexed, bool) {
         });
     }
     (out, valid)
+}
+
+#[inline]
+fn is_keyword(text: &str) -> bool {
+    matches!(
+        text,
+        "param"
+            | "node"
+            | "show"
+            | "struct"
+            | "enum"
+            | "fn"
+            | "let"
+            | "const"
+            | "mut"
+            | "return"
+            | "yield"
+            | "if"
+            | "else"
+            | "while"
+            | "for"
+            | "foreach"
+            | "in"
+            | "match"
+            | "break"
+            | "continue"
+            | "and"
+            | "or"
+            | "not"
+            | "true"
+            | "false"
+            | "null"
+            | "region"
+            | "async"
+            | "await"
+            | "import"
+            | "export"
+    )
+}
+
+#[inline]
+fn is_type_name(text: &str) -> bool {
+    matches!(
+        text,
+        "int" | "f64" | "str" | "bool" | "list" | "map" | "float" | "string"
+    )
 }

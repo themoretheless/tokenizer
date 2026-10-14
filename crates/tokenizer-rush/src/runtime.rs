@@ -3,7 +3,6 @@ use crate::{Block, Expr, ExprKind, Name, Stmt, StmtKind};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::Write as _;
 use std::rc::{Rc, Weak};
 use std::sync::{
     Arc,
@@ -23,7 +22,11 @@ mod instance;
 pub use instance::{OwnedScriptInstance, ScriptState, StateValue};
 pub mod json;
 pub use json::{parse as json_parse, stringify as json_stringify};
+pub(crate) mod builtins;
+pub use builtins::builtin_catalog;
 mod memory;
+pub(crate) mod ops;
+pub(crate) use ops::{exact_remainder, format_value_for_display};
 
 #[derive(Clone, Debug, PartialEq)]
 enum Binding<'s> {
@@ -280,160 +283,6 @@ impl<'s> Value<'s> {
             Value::BytecodeIterator(i) => Some(Value::BytecodeIterator(i.clone())),
             _ => None,
         }
-    }
-}
-
-pub(crate) fn format_value_for_display(value: &Value<'_>, out: &mut String, depth: usize) {
-    if depth > 16 {
-        out.push_str("...");
-        return;
-    }
-    match value {
-        Value::Null => out.push_str("null"),
-        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        Value::Number(n) => {
-            if n.fract() == 0.0 && *n >= (i64::MIN as f64) && *n <= (i64::MAX as f64) {
-                let _ = write!(out, "{:.0}", n);
-            } else {
-                let _ = write!(out, "{}", n);
-            }
-        }
-        Value::Angle(a) => {
-            let _ = write!(out, "{} rad", a);
-        }
-        Value::String(s) => {
-            if depth == 0 {
-                out.push_str(s);
-            } else {
-                out.push('"');
-                for c in s.chars() {
-                    match c {
-                        '"' => out.push_str("\\\""),
-                        '\\' => out.push_str("\\\\"),
-                        '\n' => out.push_str("\\n"),
-                        '\r' => out.push_str("\\r"),
-                        '\t' => out.push_str("\\t"),
-                        _ => out.push(c),
-                    }
-                }
-                out.push('"');
-            }
-        }
-        Value::List(items) => {
-            out.push('[');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                format_value_for_display(item, out, depth + 1);
-            }
-            out.push(']');
-        }
-        Value::Tuple(items) => {
-            out.push('(');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                format_value_for_display(item, out, depth + 1);
-            }
-            if items.len() == 1 {
-                out.push(',');
-            }
-            out.push(')');
-        }
-        Value::Record(fields) => {
-            out.push_str("{ ");
-            for (i, (k, v)) in fields.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                out.push_str(k);
-                out.push_str(": ");
-                format_value_for_display(v, out, depth + 1);
-            }
-            out.push_str(" }");
-        }
-        Value::Vector(comps) => {
-            match comps.len() {
-                2 => out.push_str("vec2("),
-                3 => out.push_str("vec3("),
-                4 => out.push_str("vec4("),
-                _ => out.push_str("vec("),
-            }
-            for (i, c) in comps.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                let _ = write!(out, "{}", c);
-            }
-            out.push(')');
-        }
-        Value::Variant(tag, payload) => {
-            out.push_str(tag);
-            if !payload.is_empty() {
-                out.push('(');
-                for (i, item) in payload.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    format_value_for_display(item, out, depth + 1);
-                }
-                out.push(')');
-            }
-        }
-        Value::UserData(data) => {
-            out.push_str(&data.type_name);
-            if let Some(var) = &data.variant {
-                out.push('.');
-                out.push_str(var);
-            }
-            out.push('(');
-            for (i, item) in data.values.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                format_value_for_display(item, out, depth + 1);
-            }
-            out.push(')');
-        }
-        Value::Function(f) => {
-            if let Some(name) = f.name() {
-                let _ = write!(out, "<function {}>", name);
-            } else {
-                out.push_str("<function>");
-            }
-        }
-        Value::BytecodeFunction(f) => {
-            if let Some(name) = f.function.name.as_deref() {
-                let _ = write!(out, "<function {}>", name);
-            } else {
-                out.push_str("<function>");
-            }
-        }
-        Value::BytecodeSequence(_) => {
-            out.push_str("<sequence>");
-        }
-        Value::BytecodeIterator(_) => {
-            out.push_str("<iterator>");
-        }
-        Value::Builtin(b) => {
-            let _ = write!(out, "<builtin {:?}>", b);
-        }
-        Value::Host(h) => {
-            let _ = write!(out, "<host function {}>", h.name);
-        }
-        Value::HostObject(o) => {
-            let _ = write!(out, "<host object {:?}>", o);
-        }
-        Value::Range { start, end, step } => {
-            let _ = write!(out, "range({}, {}, {})", start, end, step);
-        }
-        Value::Mesh(_) => out.push_str("<Mesh>"),
-        Value::Polygon(_) => out.push_str("<Polygon>"),
-        Value::Matrix(_) => out.push_str("<Matrix4>"),
-        Value::Quaternion(_) => out.push_str("<Quaternion>"),
-        Value::Sequence(_) => out.push_str("<sequence>"),
     }
 }
 
@@ -804,22 +653,6 @@ impl ExecutionLimits {
             max_collection_items: usize::MAX,
             max_string_bytes: usize::MAX,
         }
-    }
-}
-
-// Integer operands within the exact f64 range can avoid libm fmod. The
-// remainder has the dividend's sign, including zero; other operands use fmod.
-pub(crate) fn exact_remainder(a: f64, b: f64) -> f64 {
-    const EXACT_INTEGER: f64 = 9_007_199_254_740_991.;
-    if a.abs() <= EXACT_INTEGER
-        && b.abs() <= EXACT_INTEGER
-        && b != 0.
-        && a.trunc() == a
-        && b.trunc() == b
-    {
-        ((a as i64 % b as i64) as f64).copysign(a)
-    } else {
-        a % b
     }
 }
 
@@ -3840,29 +3673,7 @@ impl<'s> Runtime<'_, 's> {
             };
             return self.vector(components, span);
         }
-        let (Value::Number(a), Value::Number(b)) = (left, right) else {
-            return self.error(span, "Numeric operands required");
-        };
-        let number = match operator {
-            "+" => a + b,
-            "-" => a - b,
-            "*" => a * b,
-            "/" => a / b,
-            "%" => exact_remainder(a, b),
-            "**" => a.powf(b),
-            "==" => return Ok(Value::Bool(a == b)),
-            "!=" => return Ok(Value::Bool(a != b)),
-            "<" => return Ok(Value::Bool(a < b)),
-            ">" => return Ok(Value::Bool(a > b)),
-            "<=" => return Ok(Value::Bool(a <= b)),
-            ">=" => return Ok(Value::Bool(a >= b)),
-            _ => return self.error(span, "Unsupported binary operator"),
-        };
-        if number.is_finite() {
-            Ok(Value::Number(number))
-        } else {
-            self.error(span, "Non-finite arithmetic result")
-        }
+        self.error(span, "Numeric operands required")
     }
     fn vector(&self, values: Vec<f64>, span: Span) -> Result<Value<'s>> {
         if values.iter().all(|x| x.is_finite()) {
@@ -3872,261 +3683,23 @@ impl<'s> Runtime<'_, 's> {
         }
     }
     fn math(&self, builtin: Builtin, arguments: &[Value<'s>], span: Span) -> Result<Value<'s>> {
-        if matches!(builtin, Builtin::Vec2 | Builtin::Vec3 | Builtin::Vec4) {
-            let dimension = match builtin {
-                Builtin::Vec2 => 2,
-                Builtin::Vec3 => 3,
-                _ => 4,
-            };
-            if arguments.len() != dimension {
-                return self.error(span, "Incorrect vector dimension");
-            }
-            let values = arguments
-                .iter()
-                .map(|v| {
-                    if let Value::Number(n) = v {
-                        Some(*n)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Option<Vec<_>>>();
-            return match values {
-                Some(values) => self.vector(values, span),
-                None => self.error(span, "Vector components must be numbers"),
-            };
-        }
         match (builtin, arguments) {
-            (Builtin::Slerp, [Value::Quaternion(a), Value::Quaternion(b), Value::Number(t)]) => {
-                return a
-                    .slerp(b, *t)
-                    .map(|q| Value::Quaternion(Box::new(q)))
-                    .ok_or_else(|| RuntimeError {
-                        stack: Vec::new(),
-                        location: None,
-                        module: self.module.map(str::to_owned),
-                        span,
-                        message: "slerp requires a finite fraction between 0 and 1".into(),
-                    });
-            }
-            (
-                Builtin::AxisAngle,
-                [
-                    Value::Vector(axis),
-                    Value::Number(angle) | Value::Angle(angle),
-                ],
-            ) if axis.len() == 3 => {
-                return crate::Quaternion::axis_angle([axis[0], axis[1], axis[2]], *angle)
-                    .map(|q| Value::Quaternion(Box::new(q)))
-                    .ok_or_else(|| RuntimeError {
-                        stack: Vec::new(),
-                        location: None,
-                        module: self.module.map(str::to_owned),
-                        span,
-                        message: "Rotation requires a finite nonzero axis and angle".into(),
-                    });
-            }
-            (Builtin::RotationMatrix, [Value::Quaternion(q)]) => {
-                return Ok(Value::Matrix(Box::new(q.matrix())));
-            }
-            (Builtin::Identity, []) => {
-                return Ok(Value::Matrix(Box::new(crate::Matrix4::identity())));
-            }
-            (Builtin::Translation | Builtin::Scaling, [Value::Vector(v)]) if v.len() == 3 => {
-                let mut matrix = crate::Matrix4::identity();
-                for (axis, value) in v.iter().enumerate() {
-                    if builtin == Builtin::Translation {
-                        matrix.0[axis][3] = *value;
-                    } else {
-                        matrix.0[axis][axis] = *value;
-                    }
-                }
-                return Ok(Value::Matrix(Box::new(matrix)));
-            }
-            (
-                Builtin::RotationX | Builtin::RotationY | Builtin::RotationZ,
-                [Value::Number(angle) | Value::Angle(angle)],
-            ) => {
-                let mut matrix = crate::Matrix4::identity();
-                let (sin, cos) = angle.sin_cos();
-                let (a, b) = match builtin {
-                    Builtin::RotationX => (1, 2),
-                    Builtin::RotationY => (2, 0),
-                    _ => (0, 1),
-                };
-                matrix.0[a][a] = cos;
-                matrix.0[a][b] = -sin;
-                matrix.0[b][a] = sin;
-                matrix.0[b][b] = cos;
-                return Ok(Value::Matrix(Box::new(matrix)));
-            }
-            (
-                Builtin::TransformPoint | Builtin::TransformDirection,
-                [Value::Matrix(matrix), Value::Vector(v)],
-            ) => {
-                return matrix
-                    .apply(v, builtin == Builtin::TransformPoint)
-                    .map(Value::Vector)
-                    .ok_or_else(|| RuntimeError {
-                        stack: Vec::new(),
-                        location: None,
-                        module: self.module.map(str::to_owned),
-                        span,
-                        message: "Invalid matrix transformation".into(),
-                    });
-            }
-            _ => {}
-        }
-        if let (Builtin::Degrees | Builtin::Radians, [Value::Number(value)]) = (builtin, arguments)
-        {
-            let radians = if builtin == Builtin::Degrees {
-                value.to_radians()
-            } else {
-                *value
-            };
-            if !radians.is_finite() {
-                return self.error(span, "Non-finite angle");
-            }
-            return Ok(Value::Angle(radians));
-        }
-        let shape = match (builtin, arguments) {
             (Builtin::Polygon, [Value::List(points)]) => {
                 self.collection_growth(0, points.len(), span)?;
-                let points = points
-                    .iter()
-                    .map(|p| match p {
-                        Value::Vector(v) if v.len() == 2 => Some([v[0], v[1]]),
-                        _ => None,
-                    })
-                    .collect::<Option<Vec<_>>>();
-                Some(match points {
-                    Some(points) => crate::Polygon::new(points),
-                    None => Err("Polygon points must be vec2 values"),
-                })
             }
             (Builtin::Translate, [Value::Polygon(polygon), Value::Vector(offset)])
                 if offset.len() == 2 =>
             {
                 self.collection_growth(0, polygon.points().len(), span)?;
-                Some(polygon.translated([offset[0], offset[1]]))
             }
-            (
-                Builtin::Rotate,
-                [
-                    Value::Polygon(polygon),
-                    Value::Number(angle) | Value::Angle(angle),
-                ],
-            ) => {
+            (Builtin::Rotate, [Value::Polygon(polygon), Value::Number(_) | Value::Angle(_)]) => {
                 self.collection_growth(0, polygon.points().len(), span)?;
-                Some(polygon.rotated(*angle))
             }
-            _ => None,
-        };
-        if let Some(shape) = shape {
-            return shape.map(Value::Polygon).map_err(|message| RuntimeError {
-                stack: Vec::new(),
-                location: None,
-                module: self.module.map(str::to_owned),
-                span,
-                message: message.into(),
-            });
+            _ => {}
         }
-        let number = match (builtin, arguments) {
-            (Builtin::Random, [Value::Number(seed), Value::Number(index)]) => {
-                crate::noise::random(*seed, *index).ok_or_else(|| RuntimeError {
-                    stack: Vec::new(),
-                    location: None,
-                    module: self.module.map(str::to_owned),
-                    span,
-                    message: "random requires nonnegative exact integer seed and index".into(),
-                })?
-            }
-            (Builtin::Noise, [Value::Number(x), Value::Number(seed)]) => {
-                crate::noise::noise(*x, *seed).ok_or_else(|| RuntimeError {
-                    stack: Vec::new(),
-                    location: None,
-                    module: self.module.map(str::to_owned),
-                    span,
-                    message:
-                        "noise requires a bounded coordinate and nonnegative exact integer seed"
-                            .into(),
-                })?
-            }
-
-            (Builtin::Cross, [Value::Vector(a), Value::Vector(b)])
-                if a.len() == 3 && b.len() == 3 =>
-            {
-                return self.vector(
-                    vec![
-                        a[1] * b[2] - a[2] * b[1],
-                        a[2] * b[0] - a[0] * b[2],
-                        a[0] * b[1] - a[1] * b[0],
-                    ],
-                    span,
-                );
-            }
-            (Builtin::Lerp, [Value::Vector(a), Value::Vector(b), Value::Number(t)])
-                if a.len() == b.len() =>
-            {
-                return self.vector(
-                    a.iter()
-                        .zip(b)
-                        .map(|(a, b)| a * (1.0 - t) + b * t)
-                        .collect(),
-                    span,
-                );
-            }
-            (Builtin::Lerp, [Value::Number(a), Value::Number(b), Value::Number(t)]) => {
-                a * (1.0 - t) + b * t
-            }
-            (Builtin::Clamp, [Value::Number(x), Value::Number(low), Value::Number(high)])
-                if low <= high =>
-            {
-                x.clamp(*low, *high)
-            }
-            (Builtin::Smoothstep, [Value::Number(low), Value::Number(high), Value::Number(x)])
-                if low < high =>
-            {
-                let t = if x <= low {
-                    0.0
-                } else if x >= high {
-                    1.0
-                } else {
-                    let width = high - low;
-                    if width.is_finite() {
-                        (x - low) / width
-                    } else {
-                        // Halving first keeps opposite finite extremes representable.
-                        (x * 0.5 - low * 0.5) / (high * 0.5 - low * 0.5)
-                    }
-                };
-                t * t * (3.0 - 2.0 * t)
-            }
-
-            (Builtin::Dot, [Value::Vector(a), Value::Vector(b)]) if a.len() == b.len() => {
-                a.iter().zip(b).map(|(a, b)| a * b).sum()
-            }
-            (Builtin::Length | Builtin::Normalize, [Value::Vector(v)]) => {
-                if builtin == Builtin::Normalize {
-                    let scale = v.iter().fold(0.0_f64, |scale, x| scale.max(x.abs()));
-                    if scale == 0.0 || v.iter().any(|x| !x.is_finite()) {
-                        return self.error(span, "Cannot normalize this vector");
-                    }
-                    let length = v.iter().fold(0.0_f64, |length, x| length.hypot(x / scale));
-                    return self.vector(v.iter().map(|x| (x / scale) / length).collect(), span);
-                }
-                v.iter().fold(0.0_f64, |length, x| length.hypot(*x))
-            }
-            (Builtin::Sin, [Value::Number(x) | Value::Angle(x)]) => x.sin(),
-            (Builtin::Cos, [Value::Number(x) | Value::Angle(x)]) => x.cos(),
-            (Builtin::Sqrt, [Value::Number(x)]) => x.sqrt(),
-            (Builtin::Deg, [Value::Number(x)]) => x.to_radians(),
-            _ => return self.error(span, "Invalid mathematical arguments"),
-        };
-        if number.is_finite() {
-            Ok(Value::Number(number))
-        } else {
-            self.error(span, "Non-finite mathematical result")
+        match builtins::eval_math_builtin(builtin, arguments) {
+            Ok(val) => Ok(val),
+            Err(msg) => self.error(span, msg),
         }
     }
     fn call(
@@ -5258,84 +4831,6 @@ impl<'s> Runtime<'_, 's> {
         }
         Ok(value)
     }
-}
-
-/// The runtime registration table, shared with editor name validation.
-pub fn builtin_catalog() -> &'static [(&'static str, Builtin)] {
-    &[
-        ("assert", Builtin::Assert),
-        ("json_parse", Builtin::JsonParse),
-        ("json_stringify", Builtin::JsonStringify),
-        ("trim", Builtin::Trim),
-        ("trim_start", Builtin::TrimStart),
-        ("trim_end", Builtin::TrimEnd),
-        ("split", Builtin::Split),
-        ("join", Builtin::Join),
-        ("starts_with", Builtin::StartsWith),
-        ("ends_with", Builtin::EndsWith),
-        ("contains", Builtin::Contains),
-        ("replace", Builtin::Replace),
-        ("to_lower", Builtin::ToLower),
-        ("to_upper", Builtin::ToUpper),
-        ("len", Builtin::Len),
-        ("get", Builtin::Get),
-        ("any", Builtin::Any),
-        ("all", Builtin::All),
-        ("degrees", Builtin::Degrees),
-        ("radians", Builtin::Radians),
-        ("Some", Builtin::Some),
-        ("None", Builtin::None),
-        ("Ok", Builtin::Ok),
-        ("Err", Builtin::Err),
-        ("random", Builtin::Random),
-        ("noise", Builtin::Noise),
-        ("transform", Builtin::Transform),
-        ("grid_mesh", Builtin::GridMesh),
-        ("mesh", Builtin::Mesh),
-        ("slerp", Builtin::Slerp),
-        ("axis_angle", Builtin::AxisAngle),
-        ("rotation_matrix", Builtin::RotationMatrix),
-        ("identity", Builtin::Identity),
-        ("promote", Builtin::Promote),
-        ("arena", Builtin::Arena),
-        ("arena_run", Builtin::ArenaRun),
-        ("arena_stats", Builtin::ArenaStats),
-        ("translation", Builtin::Translation),
-        ("scaling", Builtin::Scaling),
-        ("rotation_x", Builtin::RotationX),
-        ("rotation_y", Builtin::RotationY),
-        ("rotation_z", Builtin::RotationZ),
-        ("transform_point", Builtin::TransformPoint),
-        ("transform_direction", Builtin::TransformDirection),
-        ("polygon", Builtin::Polygon),
-        ("translate", Builtin::Translate),
-        ("rotate", Builtin::Rotate),
-        ("zip", Builtin::Zip),
-        ("range", Builtin::Range),
-        ("range_iter", Builtin::RangeIter),
-        ("iter", Builtin::Iter),
-        ("collect", Builtin::Collect),
-        ("cross", Builtin::Cross),
-        ("lerp", Builtin::Lerp),
-        ("clamp", Builtin::Clamp),
-        ("smoothstep", Builtin::Smoothstep),
-        ("vec2", Builtin::Vec2),
-        ("vec3", Builtin::Vec3),
-        ("vec4", Builtin::Vec4),
-        ("dot", Builtin::Dot),
-        ("length", Builtin::Length),
-        ("normalize", Builtin::Normalize),
-        ("sin", Builtin::Sin),
-        ("cos", Builtin::Cos),
-        ("sqrt", Builtin::Sqrt),
-        ("deg", Builtin::Deg),
-        ("map", Builtin::Map),
-        ("flat_map", Builtin::FlatMap),
-        ("filter", Builtin::Filter),
-        ("fold", Builtin::Fold),
-        ("group_by", Builtin::GroupBy),
-        ("fold_by", Builtin::FoldBy),
-    ]
 }
 
 #[cfg(test)]
