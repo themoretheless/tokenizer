@@ -184,7 +184,12 @@ impl<'a, 's> Graph<'a, 's> {
                     }
                     _ => {}
                 },
-                Work::Function(function) => self.environment(from, &function.environment)?,
+                Work::Function(function) => {
+                    self.environment(from, &function.environment)?;
+                    for sib in function.siblings.iter() {
+                        self.environment(from, &sib.environment)?;
+                    }
+                }
                 Work::Environment(environment) => {
                     if let Some(parent) = &environment.parent {
                         self.environment(from, parent)?;

@@ -31,12 +31,15 @@ pub use ast::*;
 pub use runtime::{
     Builtin, CallFrame, CancellationToken, Closure, CoroutineId, CoroutineScheduler,
     CoroutineState, ExecutionLimits, HostCallback, HostFunction, HostRegistration, HostSequence,
-    HostSequenceIterator, ModelInstance, ModelNode, ModelProgram, OwnedCoroutineScheduler,
-    OwnedScriptInstance, Program, RegionStats, RuntimeError, ScheduledState, ScheduledStep,
-    ScriptInstance, ScriptState, Sequence, SourceLocation, StateValue, UserData, Value, ValueType,
-    WakeRequest, builtin_catalog, evaluate, json_parse, json_stringify,
+    HostSequenceIterator, InlineVec, ModelInstance, ModelNode, ModelProgram,
+    OwnedCoroutineScheduler, OwnedScriptInstance, Program, RecordMap, RecordShape, RegionStats,
+    RuntimeError, ScheduledState, ScheduledStep, ScriptInstance, ScriptState, Sequence,
+    SourceLocation, StateValue, UserData, Value, ValueType, WakeRequest, builtin_catalog, evaluate,
+    json_parse, json_stringify,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub mod repl;
+#[cfg(not(target_arch = "wasm32"))]
 pub use repl::{ReplCommand, ReplOutcome, ReplSession, is_input_complete, pretty_print_value};
 pub mod bytecode;
 pub use bytecode::{

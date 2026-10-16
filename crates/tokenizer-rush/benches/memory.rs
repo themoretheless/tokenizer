@@ -184,13 +184,16 @@ fn grouping_memory() {
             (0..2)
                 .map(|parity| {
                     let sum: usize = (parity..items).step_by(2).sum();
-                    Value::Record(BTreeMap::from([
-                        (
-                            "key".into(),
-                            Value::String(if parity == 0 { "even" } else { "odd" }.into()),
-                        ),
-                        ("value".into(), Value::Number(sum as f64)),
-                    ]))
+                    Value::Record(
+                        BTreeMap::from([
+                            (
+                                "key".into(),
+                                Value::String(if parity == 0 { "even" } else { "odd" }.into()),
+                            ),
+                            ("value".into(), Value::Number(sum as f64)),
+                        ])
+                        .into(),
+                    )
                 })
                 .collect(),
         );

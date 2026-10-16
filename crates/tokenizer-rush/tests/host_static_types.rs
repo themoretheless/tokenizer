@@ -255,7 +255,7 @@ fn composition_preserves_matrix_quaternion_and_angle_contracts() {
     assert!(analyze_host_calls(source, &[]).is_valid());
     assert_eq!(
         themoretheless_tokenizer_rush::evaluate(source, 1000).unwrap(),
-        Value::Vector(vec![1.0, 2.0, 3.0])
+        Value::vec3(1.0, 2.0, 3.0)
     );
 }
 

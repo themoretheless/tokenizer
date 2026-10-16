@@ -35,10 +35,13 @@ fn main() {
             (0..groups)
                 .map(|group| {
                     let total: usize = (group..count).step_by(groups).map(|i| i + 1).sum();
-                    Value::Record(BTreeMap::from([
-                        ("group".into(), Value::String(format!("g{group}"))),
-                        ("total".into(), Value::Number(total as f64)),
-                    ]))
+                    Value::Record(
+                        BTreeMap::from([
+                            ("group".into(), Value::String(format!("g{group}"))),
+                            ("total".into(), Value::Number(total as f64)),
+                        ])
+                        .into(),
+                    )
                 })
                 .collect(),
         );

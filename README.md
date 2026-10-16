@@ -14,11 +14,11 @@ slice the original Rust string.
 
 ## Installation
 
-From crates.io:
+From the GitHub release:
 
 ```toml
 [dependencies]
-themoretheless-tokenizer = "0.7"
+themoretheless-tokenizer = { git = "https://github.com/themoretheless/tokenizer", tag = "v0.8.0" }
 ```
 
 The latest unreleased revision can instead be used directly from Git:

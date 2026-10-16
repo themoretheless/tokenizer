@@ -7,6 +7,7 @@ pub enum StateValue {
     Null,
     Bool(bool),
     Number(f64),
+    Int(i64),
     String(String),
     List(Vec<StateValue>),
     Record(BTreeMap<String, StateValue>),
@@ -23,6 +24,7 @@ impl StateValue {
         Ok(match value {
             Value::Null => Self::Null,
             Value::Bool(v) => Self::Bool(*v),
+            Value::Int(v) => Self::Int(*v),
             Value::Number(v) if v.is_finite() => Self::Number(*v),
             Value::String(v) => Self::String(v.clone()),
             Value::List(values) => Self::List(values.iter().map(|v| Self::convert(v, depth + 1)).collect::<std::result::Result<_, _>>()?),
@@ -38,6 +40,7 @@ impl StateValue {
             Ok(match v {
                 StateValue::Null => Value::Null,
                 StateValue::Bool(v) => Value::Bool(*v),
+                StateValue::Int(v) => Value::Int(*v),
                 StateValue::Number(v) if v.is_finite() => Value::Number(*v),
                 StateValue::Number(_) => return Err("Non-finite state number".into()),
                 StateValue::String(v) => Value::String(v.clone()),
@@ -89,13 +92,12 @@ impl ScriptInstance<'_, '_> {
                 )));
             };
             let index = self.runtime.cell_index(cell, self.span)?;
-            let value = value.to_value().map_err(|e| self.state_error(e))?;
-            if self.runtime.cells[index]
-                .1
-                .as_ref()
-                .is_some_and(|ty| !ty.accepts(&value))
-            {
-                return Err(self.state_error(format!("State violates variable type: {name}")));
+            let mut value = value.to_value().map_err(|e| self.state_error(e))?;
+            if let Some(ty) = self.runtime.cells[index].1.as_ref() {
+                if !ty.accepts(&value) {
+                    return Err(self.state_error(format!("State violates variable type: {name}")));
+                }
+                value = value.coerce_for_type(ty);
             }
             let remaining = self.runtime.remaining;
             self.runtime.remaining = usize::MAX;
@@ -329,6 +331,18 @@ impl Usage {
                 {
                     self.environment(&f.environment);
                 }
+                if !f.siblings.is_empty()
+                    && self.seen.insert((21, Rc::as_ptr(&f.siblings) as usize))
+                {
+                    for sib in f.siblings.iter() {
+                        if self
+                            .seen
+                            .insert((1, memory::Shared::as_ptr(&sib.environment) as usize))
+                        {
+                            self.environment(&sib.environment);
+                        }
+                    }
+                }
             }
             Value::BytecodeFunction(f) if self.seen.insert((20, Rc::as_ptr(f) as usize)) => {
                 self.add(std::mem::size_of::<crate::bytecode::BytecodeClosure>());
@@ -476,13 +490,17 @@ pub(super) fn owned_value(value: Value<'_>) -> std::result::Result<Value<'static
         Value::Mesh(v) => Value::Mesh(v),
         Value::Quaternion(v) => Value::Quaternion(v),
         Value::String(v) => Value::String(v),
-        Value::Record(v) => Value::Record(
-            v.into_iter()
-                .map(|(k, v)| Ok((k, owned_value(v)?)))
-                .collect::<std::result::Result<_, String>>()?,
-        ),
+        Value::Record(v) => {
+            let (shape, values) = v.into_parts();
+            let owned_values = values
+                .into_iter()
+                .map(owned_value)
+                .collect::<std::result::Result<Vec<_>, String>>()?;
+            Value::Record(super::RecordMap::from_shape_and_values(shape, owned_values))
+        }
         Value::Matrix(v) => Value::Matrix(v),
         Value::Polygon(v) => Value::Polygon(v),
+        Value::Int(v) => Value::Int(v),
         Value::Number(v) => Value::Number(v),
         Value::Vector(v) => Value::Vector(v),
         Value::Bool(v) => Value::Bool(v),

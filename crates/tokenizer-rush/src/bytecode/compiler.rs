@@ -1,8 +1,13 @@
 //! AST to Bytecode compiler with constant folding, compile-time builtin resolution, and superinstruction fusion.
-use crate::bytecode::opcode::{BytecodeFunction, Chunk, Opcode, UpvalueDescriptor};
+use crate::bytecode::opcode::{
+    BytecodeFunction, Chunk, Opcode, PathTarget, RecordShapeDescriptor, UpvalueDescriptor,
+};
 use crate::runtime::builtins::lookup_builtin;
 use crate::runtime::ops::{eval_binary_values, eval_unary_value, is_truthy};
-use crate::{Builtin, Expr, ExprKind, InterpolationPart, RuntimeError, Stmt, StmtKind, Value};
+use crate::{
+    Builtin, Expr, ExprKind, InterpolationPart, Name, RecordMap, RuntimeError, Stmt, StmtKind,
+    Value,
+};
 use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
 
@@ -10,12 +15,11 @@ use themoretheless_tokenizer_core::Span;
 pub(crate) fn try_eval_const(expr: &Expr<'_>) -> Option<Value<'static>> {
     match &expr.kind {
         ExprKind::Number(text) => {
-            let n = if text.as_bytes().contains(&b'_') {
-                text.replace('_', "").parse::<f64>().ok()?
+            if crate::runtime::is_int_literal(text) {
+                crate::runtime::parse_int_literal(text).map(Value::Int)
             } else {
-                text.parse::<f64>().ok()?
-            };
-            n.is_finite().then_some(Value::Number(n))
+                crate::runtime::parse_f64_literal(text).map(Value::Number)
+            }
         }
         ExprKind::String(text) => {
             let mut decoded = String::with_capacity(text.len());
@@ -27,6 +31,12 @@ pub(crate) fn try_eval_const(expr: &Expr<'_>) -> Option<Value<'static>> {
         ExprKind::Bool(b) => Some(Value::Bool(*b)),
         ExprKind::Null => Some(Value::Null),
         ExprKind::Unary { operator, value } => {
+            if *operator == "-"
+                && let ExprKind::Number(text) = &value.kind
+                && crate::runtime::is_int_literal(text)
+            {
+                return crate::runtime::parse_neg_int_literal(text).map(Value::Int);
+            }
             let inner = try_eval_const(value)?;
             eval_unary_value(operator, inner, false).ok()
         }
@@ -69,6 +79,11 @@ pub(crate) fn try_eval_const(expr: &Expr<'_>) -> Option<Value<'static>> {
     }
 }
 
+fn type_annotation_has_int(ty: &crate::Type<'_>) -> bool {
+    matches!(&*ty.qualified_name(), "int" | "i64")
+        || ty.arguments.iter().any(type_annotation_has_int)
+}
+
 struct LoopContext {
     start_ip: usize,
     break_jumps: Vec<usize>,
@@ -90,6 +105,7 @@ struct CompilerState<'s> {
     local_count: u32,
     upvalues: Vec<UpvalueDescriptor>,
     loops: Vec<LoopContext>,
+    coerce_return_int: bool,
 }
 
 impl<'s> CompilerState<'s> {
@@ -103,6 +119,7 @@ impl<'s> CompilerState<'s> {
             local_count: arity as u32,
             upvalues: Vec::new(),
             loops: Vec::new(),
+            coerce_return_int: false,
         }
     }
 
@@ -277,17 +294,88 @@ impl<'s> Compiler<'s> {
             }
             return Ok(());
         }
+        for stmt in items {
+            if matches!(stmt.kind, StmtKind::Struct { .. } | StmtKind::Enum { .. }) {
+                self.compile_type_decl(stmt)?;
+            }
+        }
+        let mut hoisted_fns = Vec::new();
+        for (i, stmt) in items.iter().enumerate() {
+            if let StmtKind::Function {
+                name, parameters, ..
+            } = &stmt.kind
+            {
+                let slot = self.current().declare_local(name.text);
+                let placeholder = Rc::new(BytecodeFunction {
+                    name: Some(name.text.to_string()),
+                    arity: parameters.len(),
+                    chunk: Chunk::new(),
+                    upvalue_descriptors: Vec::new(),
+                });
+                let fn_idx = self.current().chunk.add_function(placeholder);
+                self.current()
+                    .chunk
+                    .emit(Opcode::MakeClosure(fn_idx), stmt.span);
+                self.current()
+                    .chunk
+                    .emit(Opcode::StoreLocal(slot), stmt.span);
+                hoisted_fns.push((i, fn_idx));
+            }
+        }
+        let mut fn_cursor = 0;
         for (i, stmt) in items.iter().enumerate() {
             let is_last = i + 1 == items.len();
-            self.compile_stmt(stmt, is_last && keep_result)?;
+            if let StmtKind::Function {
+                name,
+                parameters,
+                result,
+                body,
+                ..
+            } = &stmt.kind
+            {
+                let (_, fn_idx) = hoisted_fns[fn_cursor];
+                fn_cursor += 1;
+                self.push_state(Some(name.text.to_string()), parameters.len());
+                self.current().coerce_return_int =
+                    result.as_ref().is_some_and(type_annotation_has_int);
+                for (p_idx, p) in parameters.iter().enumerate() {
+                    if let Some(p_name) = extract_pattern_name(&p.pattern) {
+                        self.current().declare_param(p_name, p_idx as u32);
+                    }
+                    if p.ty.as_ref().is_some_and(type_annotation_has_int) {
+                        self.current()
+                            .chunk
+                            .emit(Opcode::GetLocal(p_idx as u32), p.pattern.span);
+                        self.current().chunk.emit(Opcode::CoerceInt, p.pattern.span);
+                        self.current()
+                            .chunk
+                            .emit(Opcode::StoreLocal(p_idx as u32), p.pattern.span);
+                    }
+                }
+                self.compile_block(&body.stmts, false)?;
+                self.current().chunk.emit(Opcode::Null, stmt.span);
+                self.current().chunk.emit(Opcode::Return, stmt.span);
+                let compiled = self.pop_state();
+                self.current().chunk.functions[fn_idx as usize] = Rc::new(compiled);
+                if is_last && keep_result {
+                    self.current().chunk.emit(Opcode::Null, stmt.span);
+                }
+            } else {
+                self.compile_stmt(stmt, is_last && keep_result)?;
+            }
         }
         Ok(())
     }
 
     fn compile_stmt(&mut self, stmt: &Stmt<'s>, keep_result: bool) -> Result<(), RuntimeError> {
         match &stmt.kind {
-            StmtKind::Declaration { name, value, .. } => {
+            StmtKind::Declaration {
+                name, value, ty, ..
+            } => {
                 self.compile_expr(value)?;
+                if ty.as_ref().is_some_and(type_annotation_has_int) {
+                    self.current().chunk.emit(Opcode::CoerceInt, stmt.span);
+                }
                 let slot = self.current().declare_local(name.text);
                 self.current()
                     .chunk
@@ -296,33 +384,8 @@ impl<'s> Compiler<'s> {
                     self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
             }
-            StmtKind::Function {
-                name,
-                parameters,
-                body,
-                ..
-            } => {
-                let slot = self.current().declare_local(name.text);
-                self.push_state(Some(name.text.to_string()), parameters.len());
-                for (i, p) in parameters.iter().enumerate() {
-                    if let Some(p_name) = extract_pattern_name(&p.pattern) {
-                        self.current().declare_param(p_name, i as u32);
-                    }
-                }
-                self.compile_block(&body.stmts, false)?;
-                self.current().chunk.emit(Opcode::Null, stmt.span);
-                self.current().chunk.emit(Opcode::Return, stmt.span);
-                let compiled = self.pop_state();
-                let fn_idx = self.current().chunk.add_function(Rc::new(compiled));
-                self.current()
-                    .chunk
-                    .emit(Opcode::MakeClosure(fn_idx), stmt.span);
-                self.current()
-                    .chunk
-                    .emit(Opcode::StoreLocal(slot), stmt.span);
-                if keep_result {
-                    self.current().chunk.emit(Opcode::Null, stmt.span);
-                }
+            StmtKind::Function { .. } => {
+                unreachable!("functions are compiled via compile_block hoisting");
             }
             StmtKind::If {
                 condition,
@@ -430,6 +493,15 @@ impl<'s> Compiler<'s> {
             StmtKind::Return(value) => {
                 if let Some(val) = value {
                     self.compile_expr(val)?;
+                    if matches!(val.kind, ExprKind::Call { .. })
+                        && let Some(Opcode::Call(argc)) = self.current().chunk.code.last().copied()
+                    {
+                        *self.current().chunk.code.last_mut().expect("present") =
+                            Opcode::TailCall(argc);
+                    }
+                    if self.current().coerce_return_int {
+                        self.current().chunk.emit(Opcode::CoerceInt, stmt.span);
+                    }
                 } else {
                     self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
@@ -446,6 +518,39 @@ impl<'s> Compiler<'s> {
                     self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
             }
+            StmtKind::Struct { .. } | StmtKind::Enum { .. } => {
+                if keep_result {
+                    self.current().chunk.emit(Opcode::Null, stmt.span);
+                }
+            }
+            StmtKind::Region { budget, body, .. } => {
+                if let Some(budget_expr) = budget {
+                    self.compile_expr(budget_expr)?;
+                    self.current()
+                        .chunk
+                        .emit(Opcode::AssertRegionBudget, budget_expr.span);
+                }
+                self.current().push_scope();
+                self.compile_block(&body.stmts, keep_result)?;
+                self.current().pop_scope();
+            }
+            StmtKind::Show(expr) | StmtKind::Expr(expr) => {
+                self.compile_expr(expr)?;
+                if !keep_result {
+                    self.current().chunk.emit(Opcode::Pop, stmt.span);
+                }
+            }
+            _ => {
+                return Err(
+                    self.error(stmt.span, "Statement not supported in bytecode compilation")
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn compile_type_decl(&mut self, stmt: &Stmt<'s>) -> Result<(), RuntimeError> {
+        match &stmt.kind {
             StmtKind::Struct { name, .. } => {
                 let slot = self.current().declare_local(name.text);
                 let mut ctor_chunk = Chunk::new();
@@ -474,9 +579,6 @@ impl<'s> Compiler<'s> {
                 self.current()
                     .chunk
                     .emit(Opcode::StoreLocal(slot), stmt.span);
-                if keep_result {
-                    self.current().chunk.emit(Opcode::Null, stmt.span);
-                }
             }
             StmtKind::Enum { name, variants } => {
                 let slot = self.current().declare_local(name.text);
@@ -526,32 +628,8 @@ impl<'s> Compiler<'s> {
                 self.current()
                     .chunk
                     .emit(Opcode::StoreLocal(slot), stmt.span);
-                if keep_result {
-                    self.current().chunk.emit(Opcode::Null, stmt.span);
-                }
             }
-            StmtKind::Region { budget, body, .. } => {
-                if let Some(budget_expr) = budget {
-                    self.compile_expr(budget_expr)?;
-                    self.current()
-                        .chunk
-                        .emit(Opcode::AssertRegionBudget, budget_expr.span);
-                }
-                self.current().push_scope();
-                self.compile_block(&body.stmts, keep_result)?;
-                self.current().pop_scope();
-            }
-            StmtKind::Show(expr) | StmtKind::Expr(expr) => {
-                self.compile_expr(expr)?;
-                if !keep_result {
-                    self.current().chunk.emit(Opcode::Pop, stmt.span);
-                }
-            }
-            _ => {
-                return Err(
-                    self.error(stmt.span, "Statement not supported in bytecode compilation")
-                );
-            }
+            _ => unreachable!("type declaration"),
         }
         Ok(())
     }
@@ -589,15 +667,16 @@ impl<'s> Compiler<'s> {
                 self.current().chunk.emit(Opcode::TryPropagate, span);
             }
             ExprKind::Number(text) => {
-                let n: f64 = if text.as_bytes().contains(&b'_') {
-                    text.replace('_', "")
-                        .parse()
-                        .map_err(|_| self.error(span, "Invalid number"))?
+                let val = if crate::runtime::is_int_literal(text) {
+                    let i = crate::runtime::parse_int_literal(text)
+                        .ok_or_else(|| self.error(span, "Invalid integer literal"))?;
+                    Value::Int(i)
                 } else {
-                    text.parse()
-                        .map_err(|_| self.error(span, "Invalid number"))?
+                    let n = crate::runtime::parse_f64_literal(text)
+                        .ok_or_else(|| self.error(span, "Invalid number literal"))?;
+                    Value::Number(n)
                 };
-                let idx = self.current().chunk.add_constant(Value::Number(n));
+                let idx = self.current().chunk.add_constant(val);
                 self.current().chunk.emit(Opcode::Constant(idx), span);
             }
             ExprKind::String(text) => {
@@ -635,6 +714,16 @@ impl<'s> Compiler<'s> {
                 }
             },
             ExprKind::Unary { operator, value } => {
+                if *operator == "-"
+                    && let ExprKind::Number(text) = &value.kind
+                    && crate::runtime::is_int_literal(text)
+                {
+                    let i = crate::runtime::parse_neg_int_literal(text)
+                        .ok_or_else(|| self.error(span, "Invalid integer literal"))?;
+                    let idx = self.current().chunk.add_constant(Value::Int(i));
+                    self.current().chunk.emit(Opcode::Constant(idx), span);
+                    return Ok(());
+                }
                 self.compile_expr(value)?;
                 match *operator {
                     "-" => {
@@ -642,6 +731,9 @@ impl<'s> Compiler<'s> {
                     }
                     "+" => {
                         self.current().chunk.emit(Opcode::Pos, span);
+                    }
+                    "~" => {
+                        self.current().chunk.emit(Opcode::BitNot, span);
                     }
                     "!" | "not" => {
                         self.current().chunk.emit(Opcode::Not, span);
@@ -676,128 +768,343 @@ impl<'s> Compiler<'s> {
                 }
 
                 // Superinstruction fast-paths when right operand is a compile-time numeric constant
-                if let Some(Value::Number(imm)) = try_eval_const(right) {
-                    if let ExprKind::Name(left_name) = &left.kind
-                        && let VariableResolution::Local(slot) =
-                            self.resolve_variable(left_name.text)
-                    {
+                match try_eval_const(right) {
+                    Some(Value::Number(imm)) => {
+                        if let ExprKind::Name(left_name) = &left.kind
+                            && let VariableResolution::Local(slot) =
+                                self.resolve_variable(left_name.text)
+                        {
+                            match *operator {
+                                "+" => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalAddImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                "-" => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalSubImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                "*" => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalMulImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                "%" if imm != 0.0 => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalModImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                "&" => {
+                                    if let Some(int_imm) = Value::Number(imm).as_exact_i64() {
+                                        self.current()
+                                            .chunk
+                                            .emit(Opcode::LocalBitAndIntImm(slot, int_imm), span);
+                                        return Ok(());
+                                    }
+                                }
+                                "==" => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalEqualImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                "<" => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalLessImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                "<=" => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalLessEqualImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                _ => {}
+                            }
+                        }
+
                         match *operator {
                             "+" => {
-                                self.current()
-                                    .chunk
-                                    .emit(Opcode::LocalAddImm(slot, imm), span);
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::AddImm(imm), span);
                                 return Ok(());
                             }
                             "-" => {
-                                self.current()
-                                    .chunk
-                                    .emit(Opcode::LocalSubImm(slot, imm), span);
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::SubImm(imm), span);
                                 return Ok(());
                             }
                             "*" => {
-                                self.current()
-                                    .chunk
-                                    .emit(Opcode::LocalMulImm(slot, imm), span);
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::MulImm(imm), span);
                                 return Ok(());
                             }
                             "%" if imm != 0.0 => {
-                                self.current()
-                                    .chunk
-                                    .emit(Opcode::LocalModImm(slot, imm), span);
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::ModImm(imm), span);
                                 return Ok(());
                             }
+                            "&" => {
+                                if let Some(int_imm) = Value::Number(imm).as_exact_i64() {
+                                    self.compile_expr(left)?;
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::BitAndIntImm(int_imm), span);
+                                    return Ok(());
+                                }
+                            }
+                            "^" => {
+                                if let Some(int_imm) = Value::Number(imm).as_exact_i64() {
+                                    self.compile_expr(left)?;
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::BitXorIntImm(int_imm), span);
+                                    return Ok(());
+                                }
+                            }
+                            "<<" => {
+                                if let Some(int_imm) = Value::Number(imm).as_exact_i64()
+                                    && let Ok(shift) = u32::try_from(int_imm)
+                                    && shift < 64
+                                {
+                                    self.compile_expr(left)?;
+                                    self.current().chunk.emit(Opcode::ShlIntImm(shift), span);
+                                    return Ok(());
+                                }
+                            }
+                            ">>" => {
+                                if let Some(int_imm) = Value::Number(imm).as_exact_i64()
+                                    && let Ok(shift) = u32::try_from(int_imm)
+                                    && shift < 64
+                                {
+                                    self.compile_expr(left)?;
+                                    self.current().chunk.emit(Opcode::ShrIntImm(shift), span);
+                                    return Ok(());
+                                }
+                            }
                             "==" => {
-                                self.current()
-                                    .chunk
-                                    .emit(Opcode::LocalEqualImm(slot, imm), span);
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::EqualImm(imm), span);
+                                return Ok(());
+                            }
+                            "<" => {
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::LessImm(imm), span);
                                 return Ok(());
                             }
                             "<=" => {
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::LessEqualImm(imm), span);
+                                return Ok(());
+                            }
+                            ">" => {
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::GreaterImm(imm), span);
+                                return Ok(());
+                            }
+                            ">=" => {
+                                self.compile_expr(left)?;
                                 self.current()
                                     .chunk
-                                    .emit(Opcode::LocalLessEqualImm(slot, imm), span);
+                                    .emit(Opcode::GreaterEqualImm(imm), span);
                                 return Ok(());
                             }
                             _ => {}
                         }
                     }
+                    Some(Value::Int(imm)) => {
+                        if let ExprKind::Name(left_name) = &left.kind
+                            && let VariableResolution::Local(slot) =
+                                self.resolve_variable(left_name.text)
+                        {
+                            match *operator {
+                                "+" => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalAddIntImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                "-" => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalSubIntImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                "*" => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalMulIntImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                "%" if imm != 0 && imm != -1 => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalModIntImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                "&" => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalBitAndIntImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                "==" => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalEqualIntImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                "<" => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalLessIntImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                "<=" => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::LocalLessEqualIntImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                _ => {}
+                            }
+                        }
 
-                    match *operator {
-                        "+" => {
-                            self.compile_expr(left)?;
-                            self.current().chunk.emit(Opcode::AddImm(imm), span);
+                        match *operator {
+                            "+" => {
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::AddIntImm(imm), span);
+                                return Ok(());
+                            }
+                            "-" => {
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::SubIntImm(imm), span);
+                                return Ok(());
+                            }
+                            "*" => {
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::MulIntImm(imm), span);
+                                return Ok(());
+                            }
+                            "%" if imm != 0 && imm != -1 => {
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::ModIntImm(imm), span);
+                                return Ok(());
+                            }
+                            "&" => {
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::BitAndIntImm(imm), span);
+                                return Ok(());
+                            }
+                            "^" => {
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::BitXorIntImm(imm), span);
+                                return Ok(());
+                            }
+                            "<<" if u32::try_from(imm).is_ok_and(|s| s < 64) => {
+                                self.compile_expr(left)?;
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::ShlIntImm(imm as u32), span);
+                                return Ok(());
+                            }
+                            ">>" if u32::try_from(imm).is_ok_and(|s| s < 64) => {
+                                self.compile_expr(left)?;
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::ShrIntImm(imm as u32), span);
+                                return Ok(());
+                            }
+                            "==" => {
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::EqualIntImm(imm), span);
+                                return Ok(());
+                            }
+                            "<" => {
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::LessIntImm(imm), span);
+                                return Ok(());
+                            }
+                            "<=" => {
+                                self.compile_expr(left)?;
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::LessEqualIntImm(imm), span);
+                                return Ok(());
+                            }
+                            ">" => {
+                                self.compile_expr(left)?;
+                                self.current().chunk.emit(Opcode::GreaterIntImm(imm), span);
+                                return Ok(());
+                            }
+                            ">=" => {
+                                self.compile_expr(left)?;
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::GreaterEqualIntImm(imm), span);
+                                return Ok(());
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+
+                // Symmetric superinstruction fast-paths when left operand is a compile-time numeric constant
+                if matches!(*operator, "+" | "*" | "==") {
+                    match try_eval_const(left) {
+                        Some(Value::Number(imm)) => {
+                            if let ExprKind::Name(right_name) = &right.kind
+                                && let VariableResolution::Local(slot) =
+                                    self.resolve_variable(right_name.text)
+                            {
+                                let op = match *operator {
+                                    "+" => Opcode::LocalAddImm(slot, imm),
+                                    "*" => Opcode::LocalMulImm(slot, imm),
+                                    _ => Opcode::LocalEqualImm(slot, imm),
+                                };
+                                self.current().chunk.emit(op, span);
+                                return Ok(());
+                            }
+                            self.compile_expr(right)?;
+                            let op = match *operator {
+                                "+" => Opcode::AddImm(imm),
+                                "*" => Opcode::MulImm(imm),
+                                _ => Opcode::EqualImm(imm),
+                            };
+                            self.current().chunk.emit(op, span);
                             return Ok(());
                         }
-                        "-" => {
-                            self.compile_expr(left)?;
-                            self.current().chunk.emit(Opcode::SubImm(imm), span);
-                            return Ok(());
-                        }
-                        "*" => {
-                            self.compile_expr(left)?;
-                            self.current().chunk.emit(Opcode::MulImm(imm), span);
-                            return Ok(());
-                        }
-                        "%" if imm != 0.0 => {
-                            self.compile_expr(left)?;
-                            self.current().chunk.emit(Opcode::ModImm(imm), span);
-                            return Ok(());
-                        }
-                        "==" => {
-                            self.compile_expr(left)?;
-                            self.current().chunk.emit(Opcode::EqualImm(imm), span);
-                            return Ok(());
-                        }
-                        "<" => {
-                            self.compile_expr(left)?;
-                            self.current().chunk.emit(Opcode::LessImm(imm), span);
-                            return Ok(());
-                        }
-                        "<=" => {
-                            self.compile_expr(left)?;
-                            self.current().chunk.emit(Opcode::LessEqualImm(imm), span);
-                            return Ok(());
-                        }
-                        ">" => {
-                            self.compile_expr(left)?;
-                            self.current().chunk.emit(Opcode::GreaterImm(imm), span);
-                            return Ok(());
-                        }
-                        ">=" => {
-                            self.compile_expr(left)?;
-                            self.current()
-                                .chunk
-                                .emit(Opcode::GreaterEqualImm(imm), span);
+                        Some(Value::Int(imm)) => {
+                            if let ExprKind::Name(right_name) = &right.kind
+                                && let VariableResolution::Local(slot) =
+                                    self.resolve_variable(right_name.text)
+                            {
+                                let op = match *operator {
+                                    "+" => Opcode::LocalAddIntImm(slot, imm),
+                                    "*" => Opcode::LocalMulIntImm(slot, imm),
+                                    _ => Opcode::LocalEqualIntImm(slot, imm),
+                                };
+                                self.current().chunk.emit(op, span);
+                                return Ok(());
+                            }
+                            self.compile_expr(right)?;
+                            let op = match *operator {
+                                "+" => Opcode::AddIntImm(imm),
+                                "*" => Opcode::MulIntImm(imm),
+                                _ => Opcode::EqualIntImm(imm),
+                            };
+                            self.current().chunk.emit(op, span);
                             return Ok(());
                         }
                         _ => {}
                     }
-                }
-
-                // Symmetric superinstruction fast-paths when left operand is a compile-time numeric constant
-                if matches!(*operator, "+" | "*" | "==")
-                    && let Some(Value::Number(imm)) = try_eval_const(left)
-                {
-                    if let ExprKind::Name(right_name) = &right.kind
-                        && let VariableResolution::Local(slot) =
-                            self.resolve_variable(right_name.text)
-                    {
-                        let op = match *operator {
-                            "+" => Opcode::LocalAddImm(slot, imm),
-                            "*" => Opcode::LocalMulImm(slot, imm),
-                            _ => Opcode::LocalEqualImm(slot, imm),
-                        };
-                        self.current().chunk.emit(op, span);
-                        return Ok(());
-                    }
-                    self.compile_expr(right)?;
-                    let op = match *operator {
-                        "+" => Opcode::AddImm(imm),
-                        "*" => Opcode::MulImm(imm),
-                        _ => Opcode::EqualImm(imm),
-                    };
-                    self.current().chunk.emit(op, span);
-                    return Ok(());
                 }
 
                 self.compile_expr(left)?;
@@ -809,6 +1116,10 @@ impl<'s> Compiler<'s> {
                     "/" => self.current().chunk.emit(Opcode::Div, span),
                     "%" => self.current().chunk.emit(Opcode::Mod, span),
                     "**" => self.current().chunk.emit(Opcode::Pow, span),
+                    "&" => self.current().chunk.emit(Opcode::BitAnd, span),
+                    "^" => self.current().chunk.emit(Opcode::BitXor, span),
+                    "<<" => self.current().chunk.emit(Opcode::Shl, span),
+                    ">>" => self.current().chunk.emit(Opcode::Shr, span),
                     "==" => self.current().chunk.emit(Opcode::Equal, span),
                     "!=" => self.current().chunk.emit(Opcode::NotEqual, span),
                     "<" => self.current().chunk.emit(Opcode::Less, span),
@@ -827,11 +1138,20 @@ impl<'s> Compiler<'s> {
                     let res = self.resolve_variable(name.text);
                     if let VariableResolution::Local(slot) = res {
                         if *operator == "+=" {
-                            if let Some(Value::Number(imm)) = try_eval_const(value) {
-                                self.current()
-                                    .chunk
-                                    .emit(Opcode::AddAssignLocalImm(slot, imm), span);
-                                return Ok(());
+                            match try_eval_const(value) {
+                                Some(Value::Number(imm)) => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::AddAssignLocalImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                Some(Value::Int(imm)) => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::AddAssignLocalIntImm(slot, imm), span);
+                                    return Ok(());
+                                }
+                                _ => {}
                             }
                             self.compile_expr(value)?;
                             self.current()
@@ -839,13 +1159,24 @@ impl<'s> Compiler<'s> {
                                 .emit(Opcode::AddAssignLocal(slot), span);
                             return Ok(());
                         }
-                        if *operator == "-="
-                            && let Some(Value::Number(imm)) = try_eval_const(value)
-                        {
-                            self.current()
-                                .chunk
-                                .emit(Opcode::AddAssignLocalImm(slot, -imm), span);
-                            return Ok(());
+                        if *operator == "-=" {
+                            match try_eval_const(value) {
+                                Some(Value::Number(imm)) => {
+                                    self.current()
+                                        .chunk
+                                        .emit(Opcode::AddAssignLocalImm(slot, -imm), span);
+                                    return Ok(());
+                                }
+                                Some(Value::Int(imm)) => {
+                                    if let Some(neg) = imm.checked_neg() {
+                                        self.current()
+                                            .chunk
+                                            .emit(Opcode::AddAssignLocalIntImm(slot, neg), span);
+                                        return Ok(());
+                                    }
+                                }
+                                _ => {}
+                            }
                         }
                     }
 
@@ -883,6 +1214,10 @@ impl<'s> Compiler<'s> {
                             "/" => self.current().chunk.emit(Opcode::Div, span),
                             "%" => self.current().chunk.emit(Opcode::Mod, span),
                             "**" => self.current().chunk.emit(Opcode::Pow, span),
+                            "&" => self.current().chunk.emit(Opcode::BitAnd, span),
+                            "^" => self.current().chunk.emit(Opcode::BitXor, span),
+                            "<<" => self.current().chunk.emit(Opcode::Shl, span),
+                            ">>" => self.current().chunk.emit(Opcode::Shr, span),
                             _ => return Err(self.error(span, "Unsupported assignment operator")),
                         };
                     }
@@ -908,80 +1243,173 @@ impl<'s> Compiler<'s> {
                         }
                     }
                 }
-                ExprKind::Index { object, index } => {
-                    let ExprKind::Name(obj_name) = &object.kind else {
-                        return Err(
-                            self.error(object.span, "Index assignment requires a variable target")
-                        );
+                ExprKind::Index { .. } | ExprKind::Member { .. } => {
+                    let Some((root_name, steps)) = extract_lvalue_path(target) else {
+                        return Err(self.error(
+                            target.span,
+                            "Assignment requires a variable, member or index",
+                        ));
                     };
-                    let res = self.resolve_variable(obj_name.text);
-                    self.compile_expr(index)?;
-                    self.compile_expr(value)?;
-                    match res {
-                        VariableResolution::Local(slot) => {
-                            self.current()
-                                .chunk
-                                .emit(Opcode::IndexSet(slot), target.span);
-                            self.current()
-                                .chunk
-                                .emit(Opcode::GetLocal(slot), target.span);
-                        }
-                        VariableResolution::Upvalue(idx) => {
-                            self.current()
-                                .chunk
-                                .emit(Opcode::IndexSetUpvalue(idx), target.span);
-                            self.current()
-                                .chunk
-                                .emit(Opcode::GetUpvalue(idx), target.span);
-                        }
-                        _ => return Err(self.error(object.span, "Cannot mutate target by index")),
+                    if steps.len() > 32 {
+                        return Err(self.error(target.span, "Assignment path is too deep"));
                     }
-                }
-                ExprKind::Member { object, field } => {
-                    let ExprKind::Name(obj_name) = &object.kind else {
-                        return Err(
-                            self.error(object.span, "Member assignment requires a variable target")
-                        );
+                    let res = self.resolve_variable(root_name.text);
+                    let path_target = match res {
+                        VariableResolution::Local(slot) => PathTarget::Local(slot),
+                        VariableResolution::Upvalue(idx) => PathTarget::Upvalue(idx),
+                        VariableResolution::Global(n) => {
+                            let idx = self.current().chunk.add_constant(Value::String(n));
+                            PathTarget::Global(idx)
+                        }
+                        VariableResolution::Builtin(_) => {
+                            return Err(self.error(root_name.span, "Cannot mutate builtin"));
+                        }
                     };
-                    let res = self.resolve_variable(obj_name.text);
-                    self.compile_expr(value)?;
-                    let field_idx = self
-                        .current()
-                        .chunk
-                        .add_constant(Value::String(field.text.to_string()));
-                    match res {
-                        VariableResolution::Local(slot) => {
-                            self.current()
-                                .chunk
-                                .emit(Opcode::MemberSet(slot, field_idx), target.span);
-                            self.current()
-                                .chunk
-                                .emit(Opcode::GetLocal(slot), target.span);
+                    if steps.len() == 1
+                        && *operator == "="
+                        && matches!(path_target, PathTarget::Local(_) | PathTarget::Upvalue(_))
+                    {
+                        match (&steps[0], path_target) {
+                            (LvalueStep::Index(index), PathTarget::Local(slot)) => {
+                                self.compile_expr(index)?;
+                                self.compile_expr(value)?;
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::IndexSet(slot), target.span);
+                            }
+                            (LvalueStep::Index(index), PathTarget::Upvalue(idx)) => {
+                                self.compile_expr(index)?;
+                                self.compile_expr(value)?;
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::IndexSetUpvalue(idx), target.span);
+                            }
+                            (LvalueStep::Member(field), PathTarget::Local(slot)) => {
+                                self.compile_expr(value)?;
+                                let field_idx = self
+                                    .current()
+                                    .chunk
+                                    .add_constant(Value::String(field.text.to_string()));
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::MemberSet(slot, field_idx), target.span);
+                            }
+                            (LvalueStep::Member(field), PathTarget::Upvalue(idx)) => {
+                                self.compile_expr(value)?;
+                                let field_idx = self
+                                    .current()
+                                    .chunk
+                                    .add_constant(Value::String(field.text.to_string()));
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::MemberSetUpvalue(idx, field_idx), target.span);
+                            }
+                            _ => unreachable!(),
                         }
-                        VariableResolution::Upvalue(idx) => {
-                            self.current()
-                                .chunk
-                                .emit(Opcode::MemberSetUpvalue(idx, field_idx), target.span);
-                            self.current()
-                                .chunk
-                                .emit(Opcode::GetUpvalue(idx), target.span);
-                        }
-                        _ => return Err(self.error(object.span, "Cannot mutate member on value")),
+                        return Ok(());
                     }
+                    let mut member_mask = 0u32;
+                    for (i, step) in steps.iter().enumerate() {
+                        match step {
+                            LvalueStep::Index(index) => {
+                                self.compile_expr(index)?;
+                            }
+                            LvalueStep::Member(field) => {
+                                member_mask |= 1u32 << i;
+                                let idx = self
+                                    .current()
+                                    .chunk
+                                    .add_constant(Value::String(field.text.to_string()));
+                                self.current().chunk.emit(Opcode::Constant(idx), field.span);
+                            }
+                        }
+                    }
+                    let depth = steps.len() as u8;
+                    if *operator == "=" {
+                        self.compile_expr(value)?;
+                    } else {
+                        let base_op = operator.strip_suffix('=').unwrap_or(operator);
+                        self.current().chunk.emit(
+                            Opcode::GetPath {
+                                target: path_target,
+                                depth,
+                                member_mask,
+                            },
+                            target.span,
+                        );
+                        self.compile_expr(value)?;
+                        match base_op {
+                            "+" => self.current().chunk.emit(Opcode::Add, span),
+                            "-" => self.current().chunk.emit(Opcode::Sub, span),
+                            "*" => self.current().chunk.emit(Opcode::Mul, span),
+                            "/" => self.current().chunk.emit(Opcode::Div, span),
+                            "%" => self.current().chunk.emit(Opcode::Mod, span),
+                            "**" => self.current().chunk.emit(Opcode::Pow, span),
+                            "&" => self.current().chunk.emit(Opcode::BitAnd, span),
+                            "^" => self.current().chunk.emit(Opcode::BitXor, span),
+                            "<<" => self.current().chunk.emit(Opcode::Shl, span),
+                            ">>" => self.current().chunk.emit(Opcode::Shr, span),
+                            _ => return Err(self.error(span, "Unsupported assignment operator")),
+                        };
+                    }
+                    self.current().chunk.emit(
+                        Opcode::SetPath {
+                            target: path_target,
+                            depth,
+                            member_mask,
+                        },
+                        target.span,
+                    );
                 }
                 _ => return Err(self.error(target.span, "Unsupported assignment expression")),
             },
             ExprKind::Index { object, index } => {
+                if let ExprKind::Name(name) = &object.kind
+                    && !expr_may_mutate(index)
+                {
+                    match self.resolve_variable(name.text) {
+                        VariableResolution::Local(slot) => {
+                            self.compile_expr(index)?;
+                            self.current().chunk.emit(Opcode::LocalIndexGet(slot), span);
+                            return Ok(());
+                        }
+                        VariableResolution::Upvalue(upval_idx) => {
+                            self.compile_expr(index)?;
+                            self.current()
+                                .chunk
+                                .emit(Opcode::UpvalueIndexGet(upval_idx), span);
+                            return Ok(());
+                        }
+                        _ => {}
+                    }
+                }
                 self.compile_expr(object)?;
                 self.compile_expr(index)?;
                 self.current().chunk.emit(Opcode::IndexGet, span);
             }
             ExprKind::Member { object, field } => {
-                self.compile_expr(object)?;
                 let field_idx = self
                     .current()
                     .chunk
                     .add_constant(Value::String(field.text.to_string()));
+                if let ExprKind::Name(name) = &object.kind {
+                    match self.resolve_variable(name.text) {
+                        VariableResolution::Local(slot) => {
+                            self.current()
+                                .chunk
+                                .emit(Opcode::LocalMemberGet(slot, field_idx), span);
+                            return Ok(());
+                        }
+                        VariableResolution::Upvalue(upval_idx) => {
+                            self.current()
+                                .chunk
+                                .emit(Opcode::UpvalueMemberGet(upval_idx, field_idx), span);
+                            return Ok(());
+                        }
+                        _ => {}
+                    }
+                }
+                self.compile_expr(object)?;
                 self.current()
                     .chunk
                     .emit(Opcode::MemberGet(field_idx), span);
@@ -1003,22 +1431,87 @@ impl<'s> Compiler<'s> {
                     .emit(Opcode::BuildTuple(items.len()), span);
             }
             ExprKind::Map(entries) => {
-                for (key, val) in entries {
-                    match &key.kind {
-                        ExprKind::Name(n) => {
-                            let idx = self
-                                .current()
-                                .chunk
-                                .add_constant(Value::String(n.text.to_string()));
-                            self.current().chunk.emit(Opcode::Constant(idx), key.span);
+                let mut static_keys = Vec::with_capacity(entries.len());
+                let mut all_static_unique = true;
+                for (key, _) in entries {
+                    let k_opt = match &key.kind {
+                        ExprKind::Name(n) => Some(n.text.to_string()),
+                        _ => match try_eval_const(key) {
+                            Some(Value::String(s)) => Some(s),
+                            _ => None,
+                        },
+                    };
+                    if let Some(k) = k_opt {
+                        if static_keys.contains(&k) {
+                            all_static_unique = false;
+                            break;
                         }
-                        _ => self.compile_expr(key)?,
+                        static_keys.push(k);
+                    } else {
+                        all_static_unique = false;
+                        break;
                     }
-                    self.compile_expr(val)?;
                 }
-                self.current()
-                    .chunk
-                    .emit(Opcode::BuildRecord(entries.len()), span);
+
+                if all_static_unique {
+                    if let Some(const_vals) = entries
+                        .iter()
+                        .map(|(_, val)| try_eval_const(val))
+                        .collect::<Option<Vec<_>>>()
+                    {
+                        let pairs: Vec<(String, Value<'static>)> =
+                            static_keys.into_iter().zip(const_vals).collect();
+                        let record = Value::Record(RecordMap::from_unique_entries(pairs));
+                        self.emit_constant_value(record, span);
+                        return Ok(());
+                    }
+
+                    for (_, val) in entries {
+                        self.compile_expr(val)?;
+                    }
+                    let is_sorted = static_keys.windows(2).all(|w| w[0] < w[1]);
+                    let desc = if is_sorted {
+                        RecordShapeDescriptor {
+                            shape: Rc::from(static_keys),
+                            source_to_slot: None,
+                        }
+                    } else {
+                        let mut indexed: Vec<(usize, String)> =
+                            static_keys.into_iter().enumerate().collect();
+                        indexed.sort_by(|(_, a), (_, b)| a.cmp(b));
+                        let mut sorted_keys = Vec::with_capacity(indexed.len());
+                        let mut source_to_slot = vec![0usize; indexed.len()];
+                        for (slot_idx, (src_idx, key)) in indexed.into_iter().enumerate() {
+                            sorted_keys.push(key);
+                            source_to_slot[src_idx] = slot_idx;
+                        }
+                        RecordShapeDescriptor {
+                            shape: Rc::from(sorted_keys),
+                            source_to_slot: Some(source_to_slot.into_boxed_slice()),
+                        }
+                    };
+                    let shape_idx = self.current().chunk.add_record_shape(desc);
+                    self.current()
+                        .chunk
+                        .emit(Opcode::BuildRecordShape(shape_idx), span);
+                } else {
+                    for (key, val) in entries {
+                        match &key.kind {
+                            ExprKind::Name(n) => {
+                                let idx = self
+                                    .current()
+                                    .chunk
+                                    .add_constant(Value::String(n.text.to_string()));
+                                self.current().chunk.emit(Opcode::Constant(idx), key.span);
+                            }
+                            _ => self.compile_expr(key)?,
+                        }
+                        self.compile_expr(val)?;
+                    }
+                    self.current()
+                        .chunk
+                        .emit(Opcode::BuildRecord(entries.len()), span);
+                }
             }
             ExprKind::If {
                 condition,
@@ -1043,6 +1536,12 @@ impl<'s> Compiler<'s> {
                     }
                 }
                 self.compile_expr(body)?;
+                if matches!(body.kind, ExprKind::Call { .. })
+                    && let Some(Opcode::Call(argc)) = self.current().chunk.code.last().copied()
+                {
+                    *self.current().chunk.code.last_mut().expect("present") =
+                        Opcode::TailCall(argc);
+                }
                 self.current().chunk.emit(Opcode::Return, span);
                 let compiled = self.pop_state();
                 let fn_idx = self.current().chunk.add_function(Rc::new(compiled));
@@ -1052,6 +1551,32 @@ impl<'s> Compiler<'s> {
                 if let ExprKind::Name(name) = &callee.kind
                     && let VariableResolution::Builtin(builtin) = self.resolve_variable(name.text)
                 {
+                    if matches!(builtin, Builtin::Vec2 | Builtin::Vec3 | Builtin::Vec4) {
+                        let expected_dim = match builtin {
+                            Builtin::Vec2 => 2,
+                            Builtin::Vec3 => 3,
+                            _ => 4,
+                        };
+                        if arguments.len() == expected_dim {
+                            let mut comps = crate::InlineVec::new();
+                            let mut all_const = true;
+                            for arg in arguments {
+                                if let Some(val) = try_eval_const(arg)
+                                    && let Some(n) = val.as_f64()
+                                    && n.is_finite()
+                                {
+                                    comps.push(n);
+                                } else {
+                                    all_const = false;
+                                    break;
+                                }
+                            }
+                            if all_const {
+                                self.emit_constant_value(Value::Vector(comps), span);
+                                return Ok(());
+                            }
+                        }
+                    }
                     for arg in arguments {
                         self.compile_expr(arg)?;
                     }
@@ -1272,10 +1797,7 @@ impl<'s> Compiler<'s> {
                     }
                     self.current()
                         .chunk
-                        .emit(Opcode::GetLocal(target_slot), span);
-                    self.current()
-                        .chunk
-                        .emit(Opcode::RecordGetAssert(field_idx), span);
+                        .emit(Opcode::LocalMemberGet(target_slot, field_idx), span);
                     let field_slot = self.current().declare_temp_local();
                     self.current()
                         .chunk
@@ -1314,13 +1836,24 @@ impl<'s> Compiler<'s> {
                 }
             }
             _ => {
-                if let Some(Value::Number(imm)) = try_eval_const(pattern) {
-                    self.current()
-                        .chunk
-                        .emit(Opcode::LocalEqualImm(target_slot, imm), span);
-                    let jmp = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
-                    fail_jumps.push(jmp);
-                    return Ok(());
+                match try_eval_const(pattern) {
+                    Some(Value::Number(imm)) => {
+                        self.current()
+                            .chunk
+                            .emit(Opcode::LocalEqualImm(target_slot, imm), span);
+                        let jmp = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
+                        fail_jumps.push(jmp);
+                        return Ok(());
+                    }
+                    Some(Value::Int(imm)) => {
+                        self.current()
+                            .chunk
+                            .emit(Opcode::LocalEqualIntImm(target_slot, imm), span);
+                        let jmp = self.current().chunk.emit(Opcode::JumpIfFalse(0), span);
+                        fail_jumps.push(jmp);
+                        return Ok(());
+                    }
+                    _ => {}
                 }
                 self.current()
                     .chunk
@@ -1410,6 +1943,35 @@ impl<'s> Compiler<'s> {
     }
 }
 
+fn expr_may_mutate(expr: &Expr<'_>) -> bool {
+    match &expr.kind {
+        ExprKind::Number(_)
+        | ExprKind::String(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Null
+        | ExprKind::Name(_) => false,
+        ExprKind::Unary { value, .. } | ExprKind::Try(value) => expr_may_mutate(value),
+        ExprKind::Binary { left, right, .. }
+        | ExprKind::Index {
+            object: left,
+            index: right,
+        } => expr_may_mutate(left) || expr_may_mutate(right),
+        ExprKind::Member { object, .. } => expr_may_mutate(object),
+        ExprKind::List(items) | ExprKind::Tuple(items) => items.iter().any(expr_may_mutate),
+        ExprKind::Map(entries) => entries
+            .iter()
+            .any(|(k, v)| expr_may_mutate(k) || expr_may_mutate(v)),
+        ExprKind::If {
+            condition,
+            then_value,
+            else_value,
+        } => {
+            expr_may_mutate(condition) || expr_may_mutate(then_value) || expr_may_mutate(else_value)
+        }
+        _ => true,
+    }
+}
+
 fn extract_callee_tag(expr: &Expr<'_>) -> Option<String> {
     match &expr.kind {
         ExprKind::Name(n) => Some(n.text.to_string()),
@@ -1421,6 +1983,30 @@ fn extract_callee_tag(expr: &Expr<'_>) -> Option<String> {
 fn extract_pattern_name<'s>(expr: &Expr<'s>) -> Option<&'s str> {
     match &expr.kind {
         ExprKind::Name(n) => Some(n.text),
+        _ => None,
+    }
+}
+
+enum LvalueStep<'a, 's> {
+    Index(&'a Expr<'s>),
+    Member(&'a Name<'s>),
+}
+
+fn extract_lvalue_path<'a, 's>(
+    expr: &'a Expr<'s>,
+) -> Option<(&'a Name<'s>, Vec<LvalueStep<'a, 's>>)> {
+    match &expr.kind {
+        ExprKind::Name(name) => Some((name, Vec::new())),
+        ExprKind::Index { object, index } => {
+            let (root, mut steps) = extract_lvalue_path(object)?;
+            steps.push(LvalueStep::Index(index));
+            Some((root, steps))
+        }
+        ExprKind::Member { object, field } => {
+            let (root, mut steps) = extract_lvalue_path(object)?;
+            steps.push(LvalueStep::Member(field));
+            Some((root, steps))
+        }
         _ => None,
     }
 }

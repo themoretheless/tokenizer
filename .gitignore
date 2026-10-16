@@ -6,6 +6,7 @@
 /wasm/target/
 .DS_Store
 /packages/*/node_modules/
+/packages/*/node_modules
 
 /packages/forma/wasm/target/
 /packages/forma/wasm-pkg/

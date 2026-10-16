@@ -6,6 +6,31 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-16
+
+### Added
+
+- Rush bytecode execution, functions, closures, user types, pattern matching,
+  iteration, propagation, JSON support and region-backed values.
+- Typed declarative models and incremental dependency updates.
+- Native `sys` automation with bounded processes and pipelines, filesystem,
+  environment, stdio, cancellation and per-command options.
+- Nested field/index mutation for mutable Rush values with type checks.
+- Rust/WASM Forma frontend and expanded expression and grammar support.
+
+### Changed
+
+- Split Rush analysis and runtime responsibilities into dedicated modules.
+- Optimize workspace tokenization, execution and web bridge allocations.
+- Update public Rush AST/runtime interfaces; consumers should recompile and
+  adapt exhaustive matches when upgrading from 0.7.x.
+
+### Limitations
+
+- Native system services are unavailable in browser/WASM builds.
+- Binary streams, background jobs and full Windows cancellation parity remain
+  outside this release's system API.
+
 ## [0.7.0] - 2026-10-01
 
 ### Added
@@ -407,10 +432,12 @@ are synchronized with Git releases starting at 0.7.0.
 - Initial dependency-free JSON tokenizer with UTF-8 byte spans, diagnostics,
   semantic token categories, and the `JsonTokenizer` compatibility facade.
 
-[Unreleased]: https://github.com/themoretheless/tokenizer/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/themoretheless/tokenizer/compare/v0.8.0...HEAD
 [0.6.0]: https://github.com/themoretheless/tokenizer/compare/v0.4.0...v0.6.0
 [0.7.0]: https://github.com/themoretheless/tokenizer/compare/v0.6.0...v0.7.0
 [0.4.0]: https://github.com/themoretheless/tokenizer/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/themoretheless/tokenizer/compare/v0.2.0...v0.3.1
 [0.2.0]: https://github.com/themoretheless/tokenizer/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/themoretheless/tokenizer/releases/tag/v0.1.0
+
+[0.8.0]: https://github.com/themoretheless/tokenizer/compare/v0.7.0...v0.8.0

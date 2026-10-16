@@ -1,23 +1,30 @@
 @top Document { (Component | Attribute | Design | Node)* }
 @skip { space | LineComment | BlockComment }
-@precedence { call, typed, member @left, prefix, multiply @left, add @left, compare @left, equal @left, and @left, or @left, nullish @left, conditional @right }
+@precedence { call, typed, member @left, prefix, multiply @left, add @left, compare @left, equal @left, and @left, or @left, pipe @left, nullish @left, conditional @right }
 
 Component { component ComponentName (":" ComponentName)? Block }
 Design { design ComponentName "{" (DesignOverride | DesignState)* "}" }
 DesignOverride { TypeName Block }
 DesignState { state String Block }
 Attribute { "#[" AttributeName Arguments? "]" }
-Block { "{" (Node | If | For | Property | Attribute | Override | PropDeclaration | EventDeclaration | EnumDeclaration | Forward | GroupMatch)* "}" }
+Block { "{" (Node | If | For | Property | Attribute | Override | PropDeclaration | LetDeclaration | EventDeclaration | EnumDeclaration | StructDeclaration | TokensDeclaration | SlotDeclaration | SlotFill | ShortcutDeclaration | Forward | GroupMatch)* "}" }
 Override { override (PropertyName | String) (Block ";"? | ":" Value+ ";" | from String (Block ";"? | ";")) }
 PropDeclaration { required? prop PropertyName ":" TypeReference ("=" Value+)? ";" }
+LetDeclaration { let PropertyName "=" Value+ ";" }
 EventDeclaration { event PropertyName "(" (Parameter ("," Parameter)* ","?)? ")" ";" }
 Parameter { PropertyName ":" TypeReference }
-TypeReference { TypeName "?"? }
+TypeReference { TypeName ("<" TypeReference ">")? "?"? }
 EnumDeclaration { enum TypeName "{" (TypeName ("," TypeName)* ","?)? "}" ";"? }
+StructDeclaration { struct TypeName "{" (StructField (("," | ";") StructField)* ("," | ";")?)? "}" ";"? }
+StructField { PropertyName ":" TypeReference }
+TokensDeclaration { tokens (PropertyName | TypeName)? "{" (PropertyName ":" Value+ ";")* "}" ";"? }
+SlotDeclaration { slot PropertyName (ChildBlock ";"? | ";") }
+SlotFill { "@" PropertyName ChildBlock ";"? }
+ShortcutDeclaration { shortcut String EventArrow Call ";" }
 Forward { forward props "{" (PropertyName ("," PropertyName)* ","?)? "}" ";" }
 Node { TypeName Block }
 If { if Value ChildBlock (else (If | ChildBlock))? }
-For { for PropertyName in Value key Value ChildBlock (empty ChildBlock)? }
+For { for PropertyName ("," PropertyName)? in Value (key Value)? ChildBlock (empty ChildBlock)? }
 ChildBlock { "{" (Node | If | For)* "}" }
 Property { PropertyName (":" Value+ | Binding Path | EventArrow Call) ";" }
 Value {
@@ -29,10 +36,11 @@ UnaryExpression { ("!" | "+" | Dash) !prefix Value }
 BinaryExpression {
   Value !multiply (Star | "/" | "%") Value |
   Value !add ("+" | Dash) Value |
-  Value !compare Comparison Value |
+  Value !compare (Comparison | RangeOp) Value |
   Value !equal Equality Value |
   Value !and "&&" Value |
   Value !or "||" Value |
+  Value !pipe PipeOp (Call | Path) |
   Value !nullish "??" Value
 }
 ConditionalExpression { Value !conditional "?" Value ":" Value }
@@ -59,9 +67,14 @@ match { @specialize<Identifier, "match"> }
 override { @specialize<Identifier, "override"> }
 from { @specialize<Identifier, "from"> }
 prop { @specialize<Identifier, "prop"> }
+let { @specialize<Identifier, "let"> }
 required { @specialize<Identifier, "required"> }
 event { @specialize<Identifier, "event"> }
 enum { @specialize<Identifier, "enum"> }
+struct { @specialize<Identifier, "struct"> }
+tokens { @extend<Identifier, "tokens"> }
+slot { @extend<Identifier, "slot"> }
+shortcut { @specialize<Identifier, "shortcut"> }
 forward { @specialize<Identifier, "forward"> }
 props { @specialize<Identifier, "props"> }
 if { @specialize<Identifier, "if"> }
@@ -81,16 +94,19 @@ Wildcard { @specialize<Identifier, "_"> }
   space { $[ \t\n\r]+ }
   LineComment { "//" ![\n]* }
   BlockComment { "/*" (![*] | "*" ![/])* "*/" }
-  Number { $[0-9]+ ("." $[0-9]+)? ("px" | "ms" | "deg" | "%" | "fr" | "*")? }
+  Number { $[0-9]+ ("." $[0-9]+)? ("px" | "ms" | "s" | "deg" | "%" | "fr" | "*")? }
   Color { "#" $[0-9a-fA-F]+ }
   TypeName { $[A-Z] $[a-zA-Z0-9_.]* }
   Identifier { $[a-z_] $[a-zA-Z0-9_.]* }
   Binding { "<->" }
   EventArrow { "->" }
   MatchArrow { "=>" }
+  RangeOp { "..=" | ".." }
+  PipeOp { "|>" }
   Comparison { "<=" | ">=" | "<" | ">" }
   Equality { "==" | "!=" | "===" | "!==" }
   Star { "*" }
   Dash { "-" }
   @precedence { LineComment, BlockComment, "/" }
+  @precedence { RangeOp, Number }
 }

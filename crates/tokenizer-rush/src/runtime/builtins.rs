@@ -1,12 +1,203 @@
 //! Shared builtin catalog, O(1) name lookup, and pure builtin evaluation for AST and Bytecode VM.
 use crate::runtime::ops::{check_vector_finite, format_value_for_display, is_truthy};
-use crate::{Builtin, Value};
-use std::collections::BTreeMap;
+use crate::{RecordMap, Value};
 use std::rc::Rc;
+
+/// Pure collection operations available in the initial environment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Builtin {
+    Int,
+    Float,
+    BitAnd,
+    BitOr,
+    BitXor,
+    BitNot,
+    Shl,
+    Shr,
+    Degrees,
+    Radians,
+    Some,
+    None,
+    Ok,
+    Err,
+    Promote,
+    Random,
+    Noise,
+    GridMesh,
+    Mesh,
+    Transform,
+    Slerp,
+    AxisAngle,
+    RotationMatrix,
+    Zip,
+    Identity,
+    Translation,
+    Scaling,
+    RotationX,
+    RotationY,
+    RotationZ,
+    TransformPoint,
+    TransformDirection,
+    Polygon,
+    Translate,
+    Rotate,
+    Range,
+    RangeIter,
+    Iter,
+    Collect,
+    Cross,
+    Lerp,
+    Clamp,
+    Smoothstep,
+    Vec2,
+    Vec3,
+    Vec4,
+    Dot,
+    Length,
+    Normalize,
+    Sin,
+    Cos,
+    Sqrt,
+    Deg,
+    Map,
+    FlatMap,
+    Assert,
+    Len,
+    Get,
+    Any,
+    All,
+    Filter,
+    Fold,
+    GroupBy,
+    FoldBy,
+    Arena,
+    ArenaRun,
+    ArenaStats,
+    JsonParse,
+    JsonStringify,
+    Trim,
+    TrimStart,
+    TrimEnd,
+    Split,
+    Join,
+    StartsWith,
+    EndsWith,
+    Contains,
+    Replace,
+    ToLower,
+    ToUpper,
+}
+
+impl Builtin {
+    /// Callback argument index and number of values supplied per invocation.
+    pub fn callback_arities(self) -> &'static [(usize, usize)] {
+        match self {
+            Self::Map | Self::Filter | Self::FlatMap | Self::Any | Self::All | Self::GroupBy => {
+                &[(1, 1)]
+            }
+            Self::Fold => &[(2, 2)],
+            Self::FoldBy => &[(1, 1), (3, 2)],
+            Self::GridMesh => &[(2, 2)],
+            Self::ArenaRun => &[(1, 0)],
+            _ => &[],
+        }
+    }
+
+    /// Inclusive accepted argument-count range, shared by runtime and analysis.
+    pub fn arity(self) -> std::ops::RangeInclusive<usize> {
+        let (min, max) = match self {
+            Self::None | Self::Identity => (0, 0),
+            Self::Int
+            | Self::Float
+            | Self::BitNot
+            | Self::Degrees
+            | Self::Iter
+            | Self::Len
+            | Self::Promote
+            | Self::Radians
+            | Self::Some
+            | Self::Ok
+            | Self::Err
+            | Self::RotationMatrix
+            | Self::Translation
+            | Self::Scaling
+            | Self::RotationX
+            | Self::RotationY
+            | Self::RotationZ
+            | Self::Polygon
+            | Self::Length
+            | Self::Normalize
+            | Self::Sin
+            | Self::Cos
+            | Self::Sqrt
+            | Self::JsonParse
+            | Self::JsonStringify
+            | Self::Deg
+            | Self::Trim
+            | Self::TrimStart
+            | Self::TrimEnd
+            | Self::ToLower
+            | Self::ToUpper => (1, 1),
+            Self::Range | Self::RangeIter => (2, 3),
+            Self::Assert | Self::Arena => (1, 2),
+            Self::ArenaStats => (1, 1),
+            Self::ArenaRun => (2, 2),
+            Self::GridMesh
+            | Self::Slerp
+            | Self::Lerp
+            | Self::Clamp
+            | Self::Smoothstep
+            | Self::Vec3
+            | Self::Replace
+            | Self::Fold => (3, 3),
+            Self::Vec4 | Self::FoldBy => (4, 4),
+            Self::BitAnd
+            | Self::BitOr
+            | Self::BitXor
+            | Self::Shl
+            | Self::Shr
+            | Self::Random
+            | Self::Collect
+            | Self::Any
+            | Self::All
+            | Self::Get
+            | Self::Mesh
+            | Self::Noise
+            | Self::Transform
+            | Self::AxisAngle
+            | Self::Zip
+            | Self::TransformPoint
+            | Self::TransformDirection
+            | Self::Translate
+            | Self::Rotate
+            | Self::Cross
+            | Self::Vec2
+            | Self::Dot
+            | Self::Map
+            | Self::GroupBy
+            | Self::FlatMap
+            | Self::Split
+            | Self::Join
+            | Self::StartsWith
+            | Self::EndsWith
+            | Self::Contains
+            | Self::Filter => (2, 2),
+        };
+        min..=max
+    }
+}
 
 /// The runtime registration table, shared with editor name validation.
 pub fn builtin_catalog() -> &'static [(&'static str, Builtin)] {
     &[
+        ("int", Builtin::Int),
+        ("float", Builtin::Float),
+        ("bit_and", Builtin::BitAnd),
+        ("bit_or", Builtin::BitOr),
+        ("bit_xor", Builtin::BitXor),
+        ("bit_not", Builtin::BitNot),
+        ("shl", Builtin::Shl),
+        ("shr", Builtin::Shr),
         ("assert", Builtin::Assert),
         ("json_parse", Builtin::JsonParse),
         ("json_stringify", Builtin::JsonStringify),
@@ -86,6 +277,14 @@ pub fn builtin_catalog() -> &'static [(&'static str, Builtin)] {
 #[inline]
 pub fn lookup_builtin(name: &str) -> Option<Builtin> {
     Some(match name {
+        "int" => Builtin::Int,
+        "float" => Builtin::Float,
+        "bit_and" => Builtin::BitAnd,
+        "bit_or" => Builtin::BitOr,
+        "bit_xor" => Builtin::BitXor,
+        "bit_not" => Builtin::BitNot,
+        "shl" => Builtin::Shl,
+        "shr" => Builtin::Shr,
         "assert" => Builtin::Assert,
         "json_parse" => Builtin::JsonParse,
         "json_stringify" => Builtin::JsonStringify,
@@ -167,67 +366,114 @@ pub(crate) fn eval_math_builtin<'s>(
     builtin: Builtin,
     arguments: &[Value<'s>],
 ) -> Result<Value<'s>, &'static str> {
+    match (builtin, arguments) {
+        (Builtin::Int, [arg]) => {
+            return match arg {
+                Value::Int(i) => Ok(Value::Int(*i)),
+                Value::Number(n)
+                    if n.is_finite()
+                        && *n >= (i64::MIN as f64)
+                        && *n < 9_223_372_036_854_775_808.0 =>
+                {
+                    Ok(Value::Int(*n as i64))
+                }
+                Value::Number(_) => Err("Cannot convert non-finite or out-of-range number to int"),
+                Value::Bool(b) => Ok(Value::Int(i64::from(*b))),
+                Value::String(s) => crate::runtime::parse_signed_int_str(s)
+                    .map(Value::Int)
+                    .ok_or("Invalid integer string"),
+                _ => Err("int requires an int, number, bool or string"),
+            };
+        }
+        (Builtin::Float, [arg]) => {
+            return match arg {
+                Value::Number(n) => {
+                    if n.is_finite() {
+                        Ok(Value::Number(*n))
+                    } else {
+                        Err("Non-finite mathematical result")
+                    }
+                }
+                Value::Int(i) => Ok(Value::Number(*i as f64)),
+                Value::Bool(b) => Ok(Value::Number(if *b { 1.0 } else { 0.0 })),
+                Value::String(s) => crate::runtime::parse_f64_literal(s.trim())
+                    .map(Value::Number)
+                    .ok_or("Invalid float string"),
+                _ => Err("float requires an int, number, bool or string"),
+            };
+        }
+        (Builtin::BitNot, [arg]) => {
+            let Some(a) = arg.as_exact_i64() else {
+                return Err("Bitwise operations require integer operands");
+            };
+            return Ok(Value::Int(!a));
+        }
+        (
+            Builtin::BitAnd | Builtin::BitOr | Builtin::BitXor | Builtin::Shl | Builtin::Shr,
+            [left, right],
+        ) => {
+            let (Some(a), Some(b)) = (left.as_exact_i64(), right.as_exact_i64()) else {
+                return Err("Bitwise operations require integer operands");
+            };
+            return match builtin {
+                Builtin::BitAnd => Ok(Value::Int(a & b)),
+                Builtin::BitOr => Ok(Value::Int(a | b)),
+                Builtin::BitXor => Ok(Value::Int(a ^ b)),
+                Builtin::Shl => u32::try_from(b)
+                    .ok()
+                    .and_then(|s| a.checked_shl(s))
+                    .map(Value::Int)
+                    .ok_or("Invalid shift count"),
+                Builtin::Shr => u32::try_from(b)
+                    .ok()
+                    .and_then(|s| a.checked_shr(s))
+                    .map(Value::Int)
+                    .ok_or("Invalid shift count"),
+                _ => unreachable!(),
+            };
+        }
+        _ => {}
+    }
+
     if matches!(builtin, Builtin::Vec2 | Builtin::Vec3 | Builtin::Vec4) {
-        return match (builtin, arguments) {
-            (Builtin::Vec2, [Value::Number(x), Value::Number(y)]) => {
-                if x.is_finite() && y.is_finite() {
-                    Ok(Value::Vector(vec![*x, *y]))
-                } else {
-                    Err("Non-finite vector result")
-                }
-            }
-            (Builtin::Vec3, [Value::Number(x), Value::Number(y), Value::Number(z)]) => {
-                if x.is_finite() && y.is_finite() && z.is_finite() {
-                    Ok(Value::Vector(vec![*x, *y, *z]))
-                } else {
-                    Err("Non-finite vector result")
-                }
-            }
-            (
-                Builtin::Vec4,
-                [
-                    Value::Number(x),
-                    Value::Number(y),
-                    Value::Number(z),
-                    Value::Number(w),
-                ],
-            ) => {
-                if x.is_finite() && y.is_finite() && z.is_finite() && w.is_finite() {
-                    Ok(Value::Vector(vec![*x, *y, *z, *w]))
-                } else {
-                    Err("Non-finite vector result")
-                }
-            }
-            _ => {
-                let dimension = match builtin {
-                    Builtin::Vec2 => 2,
-                    Builtin::Vec3 => 3,
-                    _ => 4,
-                };
-                if arguments.len() != dimension {
-                    Err("Incorrect vector dimension")
-                } else {
-                    Err("Vector components must be numbers")
-                }
-            }
+        let dimension = match builtin {
+            Builtin::Vec2 => 2,
+            Builtin::Vec3 => 3,
+            _ => 4,
         };
+        if arguments.len() != dimension {
+            return Err("Incorrect vector dimension");
+        }
+        let mut comps = crate::InlineVec::new();
+        for arg in arguments {
+            let Some(v) = arg.as_f64() else {
+                return Err("Vector components must be numbers");
+            };
+            if !v.is_finite() {
+                return Err("Non-finite vector result");
+            }
+            comps.push(v);
+        }
+        return Ok(Value::Vector(comps));
     }
 
     match (builtin, arguments) {
-        (Builtin::Slerp, [Value::Quaternion(a), Value::Quaternion(b), Value::Number(t)]) => {
+        (Builtin::Slerp, [Value::Quaternion(a), Value::Quaternion(b), t])
+            if t.as_f64().is_some() =>
+        {
             return a
-                .slerp(b, *t)
+                .slerp(b, t.as_f64().unwrap())
                 .map(|q| Value::Quaternion(Box::new(q)))
                 .ok_or("slerp requires a finite fraction between 0 and 1");
         }
-        (
-            Builtin::AxisAngle,
-            [
-                Value::Vector(axis),
-                Value::Number(angle) | Value::Angle(angle),
-            ],
-        ) if axis.len() == 3 => {
-            return crate::Quaternion::axis_angle([axis[0], axis[1], axis[2]], *angle)
+        (Builtin::AxisAngle, [Value::Vector(axis), angle]) if axis.len() == 3 => {
+            let Some(rad) = (match angle {
+                Value::Angle(a) => Some(*a),
+                other => other.as_f64(),
+            }) else {
+                return Err("Invalid mathematical arguments");
+            };
+            return crate::Quaternion::axis_angle([axis[0], axis[1], axis[2]], rad)
                 .map(|q| Value::Quaternion(Box::new(q)))
                 .ok_or("Rotation requires a finite nonzero axis and angle");
         }
@@ -250,10 +496,14 @@ pub(crate) fn eval_math_builtin<'s>(
         }
         (
             Builtin::RotationX | Builtin::RotationY | Builtin::RotationZ,
-            [Value::Number(angle) | Value::Angle(angle)],
+            [angle @ (Value::Number(_) | Value::Int(_) | Value::Angle(_))],
         ) => {
+            let rad = match angle {
+                Value::Angle(a) => *a,
+                other => other.as_f64().unwrap(),
+            };
             let mut matrix = crate::Matrix4::identity();
-            let (sin, cos) = angle.sin_cos();
+            let (sin, cos) = rad.sin_cos();
             let (a, b) = match builtin {
                 Builtin::RotationX => (1, 2),
                 Builtin::RotationY => (2, 0),
@@ -277,11 +527,13 @@ pub(crate) fn eval_math_builtin<'s>(
         _ => {}
     }
 
-    if let (Builtin::Degrees | Builtin::Radians, [Value::Number(value)]) = (builtin, arguments) {
+    if let (Builtin::Degrees | Builtin::Radians, [val]) = (builtin, arguments)
+        && let Some(value) = val.as_f64()
+    {
         let radians = if builtin == Builtin::Degrees {
             value.to_radians()
         } else {
-            *value
+            value
         };
         if !radians.is_finite() {
             return Err("Non-finite angle");
@@ -312,35 +564,51 @@ pub(crate) fn eval_math_builtin<'s>(
             Builtin::Rotate,
             [
                 Value::Polygon(polygon),
-                Value::Number(angle) | Value::Angle(angle),
+                angle @ (Value::Number(_) | Value::Int(_) | Value::Angle(_)),
             ],
-        ) => Some(polygon.rotated(*angle)),
+        ) => {
+            let rad = match angle {
+                Value::Angle(a) => *a,
+                other => other.as_f64().unwrap(),
+            };
+            Some(polygon.rotated(rad))
+        }
         _ => None,
     };
     if let Some(shape) = shape {
         return shape.map(Value::Polygon);
     }
 
+    if let (Builtin::Clamp, [Value::Int(x), Value::Int(low), Value::Int(high)]) =
+        (builtin, arguments)
+        && low <= high
+    {
+        return Ok(Value::Int((*x).clamp(*low, *high)));
+    }
+
     let number = match (builtin, arguments) {
-        (Builtin::Random, [Value::Number(seed), Value::Number(index)]) => {
-            crate::noise::random(*seed, *index)
+        (Builtin::Random, [seed, index]) if seed.as_f64().is_some() && index.as_f64().is_some() => {
+            crate::noise::random(seed.as_f64().unwrap(), index.as_f64().unwrap())
                 .ok_or("random requires nonnegative exact integer seed and index")?
         }
-        (Builtin::Noise, [Value::Number(x), Value::Number(seed)]) => crate::noise::noise(*x, *seed)
-            .ok_or("noise requires a bounded coordinate and nonnegative exact integer seed")?,
+        (Builtin::Noise, [x, seed]) if x.as_f64().is_some() && seed.as_f64().is_some() => {
+            crate::noise::noise(x.as_f64().unwrap(), seed.as_f64().unwrap())
+                .ok_or("noise requires a bounded coordinate and nonnegative exact integer seed")?
+        }
         (Builtin::Cross, [Value::Vector(a), Value::Vector(b)]) if a.len() == 3 && b.len() == 3 => {
             let x = a[1] * b[2] - a[2] * b[1];
             let y = a[2] * b[0] - a[0] * b[2];
             let z = a[0] * b[1] - a[1] * b[0];
             return if x.is_finite() && y.is_finite() && z.is_finite() {
-                Ok(Value::Vector(vec![x, y, z]))
+                Ok(Value::Vector(crate::InlineVec::vec3(x, y, z)))
             } else {
                 Err("Non-finite vector result")
             };
         }
-        (Builtin::Lerp, [Value::Vector(a), Value::Vector(b), Value::Number(t)])
-            if a.len() == b.len() =>
+        (Builtin::Lerp, [Value::Vector(a), Value::Vector(b), t])
+            if a.len() == b.len() && t.as_f64().is_some() =>
         {
+            let t = t.as_f64().unwrap();
             return check_vector_finite(
                 a.iter()
                     .zip(b)
@@ -348,17 +616,37 @@ pub(crate) fn eval_math_builtin<'s>(
                     .collect(),
             );
         }
-        (Builtin::Lerp, [Value::Number(a), Value::Number(b), Value::Number(t)]) => {
+        (Builtin::Lerp, [a, b, t])
+            if a.as_f64().is_some() && b.as_f64().is_some() && t.as_f64().is_some() =>
+        {
+            let (a, b, t) = (
+                a.as_f64().unwrap(),
+                b.as_f64().unwrap(),
+                t.as_f64().unwrap(),
+            );
             a * (1.0 - t) + b * t
         }
-        (Builtin::Clamp, [Value::Number(x), Value::Number(low), Value::Number(high)])
-            if low <= high =>
+        (Builtin::Clamp, [x, low, high])
+            if x.as_f64().is_some()
+                && low.as_f64().is_some()
+                && high.as_f64().is_some()
+                && low.as_f64().unwrap() <= high.as_f64().unwrap() =>
         {
-            x.clamp(*low, *high)
+            x.as_f64()
+                .unwrap()
+                .clamp(low.as_f64().unwrap(), high.as_f64().unwrap())
         }
-        (Builtin::Smoothstep, [Value::Number(low), Value::Number(high), Value::Number(x)])
-            if low < high =>
+        (Builtin::Smoothstep, [low, high, x])
+            if low.as_f64().is_some()
+                && high.as_f64().is_some()
+                && x.as_f64().is_some()
+                && low.as_f64().unwrap() < high.as_f64().unwrap() =>
         {
+            let (low, high, x) = (
+                low.as_f64().unwrap(),
+                high.as_f64().unwrap(),
+                x.as_f64().unwrap(),
+            );
             let t = if x <= low {
                 0.0
             } else if x >= high {
@@ -393,9 +681,13 @@ pub(crate) fn eval_math_builtin<'s>(
             v.iter().fold(0.0_f64, |length, x| length.hypot(*x))
         }
         (Builtin::Sin, [Value::Number(x) | Value::Angle(x)]) => x.sin(),
+        (Builtin::Sin, [Value::Int(x)]) => (*x as f64).sin(),
         (Builtin::Cos, [Value::Number(x) | Value::Angle(x)]) => x.cos(),
+        (Builtin::Cos, [Value::Int(x)]) => (*x as f64).cos(),
         (Builtin::Sqrt, [Value::Number(x)]) => x.sqrt(),
+        (Builtin::Sqrt, [Value::Int(x)]) => (*x as f64).sqrt(),
         (Builtin::Deg, [Value::Number(x)]) => x.to_radians(),
+        (Builtin::Deg, [Value::Int(x)]) => (*x as f64).to_radians(),
         _ => return Err("Invalid mathematical arguments"),
     };
     if number.is_finite() {
@@ -471,7 +763,11 @@ pub(crate) fn eval_pure_builtin<'s>(
                 (Value::String(s), Value::String(needle)) => {
                     Ok(Value::Bool(s.contains(needle.as_str())))
                 }
-                (Value::List(items), needle) => Ok(Value::Bool(items.contains(needle))),
+                (Value::List(items), needle) => {
+                    Ok(Value::Bool(items.iter().any(|item| {
+                        crate::runtime::ops::values_equal(item, needle)
+                    })))
+                }
                 (Value::Record(fields), Value::String(k)) => {
                     Ok(Value::Bool(fields.contains_key(k)))
                 }
@@ -537,16 +833,18 @@ pub(crate) fn eval_pure_builtin<'s>(
             }
             let value = match (&args[0], &args[1]) {
                 (Value::Record(fields), Value::String(key)) => fields.get(key).cloned(),
-                (Value::List(items) | Value::Tuple(items), Value::Number(index)) => {
-                    if !index.is_finite() || index.fract() != 0.0 || *index < 0.0 {
-                        return Err("Collection index must be a non-negative integer".into());
+                (
+                    Value::List(items) | Value::Tuple(items),
+                    index @ (Value::Number(_) | Value::Int(_)),
+                ) => match index {
+                    Value::Int(i) if *i >= 0 => items.get(*i as usize).cloned(),
+                    Value::Number(n) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 => {
+                        usize::try_from(*n as u128)
+                            .ok()
+                            .and_then(|idx| items.get(idx).cloned())
                     }
-                    if *index >= items.len() as f64 {
-                        None
-                    } else {
-                        items.get(*index as usize).cloned()
-                    }
-                }
+                    _ => return Err("Collection index must be a non-negative integer".into()),
+                },
                 _ => {
                     return Err(
                         "get requires a record and string key, or list/tuple and integer index"
@@ -608,12 +906,10 @@ pub(crate) fn eval_pure_builtin<'s>(
             }
             let budget = match args.get(1) {
                 None | Some(Value::Null) => Value::Null,
-                Some(Value::Number(v)) if v.is_finite() && v.fract() == 0.0 && *v >= 0.0 => {
-                    Value::Number(*v)
-                }
+                Some(v) if v.as_usize_index().is_some() => v.clone(),
                 _ => return Err("arena budget must be a non-negative integer".into()),
             };
-            Ok(Value::Record(BTreeMap::from([
+            Ok(Value::Record(RecordMap::from([
                 ("name".into(), Value::String(name.clone())),
                 ("budget".into(), budget),
             ])))
@@ -654,17 +950,13 @@ pub(crate) fn eval_pure_builtin<'s>(
                 }
                 let mut triangle = [0; 3];
                 for (slot, index) in triangle.iter_mut().zip(indices) {
-                    let Value::Number(index) = index else {
+                    if !matches!(index, Value::Number(_) | Value::Int(_)) {
                         return Err("Mesh index must be an integer".into());
-                    };
-                    if !index.is_finite()
-                        || index.fract() != 0.0
-                        || *index < 0.0
-                        || *index >= vertices.len() as f64
-                    {
-                        return Err("Mesh index out of bounds or non-integer".into());
                     }
-                    *slot = *index as usize;
+                    let Some(idx) = index.as_usize_index().filter(|&i| i < vertices.len()) else {
+                        return Err("Mesh index out of bounds or non-integer".into());
+                    };
+                    *slot = idx;
                 }
                 triangles.push(triangle);
             }

@@ -215,7 +215,12 @@ where
             let count = args.len();
             let valid = match name {
                 "min" | "max" => count >= 1,
-                "clamp" => count == 3,
+                "clamp" | "replace" => count == 3,
+                "contains" | "startsWith" | "endsWith" | "split" | "take" | "skip" | "range" => {
+                    count == 2
+                }
+                "slice" => count == 2 || count == 3,
+                "join" | "formatNumber" => count == 1 || count == 2,
                 _ => count == 1,
             };
             if !valid {
@@ -275,6 +280,144 @@ where
                         _ => n.ceil(),
                     })
                 }
+                "trim" => {
+                    let s = args[0].as_str().ok_or("trim ожидает строку")?;
+                    Ok(json!(s.trim()))
+                }
+                "upper" => {
+                    let s = args[0].as_str().ok_or("upper ожидает строку")?;
+                    Ok(json!(s.to_uppercase()))
+                }
+                "lower" => {
+                    let s = args[0].as_str().ok_or("lower ожидает строку")?;
+                    Ok(json!(s.to_lowercase()))
+                }
+                "contains" => {
+                    if let Some(s) = args[0].as_str() {
+                        let sub = args[1].as_str().ok_or("contains ожидает подстроку")?;
+                        Ok(json!(s.contains(sub)))
+                    } else if let Some(a) = args[0].as_array() {
+                        Ok(json!(a.iter().any(|x| equal(x, &args[1]))))
+                    } else {
+                        Err("contains ожидает строку или массив".into())
+                    }
+                }
+                "startsWith" => {
+                    let s = args[0].as_str().ok_or("startsWith ожидает строку")?;
+                    let p = args[1]
+                        .as_str()
+                        .ok_or("startsWith ожидает префикс-строку")?;
+                    Ok(json!(s.starts_with(p)))
+                }
+                "endsWith" => {
+                    let s = args[0].as_str().ok_or("endsWith ожидает строку")?;
+                    let sfx = args[1].as_str().ok_or("endsWith ожидает суффикс-строку")?;
+                    Ok(json!(s.ends_with(sfx)))
+                }
+                "replace" => {
+                    let s = args[0].as_str().ok_or("replace ожидает строку")?;
+                    let from = args[1]
+                        .as_str()
+                        .ok_or("replace ожидает искомую подстроку")?;
+                    let to = args[2].as_str().ok_or("replace ожидает строку замены")?;
+                    Ok(json!(s.replace(from, to)))
+                }
+                "slice" => {
+                    let start = number(&args[1])? as isize;
+                    let end = if count == 3 {
+                        Some(number(&args[2])? as isize)
+                    } else {
+                        None
+                    };
+                    let norm = |idx: isize, len: usize| -> usize {
+                        if idx < 0 {
+                            len.saturating_sub(idx.unsigned_abs())
+                        } else {
+                            (idx as usize).min(len)
+                        }
+                    };
+                    if let Some(s) = args[0].as_str() {
+                        let chars: Vec<char> = s.chars().collect();
+                        let len = chars.len();
+                        let st = norm(start, len);
+                        let en = norm(end.unwrap_or(len as isize), len).max(st);
+                        Ok(json!(chars[st..en].iter().collect::<String>()))
+                    } else if let Some(a) = args[0].as_array() {
+                        let len = a.len();
+                        let st = norm(start, len);
+                        let en = norm(end.unwrap_or(len as isize), len).max(st);
+                        Ok(json!(a[st..en].to_vec()))
+                    } else {
+                        Err("slice ожидает строку или массив".into())
+                    }
+                }
+                "split" => {
+                    let s = args[0].as_str().ok_or("split ожидает строку")?;
+                    let sep = args[1].as_str().ok_or("split ожидает разделитель-строку")?;
+                    Ok(json!(s.split(sep).collect::<Vec<_>>()))
+                }
+                "join" => {
+                    let a = args[0].as_array().ok_or("join ожидает массив")?;
+                    let sep = if count == 2 {
+                        args[1].as_str().ok_or("join ожидает разделитель-строку")?
+                    } else {
+                        ", "
+                    };
+                    let mut parts = Vec::with_capacity(a.len());
+                    for item in a {
+                        parts.push(text(item)?);
+                    }
+                    Ok(json!(parts.join(sep)))
+                }
+                "reverse" => {
+                    if let Some(a) = args[0].as_array() {
+                        let mut v = a.clone();
+                        v.reverse();
+                        Ok(V::Array(v))
+                    } else if let Some(s) = args[0].as_str() {
+                        Ok(json!(s.chars().rev().collect::<String>()))
+                    } else {
+                        Err("reverse ожидает массив или строку".into())
+                    }
+                }
+                "take" => {
+                    let a = args[0].as_array().ok_or("take ожидает массив")?;
+                    let n = number(&args[1])?.max(0.) as usize;
+                    Ok(V::Array(a.iter().take(n).cloned().collect()))
+                }
+                "skip" => {
+                    let a = args[0].as_array().ok_or("skip ожидает массив")?;
+                    let n = number(&args[1])?.max(0.) as usize;
+                    Ok(V::Array(a.iter().skip(n).cloned().collect()))
+                }
+                "sum" => {
+                    let a = args[0].as_array().ok_or("sum ожидает массив чисел")?;
+                    let mut total = 0.0;
+                    for item in a {
+                        total += number(item)?;
+                    }
+                    numeric(total)
+                }
+                "range" => {
+                    let st = number(&args[0])? as i64;
+                    let en = number(&args[1])? as i64;
+                    if en < st {
+                        return Ok(json!([]));
+                    }
+                    if en - st > 4096 {
+                        return Err("Превышен предел размера диапазона (макс. 4096)".into());
+                    }
+                    Ok(V::Array((st..en).map(|i| json!(i)).collect()))
+                }
+                "formatNumber" => {
+                    let n = number(&args[0])?;
+                    if count == 2 {
+                        let dec = (number(&args[1])?.max(0.) as usize).min(12);
+                        Ok(json!(format!("{n:.dec$}")))
+                    } else {
+                        text(&json!(n)).map(|s| json!(s))
+                    }
+                }
                 _ => Err(format!("Неизвестная чистая функция {name}")),
             }
         }
@@ -319,6 +462,24 @@ where
                         ">" => o.is_gt(),
                         _ => !o.is_lt(),
                     }))
+                }
+                ".." | "..=" => {
+                    let st = number(&a)? as i64;
+                    let en = number(&b)? as i64;
+                    let inclusive = op == "..=";
+                    let count = if inclusive { en - st + 1 } else { en - st };
+                    if count <= 0 {
+                        return Ok(json!([]));
+                    }
+                    if count > 4096 {
+                        return Err("Превышен предел размера диапазона (макс. 4096)".into());
+                    }
+                    let items: Vec<V> = if inclusive {
+                        (st..=en).map(|i| json!(i)).collect()
+                    } else {
+                        (st..en).map(|i| json!(i)).collect()
+                    };
+                    Ok(V::Array(items))
                 }
                 "+" if a.is_string() && b.is_string() => Ok(json!(format!(
                     "{}{}",

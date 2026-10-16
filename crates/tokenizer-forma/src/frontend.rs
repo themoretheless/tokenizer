@@ -106,7 +106,8 @@ pub fn tokenize(source: &str) -> R<Vec<Token>> {
         } else if c == '\'' || c == '"' {
             i = string_end(source, i, 0)?
         } else if let Some(op) = [
-            "<->", "===", "!==", "->", "=>", "==", "!=", "<=", ">=", "&&", "||", "??", "?.",
+            "<->", "===", "!==", "..=", "|>", "->", "=>", "==", "!=", "<=", ">=", "&&", "||", "??",
+            "?.", "..",
         ]
         .iter()
         .find(|op| source[i..].starts_with(**op))
@@ -129,6 +130,7 @@ pub fn tokenize(source: &str) -> R<Vec<Token>> {
             }
             if i + 1 < source.len()
                 && source.as_bytes()[i] == b'.'
+                && source.as_bytes()[i + 1] != b'.'
                 && source.as_bytes()[i + 1].is_ascii_digit()
             {
                 i += 1;
@@ -166,7 +168,7 @@ pub fn tokenize(source: &str) -> R<Vec<Token>> {
                     break;
                 }
             }
-        } else if "{}[]():;,!@#*+-/%<>=?.".contains(c) {
+        } else if "{}[]():;,!@#*+-/%<>=?.|".contains(c) {
             i += c.len_utf8()
         } else {
             return Err(Error {
@@ -228,6 +230,35 @@ fn name(s: &str) -> bool {
 fn path(s: &str) -> bool {
     s.split('.').all(name)
 }
+const PURE_FUNCTIONS: &[&str] = &[
+    "min",
+    "max",
+    "clamp",
+    "abs",
+    "round",
+    "floor",
+    "ceil",
+    "len",
+    "String",
+    "Number",
+    "Bool",
+    "trim",
+    "upper",
+    "lower",
+    "contains",
+    "startsWith",
+    "endsWith",
+    "replace",
+    "slice",
+    "split",
+    "join",
+    "reverse",
+    "take",
+    "skip",
+    "sum",
+    "range",
+    "formatNumber",
+];
 struct Parser<'a> {
     source: &'a str,
     tokens: Vec<Token>,
@@ -316,6 +347,12 @@ impl<'a> Parser<'a> {
         if !path(&s) {
             return self.err("Ожидалось имя типа");
         }
+        if self.peek() == "<" {
+            self.i += 1;
+            let inner = self.ty()?;
+            self.take(">")?;
+            s = format!("{s}<{inner}>");
+        }
         if self.peek() == "?" {
             self.i += 1;
             s.push('?')
@@ -362,6 +399,26 @@ impl<'a> Parser<'a> {
                 }
                 continue;
             }
+            if op == "|>" && min <= 1 {
+                self.i += 1;
+                let fn_name = self.take("")?;
+                if !PURE_FUNCTIONS.contains(&fn_name.as_str()) {
+                    return self.err(format!("Неизвестная чистая функция {fn_name}"));
+                }
+                let mut args = vec![left];
+                if self.peek() == "(" {
+                    self.take("(")?;
+                    while self.peek() != ")" {
+                        args.push(self.expression(0)?);
+                        if self.peek() != ")" {
+                            self.take(",")?;
+                        }
+                    }
+                    self.take(")")?;
+                }
+                left = json!({"expression":{"kind":"call","name":fn_name,"args":args}});
+                continue;
+            }
             if op == "?" && min == 0 {
                 self.i += 1;
                 let then = self.expression(0)?;
@@ -375,7 +432,7 @@ impl<'a> Parser<'a> {
                 "||" => 2,
                 "&&" => 3,
                 "==" | "!=" | "===" | "!==" => 4,
-                "<" | "<=" | ">" | ">=" => 5,
+                "<" | "<=" | ">" | ">=" | ".." | "..=" => 5,
                 "+" | "-" => 6,
                 "*" | "/" | "%" => 7,
                 _ => break,
@@ -488,12 +545,7 @@ impl<'a> Parser<'a> {
                         .join(", ")
                 )));
             }
-            if ![
-                "min", "max", "clamp", "abs", "round", "floor", "ceil", "len", "String", "Number",
-                "Bool",
-            ]
-            .contains(&token.as_str())
-            {
+            if !PURE_FUNCTIONS.contains(&token.as_str()) {
                 return self.err(format!("Неизвестная чистая функция {token}"));
             }
             return Ok(json!({"expression":{"kind":"call","name":token,"args":args}}));
@@ -623,18 +675,39 @@ impl<'a> Parser<'a> {
             }
         } else {
             let item = self.identifier("for")?;
-            if [
+            let reserved_names = [
                 "state", "props", "events", "actions", "base", "design", "viewport",
-            ]
-            .contains(&item.as_str())
-            {
+            ];
+            if reserved_names.contains(&item.as_str()) {
                 return self.err(format!("for: зарезервированное имя {item}"));
             }
             n["item"] = json!(item);
+            if self.peek() == "," {
+                self.i += 1;
+                let idx = self.identifier("for")?;
+                if reserved_names.contains(&idx.as_str()) || idx == n["item"].as_str().unwrap() {
+                    return self.err(format!("for: недопустимое имя индекса {idx}"));
+                }
+                n["index"] = json!(idx);
+            }
             self.take("in")?;
             n["collection"] = self.expression(0)?;
-            self.take("key")?;
-            n["key"] = self.expression(0)?;
+            if self.peek() == "key" {
+                self.take("key")?;
+                n["key"] = self.expression(0)?;
+            } else if (n["collection"]["expression"]["kind"] == "binary"
+                && ["..", "..="].contains(
+                    &n["collection"]["expression"]["operator"]
+                        .as_str()
+                        .unwrap_or(""),
+                ))
+                || (n["collection"]["expression"]["kind"] == "call"
+                    && n["collection"]["expression"]["name"] == "range")
+            {
+                n["key"] = json!({"expr":n["item"].as_str().unwrap()});
+            } else {
+                self.take("key")?;
+            }
             let (c, end) = self.children()?;
             n["children"] = c;
             n["end"] = json!(end);
@@ -657,6 +730,59 @@ impl<'a> Parser<'a> {
         let kind = self.take("")?;
         if required && kind != "prop" {
             return self.err("required применяется только к prop");
+        }
+        if kind == "shortcut" {
+            let combo = self.expression(0)?;
+            let Some(combo_str) = combo.as_str().filter(|s| !s.is_empty()) else {
+                return self.err("shortcut ожидает непустую строку комбинации клавиш");
+            };
+            self.take("->")?;
+            let action = self.take("")?;
+            if !path(&action)
+                || !["actions.", "events.", "state."]
+                    .iter()
+                    .any(|p| action.starts_with(p))
+            {
+                return self.err("Обработчик требует путь actions.…, events.… или state.…");
+            }
+            self.take("(")?;
+            let mut args = Vec::new();
+            while self.peek() != ")" {
+                args.push(self.expression(0)?);
+                if self.peek() != ")" {
+                    self.take(",")?;
+                }
+            }
+            self.take(")")?;
+            let end = self.pos() + 1;
+            self.take(";")?;
+            push(
+                n,
+                "shortcuts",
+                json!({"key":combo_str,"action":action,"args":args,"from":start,"to":end}),
+            );
+            return Ok(());
+        }
+        if kind == "tokens" {
+            if self.peek() != "{" {
+                let _ = self.identifier("tokens")?;
+            }
+            self.take("{")?;
+            while self.peek() != "}" {
+                let k = self.take("")?;
+                if !path(&k) {
+                    return self.err(format!("tokens: ожидалось имя токена, получено {k}"));
+                }
+                if has(&n["tokens"], &k) {
+                    return self.err(format!("Повторный токен {k}"));
+                }
+                self.take(":")?;
+                n["tokens"][&k] = self.sequence()?;
+                self.take(";")?;
+            }
+            self.take("}")?;
+            self.semi();
+            return Ok(());
         }
         let name = self.identifier(&kind)?;
         if kind == "enum" {
@@ -683,11 +809,78 @@ impl<'a> Parser<'a> {
             n["enums"][&name] = json!(a);
             return Ok(());
         }
-        if ["statementRanges", "propDefinitions", "eventDefinitions"]
-            .iter()
-            .any(|k| has(&n[k], &name))
+        if kind == "struct" {
+            if has(&n["structs"], &name) || has(&n["enums"], &name) {
+                return self.err(format!("Повторный тип {name}"));
+            }
+            self.take("{")?;
+            let mut fields = object();
+            while self.peek() != "}" {
+                let field_name = self.identifier("struct")?;
+                if has(&fields, &field_name) {
+                    return self.err(format!("Повторное поле {name}.{field_name}"));
+                }
+                self.take(":")?;
+                let field_ty = self.ty()?;
+                fields[&field_name] = json!(field_ty);
+                if self.peek() == "," || self.peek() == ";" {
+                    self.i += 1;
+                } else if self.peek() != "}" {
+                    self.take(",")?;
+                }
+            }
+            self.take("}")?;
+            self.semi();
+            if !nonempty(&fields) {
+                return self.err(format!("struct {name} требует поля"));
+            }
+            n["structs"][&name] = fields;
+            return Ok(());
+        }
+        if kind == "slot" {
+            let mut presenter = empty_node("ContentPresenter", start);
+            presenter["props"]["key"] = json!(name.clone());
+            if self.peek() == "{" {
+                let (c, end) = self.children()?;
+                presenter["children"] = c;
+                presenter["end"] = json!(end);
+                self.semi();
+            } else {
+                let end = self.pos() + 1;
+                self.take(";")?;
+                presenter["end"] = json!(end);
+            }
+            if n.get("slotDefinitions").is_some() {
+                n["slotDefinitions"][&name] = presenter.clone();
+            }
+            push(n, "children", presenter);
+            return Ok(());
+        }
+        if [
+            "statementRanges",
+            "propDefinitions",
+            "eventDefinitions",
+            "lets",
+        ]
+        .iter()
+        .any(|k| has(&n[k], &name))
         {
             return self.err(format!("Повторное свойство или событие {name}"));
+        }
+        if kind == "let" {
+            self.take("=")?;
+            let from = self.pos();
+            let val = self.sequence()?;
+            let to = self.end();
+            let end = self.pos() + 1;
+            self.take(";")?;
+            n["lets"][&name] = val.clone();
+            // Also expose as `props.<name>` for expressions that refer to `props.name` or bare `name`:
+            let prop_expr = rewrite_bare_props(&val, &n["lets"], &n["propDefinitions"]);
+            n["props"][&name] = prop_expr;
+            n["propertyRanges"][&name] = json!({"from":from,"to":to});
+            n["statementRanges"][&name] = json!({"from":start,"to":end});
+            return Ok(());
         }
         if kind == "prop" {
             self.take(":")?;
@@ -756,9 +949,18 @@ impl<'a> Parser<'a> {
         }
         let mut n = empty_node(&ty, start);
         if component {
-            for k in ["propDefinitions", "eventDefinitions", "enums"] {
+            for k in [
+                "propDefinitions",
+                "eventDefinitions",
+                "enums",
+                "structs",
+                "lets",
+                "tokens",
+                "slotDefinitions",
+            ] {
                 n[k] = object()
             }
+            n["shortcuts"] = array();
         }
         if self.peek() == ":" {
             self.i += 1;
@@ -767,12 +969,38 @@ impl<'a> Parser<'a> {
         self.take("{")?;
         while self.peek() != "}" {
             match self.peek() {
-                "required" | "prop" | "event" | "enum" => {
+                "required" | "prop" | "event" | "enum" | "let" | "struct" | "tokens"
+                | "shortcut" => {
                     if !component {
-                        return self
-                            .err("Объявления prop, event и enum разрешены только в component");
+                        return self.err(
+                            "Объявления prop, let, event, enum, struct, tokens и shortcut разрешены только в component",
+                        );
                     }
                     self.declaration(&mut n)?;
+                    continue;
+                }
+                "slot" if name(self.next()) && self.next() != ":" => {
+                    self.declaration(&mut n)?;
+                    continue;
+                }
+                "@" => {
+                    self.i += 1;
+                    let slot_name = self.identifier("slot")?;
+                    let (c, _) = self.children()?;
+                    let children = c.as_array().unwrap();
+                    let val = if children.len() == 1 {
+                        children[0].clone()
+                    } else {
+                        let mut frame = empty_node("Frame", start);
+                        frame["children"] = c;
+                        frame
+                    };
+                    if component {
+                        n["slots"][&slot_name] = val;
+                    } else {
+                        n["props"][&slot_name] = val;
+                    }
+                    self.semi();
                     continue;
                 }
                 "match" => {
@@ -897,6 +1125,12 @@ impl<'a> Parser<'a> {
         }
         n["end"] = json!(self.pos() + 1);
         self.take("}")?;
+        if component && nonempty(&n["lets"]) {
+            let lets = n["lets"].clone();
+            let prop_defs = n["propDefinitions"].clone();
+            n["children"] = rewrite_bare_props(&n["children"], &lets, &prop_defs);
+            n["matches"] = rewrite_bare_props(&n["matches"], &lets, &prop_defs);
+        }
         Ok(n)
     }
     fn design_entry(&mut self, overrides: &mut V, types: &mut V, nodes: &mut V) -> R<()> {
@@ -928,7 +1162,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
     fn document(&mut self, fragment: bool) -> R<V> {
-        let mut d = json!({"name":"Preview","nodes":[],"designs":[],"states":[],"entries":[],"designBody":null,"overrides":{},"overrideTypes":{},"defaults":{},"defaultRanges":{},"base":null,"slots":{},"propDefinitions":{},"eventDefinitions":{},"enums":{},"matches":[],"forward":[]});
+        let mut d = json!({"name":"Preview","nodes":[],"designs":[],"states":[],"entries":[],"designBody":null,"overrides":{},"overrideTypes":{},"defaults":{},"defaultRanges":{},"base":null,"slots":{},"propDefinitions":{},"eventDefinitions":{},"enums":{},"structs":{},"lets":{},"tokens":{},"slotDefinitions":{},"shortcuts":[],"matches":[],"forward":[]});
         while self.peek() == "#" {
             self.i += 1;
             self.take("[")?;
@@ -955,6 +1189,11 @@ impl<'a> Parser<'a> {
                 ("propDefinitions", "propDefinitions"),
                 ("eventDefinitions", "eventDefinitions"),
                 ("enums", "enums"),
+                ("structs", "structs"),
+                ("lets", "lets"),
+                ("tokens", "tokens"),
+                ("slotDefinitions", "slotDefinitions"),
+                ("shortcuts", "shortcuts"),
                 ("matches", "matches"),
                 ("forward", "forward"),
             ] {
@@ -1024,6 +1263,33 @@ impl<'a> Parser<'a> {
         check_keys(&d["nodes"], &mut HashSet::new())?;
         Ok(d)
     }
+}
+fn rewrite_bare_props(v: &V, lets: &V, props: &V) -> V {
+    if let Some(s) = v["expr"].as_str() {
+        let neg = s.starts_with('!');
+        let raw = if neg { &s[1..] } else { s };
+        let head = raw.split('.').next().unwrap_or("");
+        if has(lets, head) || (!raw.contains('.') && has(props, head)) {
+            let prefix = if neg { "!props." } else { "props." };
+            return json!({"expr": format!("{prefix}{raw}")});
+        }
+        return v.clone();
+    }
+    if let Some(a) = v.as_array() {
+        return V::Array(
+            a.iter()
+                .map(|x| rewrite_bare_props(x, lets, props))
+                .collect(),
+        );
+    }
+    if let Some(o) = v.as_object() {
+        let mut out = serde_json::Map::new();
+        for (k, val) in o {
+            out.insert(k.clone(), rewrite_bare_props(val, lets, props));
+        }
+        return V::Object(out);
+    }
+    v.clone()
 }
 fn check_keys(nodes: &V, keys: &mut HashSet<String>) -> R<()> {
     if let Some(nodes) = nodes.as_array() {

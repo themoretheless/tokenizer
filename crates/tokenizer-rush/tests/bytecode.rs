@@ -138,7 +138,7 @@ let parsed = json_parse(encoded)
             expected_record.insert("val".to_string(), Value::Number(123.0));
             assert_eq!(
                 items[1],
-                Value::Variant("Ok", vec![Value::Record(expected_record)])
+                Value::Variant("Ok", vec![Value::Record(expected_record.into())])
             );
         }
         other => panic!("Expected tuple, got {other:?}"),

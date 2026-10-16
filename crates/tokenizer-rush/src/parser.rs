@@ -719,7 +719,7 @@ impl<'s> Parser<'s> {
                 break;
             }
             let op = self.text();
-            if op == "?" && min_bp <= 20 {
+            if op == "?" && min_bp <= 22 {
                 let operator_span = self.span();
                 self.bump();
                 chain += 1;
@@ -736,7 +736,7 @@ impl<'s> Parser<'s> {
                 };
                 continue;
             }
-            if matches!(op, "(" | "[" | ".") && min_bp <= 20 {
+            if matches!(op, "(" | "[" | ".") && min_bp <= 22 {
                 chain += 1;
                 if self.eat("(") {
                     let arguments = self.arguments(")");
@@ -981,12 +981,12 @@ impl<'s> Parser<'s> {
         if text == "match" {
             return self.match_expr(multiline);
         }
-        if matches!(text, "-" | "+" | "!" | "not") {
+        if matches!(text, "-" | "+" | "!" | "not" | "~") {
             self.bump();
             let value = if !multiline && self.newline() {
                 self.required_expr(false)
             } else {
-                self.expr(13, multiline, false)
+                self.expr(19, multiline, false)
             };
             return Expr {
                 span: Span::new(span.start, value.span.end.max(span.end)),
@@ -1612,14 +1612,17 @@ fn offset_expr_spans(expr: &mut Expr<'_>, offset: usize) {
 
 pub(crate) fn binding(op: &str) -> Option<(u8, u8)> {
     Some(match op {
-        "=" | "+=" | "-=" | "*=" | "/=" | "%=" => (0, 0),
+        "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "<<=" | ">>=" | "&=" | "^=" => (0, 0),
         "|" => (1, 2),
         "or" | "||" => (3, 4),
         "and" | "&&" => (5, 6),
         "==" | "!=" | "<" | ">" | "<=" | ">=" => (7, 8),
-        "+" | "-" => (9, 10),
-        "*" | "/" | "%" => (11, 12),
-        "**" => (14, 14),
+        "^" => (9, 10),
+        "&" => (11, 12),
+        "<<" | ">>" => (13, 14),
+        "+" | "-" => (15, 16),
+        "*" | "/" | "%" => (17, 18),
+        "**" => (20, 20),
         _ => return None,
     })
 }

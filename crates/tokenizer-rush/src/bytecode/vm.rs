@@ -3,12 +3,16 @@
 use crate::bytecode::iterator::{
     BytecodeIterator, BytecodeSequence, BytecodeSequenceSource, BytecodeSequenceStage,
 };
-use crate::bytecode::opcode::{BytecodeClosure, BytecodeFunction, Chunk, Opcode, Upvalue};
+use crate::bytecode::opcode::{
+    BytecodeClosure, BytecodeFunction, Chunk, Opcode, PathTarget, Upvalue,
+};
 use crate::runtime::builtins::{eval_pure_builtin, lookup_builtin};
 use crate::runtime::ops::{
     eval_binary_values, eval_unary_value, format_value_for_display, is_truthy,
 };
-use crate::{Builtin, CancellationToken, ExecutionLimits, RuntimeError, UserData, Value};
+use crate::{
+    Builtin, CancellationToken, ExecutionLimits, RecordMap, RuntimeError, UserData, Value,
+};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
@@ -18,6 +22,7 @@ struct CallFrame {
     closure: Rc<BytecodeClosure>,
     ip: usize,
     stack_base: usize,
+    coerce_int: bool,
 }
 
 /// The flat stack Bytecode Virtual Machine runtime.
@@ -80,6 +85,27 @@ impl<'c> Vm<'c> {
     }
 
     #[inline]
+    fn coerce_int_in_place(
+        &self,
+        slot: &mut Value<'static>,
+        span: Span,
+    ) -> Result<(), RuntimeError> {
+        if let Some(i) = slot.as_exact_i64() {
+            *slot = Value::Int(i);
+            Ok(())
+        } else if let Value::List(items) = slot {
+            for item in items.iter_mut() {
+                if let Some(i) = item.as_exact_i64() {
+                    *item = Value::Int(i);
+                }
+            }
+            Ok(())
+        } else {
+            Err(self.error(span, "Binding value does not match its type annotation"))
+        }
+    }
+
+    #[inline]
     fn unwind_frame(&mut self, exiting: CallFrame) {
         if !self.open_upvalues.is_empty() {
             self.close_upvalues(exiting.stack_base);
@@ -134,6 +160,7 @@ impl<'c> Vm<'c> {
             closure: closure.clone(),
             ip: 0,
             stack_base,
+            coerce_int: false,
         });
 
         match self.execute_to_depth(target_depth) {
@@ -196,9 +223,13 @@ impl<'c> Vm<'c> {
             }
 
             if ip >= self.frames[frame_idx].closure.function.chunk.code.len() {
-                let ret_val = self.stack.pop().unwrap_or(Value::Null);
+                let mut ret_val = self.stack.pop().unwrap_or(Value::Null);
                 let exiting = self.frames.pop().unwrap();
+                let coerce_int = exiting.coerce_int;
                 self.unwind_frame(exiting);
+                if coerce_int {
+                    self.coerce_int_in_place(&mut ret_val, Span::new(0, 0))?;
+                }
                 if self.frames.len() == target_depth {
                     return Ok(ret_val);
                 }
@@ -206,7 +237,7 @@ impl<'c> Vm<'c> {
                 continue;
             }
 
-            let op = self.frames[frame_idx].closure.function.chunk.code[ip].clone();
+            let op = self.frames[frame_idx].closure.function.chunk.code[ip];
             let span = self.frames[frame_idx].closure.function.chunk.spans[ip];
             self.frames[frame_idx].ip = ip + 1;
 
@@ -330,31 +361,148 @@ impl<'c> Vm<'c> {
                     let err = match &mut *borrow {
                         Upvalue::Open(s) => {
                             let slot = *s;
-                            Self::mutate_index(&mut self.stack[slot], &idx, val)
+                            Self::mutate_index(&mut self.stack[slot], &idx, val.clone())
                         }
-                        Upvalue::Closed(c) => Self::mutate_index(c, &idx, val),
+                        Upvalue::Closed(c) => Self::mutate_index(c, &idx, val.clone()),
                     };
+                    drop(borrow);
                     if let Some(msg) = err {
                         return Err(self.error(span, msg));
                     }
+                    self.stack.push(val);
                 }
                 Opcode::MemberSetUpvalue(upval_idx, field_idx) => {
                     let val = self.stack.pop().unwrap();
-                    let field_name =
-                        Self::const_str(&self.frames[frame_idx].closure.function.chunk, field_idx)
-                            .to_string();
                     let cell = self.frames[frame_idx].closure.upvalues[upval_idx as usize].clone();
+                    let chunk = &self.frames[frame_idx].closure.function.chunk;
+                    let field_name = Self::const_str(chunk, field_idx);
+                    let ic_cell = &chunk.ic_slots[ip];
                     let mut borrow = cell.borrow_mut();
                     let err = match &mut *borrow {
                         Upvalue::Open(s) => {
                             let slot = *s;
-                            Self::mutate_member(&mut self.stack[slot], field_name, val)
+                            Self::mutate_member(
+                                &mut self.stack[slot],
+                                field_name,
+                                val.clone(),
+                                Some(ic_cell),
+                            )
                         }
-                        Upvalue::Closed(c) => Self::mutate_member(c, field_name, val),
+                        Upvalue::Closed(c) => {
+                            Self::mutate_member(c, field_name, val.clone(), Some(ic_cell))
+                        }
+                    };
+                    drop(borrow);
+                    if let Some(msg) = err {
+                        return Err(self.error(span, msg));
+                    }
+                    self.stack.push(val);
+                }
+                Opcode::GetPath {
+                    target,
+                    depth,
+                    member_mask,
+                } => {
+                    let depth = depth as usize;
+                    let keys_start = self.stack.len() - depth;
+                    let val = match target {
+                        PathTarget::Local(slot) => {
+                            let target_slot = self.frames[frame_idx].stack_base + slot as usize;
+                            Self::read_path_vm(
+                                &self.stack[target_slot],
+                                &self.stack[keys_start..],
+                                member_mask,
+                                0,
+                            )
+                        }
+                        PathTarget::Upvalue(upval_idx) => {
+                            let cell =
+                                self.frames[frame_idx].closure.upvalues[upval_idx as usize].clone();
+                            let borrow = cell.borrow();
+                            match &*borrow {
+                                Upvalue::Open(s) => Self::read_path_vm(
+                                    &self.stack[*s],
+                                    &self.stack[keys_start..],
+                                    member_mask,
+                                    0,
+                                ),
+                                Upvalue::Closed(c) => {
+                                    Self::read_path_vm(c, &self.stack[keys_start..], member_mask, 0)
+                                }
+                            }
+                        }
+                        PathTarget::Global(name_idx) => {
+                            let name = Self::const_str(
+                                &self.frames[frame_idx].closure.function.chunk,
+                                name_idx,
+                            );
+                            let Some(root) = self.globals.get(name) else {
+                                return Err(self.error(span, format!("Unknown name: {name}")));
+                            };
+                            Self::read_path_vm(root, &self.stack[keys_start..], member_mask, 0)
+                        }
+                    };
+                    match val {
+                        Ok(v) => self.stack.push(v),
+                        Err(msg) => return Err(self.error(span, msg)),
+                    }
+                }
+                Opcode::SetPath {
+                    target,
+                    depth,
+                    member_mask,
+                } => {
+                    let val = self.stack.pop().unwrap();
+                    let depth = depth as usize;
+                    let keys_start = self.stack.len() - depth;
+                    let keys: Vec<Value<'static>> = self.stack.drain(keys_start..).collect();
+                    let err = match target {
+                        PathTarget::Local(slot) => {
+                            let target_slot = self.frames[frame_idx].stack_base + slot as usize;
+                            Self::mutate_path_vm(
+                                &mut self.stack[target_slot],
+                                &keys,
+                                member_mask,
+                                0,
+                                val.clone(),
+                            )
+                        }
+                        PathTarget::Upvalue(upval_idx) => {
+                            let cell =
+                                self.frames[frame_idx].closure.upvalues[upval_idx as usize].clone();
+                            let mut borrow = cell.borrow_mut();
+                            match &mut *borrow {
+                                Upvalue::Open(s) => {
+                                    let slot = *s;
+                                    Self::mutate_path_vm(
+                                        &mut self.stack[slot],
+                                        &keys,
+                                        member_mask,
+                                        0,
+                                        val.clone(),
+                                    )
+                                }
+                                Upvalue::Closed(c) => {
+                                    Self::mutate_path_vm(c, &keys, member_mask, 0, val.clone())
+                                }
+                            }
+                        }
+                        PathTarget::Global(name_idx) => {
+                            let name = Self::const_str(
+                                &self.frames[frame_idx].closure.function.chunk,
+                                name_idx,
+                            )
+                            .to_string();
+                            let Some(root) = self.globals.get_mut(&name) else {
+                                return Err(self.error(span, format!("Unknown name: {name}")));
+                            };
+                            Self::mutate_path_vm(root, &keys, member_mask, 0, val.clone())
+                        }
                     };
                     if let Some(msg) = err {
                         return Err(self.error(span, msg));
                     }
+                    self.stack.push(val);
                 }
                 Opcode::MakeClosure(fn_idx) => {
                     let target_fn = self.frames[frame_idx].closure.function.chunk.functions
@@ -410,14 +558,31 @@ impl<'c> Vm<'c> {
                 }
                 Opcode::Add => {
                     let right = self.stack.pop().unwrap();
-                    if let (Some(Value::Number(a)), Value::Number(b)) =
-                        (self.stack.last_mut(), &right)
-                    {
-                        let n = *a + *b;
-                        if n.is_finite() {
-                            *a = n;
-                            continue;
+                    match (self.stack.last_mut(), &right) {
+                        (Some(Value::Number(a)), Value::Number(b)) => {
+                            let n = *a + *b;
+                            if n.is_finite() {
+                                *a = n;
+                                continue;
+                            }
                         }
+                        (Some(Value::Int(a)), Value::Int(b)) => {
+                            if let Some(n) = a.checked_add(*b) {
+                                *a = n;
+                                continue;
+                            }
+                        }
+                        (Some(Value::Vector(a)), Value::Vector(b)) if a.len() == b.len() => {
+                            let mut next = *a;
+                            for (x, y) in next.iter_mut().zip(b.as_slice()) {
+                                *x += *y;
+                            }
+                            if next.iter().all(|x| x.is_finite()) {
+                                *a = next;
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
                     let left = self.stack.pop().unwrap();
                     let res =
@@ -426,14 +591,31 @@ impl<'c> Vm<'c> {
                 }
                 Opcode::Sub => {
                     let right = self.stack.pop().unwrap();
-                    if let (Some(Value::Number(a)), Value::Number(b)) =
-                        (self.stack.last_mut(), &right)
-                    {
-                        let n = *a - *b;
-                        if n.is_finite() {
-                            *a = n;
-                            continue;
+                    match (self.stack.last_mut(), &right) {
+                        (Some(Value::Number(a)), Value::Number(b)) => {
+                            let n = *a - *b;
+                            if n.is_finite() {
+                                *a = n;
+                                continue;
+                            }
                         }
+                        (Some(Value::Int(a)), Value::Int(b)) => {
+                            if let Some(n) = a.checked_sub(*b) {
+                                *a = n;
+                                continue;
+                            }
+                        }
+                        (Some(Value::Vector(a)), Value::Vector(b)) if a.len() == b.len() => {
+                            let mut next = *a;
+                            for (x, y) in next.iter_mut().zip(b.as_slice()) {
+                                *x -= *y;
+                            }
+                            if next.iter().all(|x| x.is_finite()) {
+                                *a = next;
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
                     let left = self.stack.pop().unwrap();
                     let res =
@@ -442,14 +624,31 @@ impl<'c> Vm<'c> {
                 }
                 Opcode::Mul => {
                     let right = self.stack.pop().unwrap();
-                    if let (Some(Value::Number(a)), Value::Number(b)) =
-                        (self.stack.last_mut(), &right)
-                    {
-                        let n = *a * *b;
-                        if n.is_finite() {
-                            *a = n;
-                            continue;
+                    match (self.stack.last_mut(), &right) {
+                        (Some(Value::Number(a)), Value::Number(b)) => {
+                            let n = *a * *b;
+                            if n.is_finite() {
+                                *a = n;
+                                continue;
+                            }
                         }
+                        (Some(Value::Int(a)), Value::Int(b)) => {
+                            if let Some(n) = a.checked_mul(*b) {
+                                *a = n;
+                                continue;
+                            }
+                        }
+                        (Some(Value::Vector(a)), Value::Number(b)) => {
+                            let mut next = *a;
+                            for x in &mut next {
+                                *x *= *b;
+                            }
+                            if next.iter().all(|x| x.is_finite()) {
+                                *a = next;
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
                     let left = self.stack.pop().unwrap();
                     let res =
@@ -458,6 +657,18 @@ impl<'c> Vm<'c> {
                 }
                 Opcode::Div => {
                     let right = self.stack.pop().unwrap();
+                    if let (Some(Value::Vector(a)), Value::Number(b)) =
+                        (self.stack.last_mut(), &right)
+                    {
+                        let mut next = *a;
+                        for x in &mut next {
+                            *x /= *b;
+                        }
+                        if next.iter().all(|x| x.is_finite()) {
+                            *a = next;
+                            continue;
+                        }
+                    }
                     let left = self.stack.pop().unwrap();
                     let res =
                         eval_binary_values("/", left, right).map_err(|m| self.error(span, m))?;
@@ -477,12 +688,65 @@ impl<'c> Vm<'c> {
                         eval_binary_values("**", left, right).map_err(|m| self.error(span, m))?;
                     self.stack.push(res);
                 }
-                Opcode::Neg => {
-                    if let Some(Value::Number(n)) = self.stack.last_mut()
-                        && (-*n).is_finite()
-                    {
-                        *n = -*n;
+                Opcode::BitAnd => {
+                    let right = self.stack.pop().unwrap();
+                    if let (Some(Value::Int(a)), Value::Int(b)) = (self.stack.last_mut(), &right) {
+                        *a &= *b;
                         continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res =
+                        eval_binary_values("&", left, right).map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::BitXor => {
+                    let right = self.stack.pop().unwrap();
+                    if let (Some(Value::Int(a)), Value::Int(b)) = (self.stack.last_mut(), &right) {
+                        *a ^= *b;
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res =
+                        eval_binary_values("^", left, right).map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::Shl => {
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
+                    let res =
+                        eval_binary_values("<<", left, right).map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::Shr => {
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
+                    let res =
+                        eval_binary_values(">>", left, right).map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::Neg => {
+                    match self.stack.last_mut() {
+                        Some(Value::Number(n)) if (-*n).is_finite() => {
+                            *n = -*n;
+                            continue;
+                        }
+                        Some(Value::Int(i)) => {
+                            if let Some(neg) = i.checked_neg() {
+                                *i = neg;
+                                continue;
+                            }
+                        }
+                        Some(Value::Vector(v)) => {
+                            let mut next = *v;
+                            for x in &mut next {
+                                *x = -*x;
+                            }
+                            if next.iter().all(|x| x.is_finite()) {
+                                *v = next;
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
                     let val = self.stack.pop().unwrap();
                     let res = eval_unary_value("-", val, false).map_err(|m| self.error(span, m))?;
@@ -492,6 +756,31 @@ impl<'c> Vm<'c> {
                     let val = self.stack.pop().unwrap();
                     let res = eval_unary_value("+", val, false).map_err(|m| self.error(span, m))?;
                     self.stack.push(res);
+                }
+                Opcode::BitNot => {
+                    if let Some(Value::Int(i)) = self.stack.last_mut() {
+                        *i = !*i;
+                        continue;
+                    }
+                    let val = self.stack.pop().unwrap();
+                    let res = eval_unary_value("~", val, false).map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::CoerceInt => {
+                    if let Some(slot) = self.stack.last_mut() {
+                        if let Some(i) = slot.as_exact_i64() {
+                            *slot = Value::Int(i);
+                        } else if let Value::List(items) = slot {
+                            for item in items.iter_mut() {
+                                if let Some(i) = item.as_exact_i64() {
+                                    *item = Value::Int(i);
+                                }
+                            }
+                        } else {
+                            return Err(self
+                                .error(span, "Binding value does not match its type annotation"));
+                        }
+                    }
                 }
                 Opcode::Not => {
                     if let Some(slot) = self.stack.last_mut() {
@@ -514,134 +803,367 @@ impl<'c> Vm<'c> {
                 }
                 Opcode::Less => {
                     let right = self.stack.pop().unwrap();
-                    match (self.stack.last_mut(), right) {
+                    match (self.stack.last_mut(), &right) {
                         (Some(slot @ Value::Number(_)), Value::Number(b)) => {
                             if let Value::Number(a) = *slot {
-                                *slot = Value::Bool(a < b);
+                                *slot = Value::Bool(a < *b);
+                                continue;
                             }
                         }
-                        _ => return Err(self.error(span, "Invalid operands for <")),
+                        (Some(slot @ Value::Int(_)), Value::Int(b)) => {
+                            if let Value::Int(a) = *slot {
+                                *slot = Value::Bool(a < *b);
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
+                    let left = self.stack.pop().unwrap();
+                    let res =
+                        eval_binary_values("<", left, right).map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
                 }
                 Opcode::LessEqual => {
                     let right = self.stack.pop().unwrap();
-                    match (self.stack.last_mut(), right) {
+                    match (self.stack.last_mut(), &right) {
                         (Some(slot @ Value::Number(_)), Value::Number(b)) => {
                             if let Value::Number(a) = *slot {
-                                *slot = Value::Bool(a <= b);
+                                *slot = Value::Bool(a <= *b);
+                                continue;
                             }
                         }
-                        _ => return Err(self.error(span, "Invalid operands for <=")),
+                        (Some(slot @ Value::Int(_)), Value::Int(b)) => {
+                            if let Value::Int(a) = *slot {
+                                *slot = Value::Bool(a <= *b);
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
+                    let left = self.stack.pop().unwrap();
+                    let res =
+                        eval_binary_values("<=", left, right).map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
                 }
                 Opcode::Greater => {
                     let right = self.stack.pop().unwrap();
-                    match (self.stack.last_mut(), right) {
+                    match (self.stack.last_mut(), &right) {
                         (Some(slot @ Value::Number(_)), Value::Number(b)) => {
                             if let Value::Number(a) = *slot {
-                                *slot = Value::Bool(a > b);
+                                *slot = Value::Bool(a > *b);
+                                continue;
                             }
                         }
-                        _ => return Err(self.error(span, "Invalid operands for >")),
+                        (Some(slot @ Value::Int(_)), Value::Int(b)) => {
+                            if let Value::Int(a) = *slot {
+                                *slot = Value::Bool(a > *b);
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
+                    let left = self.stack.pop().unwrap();
+                    let res =
+                        eval_binary_values(">", left, right).map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
                 }
                 Opcode::GreaterEqual => {
                     let right = self.stack.pop().unwrap();
-                    match (self.stack.last_mut(), right) {
+                    match (self.stack.last_mut(), &right) {
                         (Some(slot @ Value::Number(_)), Value::Number(b)) => {
                             if let Value::Number(a) = *slot {
-                                *slot = Value::Bool(a >= b);
+                                *slot = Value::Bool(a >= *b);
+                                continue;
                             }
                         }
-                        _ => return Err(self.error(span, "Invalid operands for >=")),
+                        (Some(slot @ Value::Int(_)), Value::Int(b)) => {
+                            if let Value::Int(a) = *slot {
+                                *slot = Value::Bool(a >= *b);
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
+                    let left = self.stack.pop().unwrap();
+                    let res =
+                        eval_binary_values(">=", left, right).map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
                 }
-                Opcode::AddImm(imm) => match self.stack.last_mut() {
-                    Some(Value::Number(a)) => *a += imm,
-                    _ => return Err(self.error(span, "Invalid operands for +")),
-                },
-                Opcode::SubImm(imm) => match self.stack.last_mut() {
-                    Some(Value::Number(a)) => *a -= imm,
-                    _ => return Err(self.error(span, "Invalid operands for -")),
-                },
+                Opcode::AddImm(imm) => {
+                    match self.stack.last_mut() {
+                        Some(Value::Number(a)) if (*a + imm).is_finite() => {
+                            *a += imm;
+                            continue;
+                        }
+                        Some(Value::Int(a))
+                            if imm.is_finite()
+                                && imm.fract() == 0.0
+                                && imm.abs() <= 9_007_199_254_740_991.0 =>
+                        {
+                            if let Some(n) = a.checked_add(imm as i64) {
+                                *a = n;
+                                continue;
+                            }
+                        }
+                        _ => {}
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("+", left, Value::Number(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::SubImm(imm) => {
+                    match self.stack.last_mut() {
+                        Some(Value::Number(a)) if (*a - imm).is_finite() => {
+                            *a -= imm;
+                            continue;
+                        }
+                        Some(Value::Int(a))
+                            if imm.is_finite()
+                                && imm.fract() == 0.0
+                                && imm.abs() <= 9_007_199_254_740_991.0 =>
+                        {
+                            if let Some(n) = a.checked_sub(imm as i64) {
+                                *a = n;
+                                continue;
+                            }
+                        }
+                        _ => {}
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("-", left, Value::Number(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
                 Opcode::MulImm(imm) => {
-                    if let Some(Value::Number(a)) = self.stack.last_mut() {
-                        *a *= imm;
-                    } else {
-                        let left = self.stack.pop().unwrap();
-                        let res = eval_binary_values("*", left, Value::Number(imm))
-                            .map_err(|m| self.error(span, m))?;
-                        self.stack.push(res);
+                    match self.stack.last_mut() {
+                        Some(Value::Number(a)) if (*a * imm).is_finite() => {
+                            *a *= imm;
+                            continue;
+                        }
+                        Some(Value::Int(a))
+                            if imm.is_finite()
+                                && imm.fract() == 0.0
+                                && imm.abs() <= 9_007_199_254_740_991.0 =>
+                        {
+                            if let Some(n) = a.checked_mul(imm as i64) {
+                                *a = n;
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("*", left, Value::Number(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
                 }
-                Opcode::ModImm(imm) => match self.stack.last_mut() {
-                    Some(Value::Number(a)) => {
-                        *a = crate::runtime::ops::exact_remainder(*a, imm);
+                Opcode::ModImm(imm) => {
+                    match self.stack.last_mut() {
+                        Some(Value::Number(a)) => {
+                            let r = crate::runtime::ops::exact_remainder(*a, imm);
+                            if r.is_finite() {
+                                *a = r;
+                                continue;
+                            }
+                        }
+                        Some(Value::Int(a))
+                            if imm.is_finite()
+                                && imm.fract() == 0.0
+                                && imm.abs() <= 9_007_199_254_740_991.0 =>
+                        {
+                            if let Some(n) = a.checked_rem(imm as i64) {
+                                *a = n;
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => return Err(self.error(span, "Invalid operands for %")),
-                },
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("%", left, Value::Number(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
                 Opcode::EqualImm(imm) => {
-                    if let Some(slot @ Value::Number(_)) = self.stack.last_mut() {
-                        if let Value::Number(a) = *slot {
-                            *slot = Value::Bool(a == imm);
+                    match self.stack.last_mut() {
+                        Some(slot @ Value::Number(_)) => {
+                            if let Value::Number(a) = *slot {
+                                *slot = Value::Bool(a == imm);
+                                continue;
+                            }
                         }
-                    } else {
-                        let left = self.stack.pop().unwrap();
-                        let res = eval_binary_values("==", left, Value::Number(imm))
-                            .map_err(|m| self.error(span, m))?;
-                        self.stack.push(res);
+                        Some(slot @ Value::Int(_)) => {
+                            if let Value::Int(a) = *slot {
+                                *slot = Value::Bool(crate::runtime::int_f64_eq(a, imm));
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("==", left, Value::Number(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
                 }
-                Opcode::LessImm(imm) => match self.stack.last_mut() {
-                    Some(slot @ Value::Number(_)) => {
-                        if let Value::Number(a) = *slot {
-                            *slot = Value::Bool(a < imm);
+                Opcode::LessImm(imm) => {
+                    match self.stack.last_mut() {
+                        Some(slot @ Value::Number(_)) => {
+                            if let Value::Number(a) = *slot {
+                                *slot = Value::Bool(a < imm);
+                                continue;
+                            }
                         }
-                    }
-                    _ => return Err(self.error(span, "Invalid operands for <")),
-                },
-                Opcode::LessEqualImm(imm) => match self.stack.last_mut() {
-                    Some(slot @ Value::Number(_)) => {
-                        if let Value::Number(a) = *slot {
-                            *slot = Value::Bool(a <= imm);
+                        Some(slot @ Value::Int(_)) => {
+                            if let Value::Int(a) = *slot {
+                                let lt =
+                                    crate::runtime::int_f64_cmp(a, imm).is_some_and(|o| o.is_lt());
+                                *slot = Value::Bool(lt);
+                                continue;
+                            }
                         }
+                        _ => {}
                     }
-                    _ => return Err(self.error(span, "Invalid operands for <=")),
-                },
-                Opcode::GreaterImm(imm) => match self.stack.last_mut() {
-                    Some(slot @ Value::Number(_)) => {
-                        if let Value::Number(a) = *slot {
-                            *slot = Value::Bool(a > imm);
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("<", left, Value::Number(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::LessEqualImm(imm) => {
+                    match self.stack.last_mut() {
+                        Some(slot @ Value::Number(_)) => {
+                            if let Value::Number(a) = *slot {
+                                *slot = Value::Bool(a <= imm);
+                                continue;
+                            }
                         }
-                    }
-                    _ => return Err(self.error(span, "Invalid operands for >")),
-                },
-                Opcode::GreaterEqualImm(imm) => match self.stack.last_mut() {
-                    Some(slot @ Value::Number(_)) => {
-                        if let Value::Number(a) = *slot {
-                            *slot = Value::Bool(a >= imm);
+                        Some(slot @ Value::Int(_)) => {
+                            if let Value::Int(a) = *slot {
+                                let le =
+                                    crate::runtime::int_f64_cmp(a, imm).is_some_and(|o| o.is_le());
+                                *slot = Value::Bool(le);
+                                continue;
+                            }
                         }
+                        _ => {}
                     }
-                    _ => return Err(self.error(span, "Invalid operands for >=")),
-                },
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("<=", left, Value::Number(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::GreaterImm(imm) => {
+                    match self.stack.last_mut() {
+                        Some(slot @ Value::Number(_)) => {
+                            if let Value::Number(a) = *slot {
+                                *slot = Value::Bool(a > imm);
+                                continue;
+                            }
+                        }
+                        Some(slot @ Value::Int(_)) => {
+                            if let Value::Int(a) = *slot {
+                                let gt =
+                                    crate::runtime::int_f64_cmp(a, imm).is_some_and(|o| o.is_gt());
+                                *slot = Value::Bool(gt);
+                                continue;
+                            }
+                        }
+                        _ => {}
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values(">", left, Value::Number(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::GreaterEqualImm(imm) => {
+                    match self.stack.last_mut() {
+                        Some(slot @ Value::Number(_)) => {
+                            if let Value::Number(a) = *slot {
+                                *slot = Value::Bool(a >= imm);
+                                continue;
+                            }
+                        }
+                        Some(slot @ Value::Int(_)) => {
+                            if let Value::Int(a) = *slot {
+                                let ge =
+                                    crate::runtime::int_f64_cmp(a, imm).is_some_and(|o| o.is_ge());
+                                *slot = Value::Bool(ge);
+                                continue;
+                            }
+                        }
+                        _ => {}
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values(">=", left, Value::Number(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
                 Opcode::LocalAddImm(slot, imm) => {
                     let idx = self.frames[frame_idx].stack_base + slot as usize;
                     match self.stack.get(idx) {
-                        Some(Value::Number(a)) => self.stack.push(Value::Number(*a + imm)),
-                        _ => return Err(self.error(span, "Invalid operands for +")),
+                        Some(Value::Number(a)) if (*a + imm).is_finite() => {
+                            self.stack.push(Value::Number(*a + imm));
+                        }
+                        Some(Value::Int(a))
+                            if imm.is_finite()
+                                && imm.fract() == 0.0
+                                && imm.abs() <= 9_007_199_254_740_991.0 =>
+                        {
+                            if let Some(n) = a.checked_add(imm as i64) {
+                                self.stack.push(Value::Int(n));
+                            } else {
+                                return Err(self.error(span, "Integer overflow"));
+                            }
+                        }
+                        Some(other) => {
+                            let res = eval_binary_values("+", other.clone(), Value::Number(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for +")),
                     }
                 }
                 Opcode::LocalSubImm(slot, imm) => {
                     let idx = self.frames[frame_idx].stack_base + slot as usize;
                     match self.stack.get(idx) {
-                        Some(Value::Number(a)) => self.stack.push(Value::Number(*a - imm)),
-                        _ => return Err(self.error(span, "Invalid operands for -")),
+                        Some(Value::Number(a)) if (*a - imm).is_finite() => {
+                            self.stack.push(Value::Number(*a - imm));
+                        }
+                        Some(Value::Int(a))
+                            if imm.is_finite()
+                                && imm.fract() == 0.0
+                                && imm.abs() <= 9_007_199_254_740_991.0 =>
+                        {
+                            if let Some(n) = a.checked_sub(imm as i64) {
+                                self.stack.push(Value::Int(n));
+                            } else {
+                                return Err(self.error(span, "Integer overflow"));
+                            }
+                        }
+                        Some(other) => {
+                            let res = eval_binary_values("-", other.clone(), Value::Number(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for -")),
                     }
                 }
                 Opcode::LocalMulImm(slot, imm) => {
                     let idx = self.frames[frame_idx].stack_base + slot as usize;
                     match self.stack.get(idx) {
-                        Some(Value::Number(a)) => self.stack.push(Value::Number(*a * imm)),
+                        Some(Value::Number(a)) if (*a * imm).is_finite() => {
+                            self.stack.push(Value::Number(*a * imm));
+                        }
+                        Some(Value::Int(a))
+                            if imm.is_finite()
+                                && imm.fract() == 0.0
+                                && imm.abs() <= 9_007_199_254_740_991.0 =>
+                        {
+                            if let Some(n) = a.checked_mul(imm as i64) {
+                                self.stack.push(Value::Int(n));
+                            } else {
+                                return Err(self.error(span, "Integer overflow"));
+                            }
+                        }
                         Some(other) => {
                             let res = eval_binary_values("*", other.clone(), Value::Number(imm))
                                 .map_err(|m| self.error(span, m))?;
@@ -655,15 +1177,39 @@ impl<'c> Vm<'c> {
                     match self.stack.get(idx) {
                         Some(Value::Number(a)) => {
                             let rem = crate::runtime::ops::exact_remainder(*a, imm);
-                            self.stack.push(Value::Number(rem));
+                            if rem.is_finite() {
+                                self.stack.push(Value::Number(rem));
+                            } else {
+                                return Err(self.error(span, "Non-finite arithmetic result"));
+                            }
                         }
-                        _ => return Err(self.error(span, "Invalid operands for %")),
+                        Some(Value::Int(a))
+                            if imm.is_finite()
+                                && imm.fract() == 0.0
+                                && imm.abs() <= 9_007_199_254_740_991.0 =>
+                        {
+                            if let Some(n) = a.checked_rem(imm as i64) {
+                                self.stack.push(Value::Int(n));
+                            } else {
+                                return Err(self.error(span, "Integer overflow"));
+                            }
+                        }
+                        Some(other) => {
+                            let res = eval_binary_values("%", other.clone(), Value::Number(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for %")),
                     }
                 }
                 Opcode::LocalEqualImm(slot, imm) => {
                     let idx = self.frames[frame_idx].stack_base + slot as usize;
                     match self.stack.get(idx) {
                         Some(Value::Number(a)) => self.stack.push(Value::Bool(*a == imm)),
+                        Some(Value::Int(a)) => {
+                            self.stack
+                                .push(Value::Bool(crate::runtime::int_f64_eq(*a, imm)));
+                        }
                         Some(other) => {
                             let res = eval_binary_values("==", other.clone(), Value::Number(imm))
                                 .map_err(|m| self.error(span, m))?;
@@ -672,61 +1218,454 @@ impl<'c> Vm<'c> {
                         None => return Err(self.error(span, "Invalid operands for ==")),
                     }
                 }
+                Opcode::LocalLessImm(slot, imm) => {
+                    let idx = self.frames[frame_idx].stack_base + slot as usize;
+                    match self.stack.get(idx) {
+                        Some(Value::Number(a)) => self.stack.push(Value::Bool(*a < imm)),
+                        Some(Value::Int(a)) => {
+                            let lt =
+                                crate::runtime::int_f64_cmp(*a, imm).is_some_and(|o| o.is_lt());
+                            self.stack.push(Value::Bool(lt));
+                        }
+                        Some(other) => {
+                            let res = eval_binary_values("<", other.clone(), Value::Number(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for <")),
+                    }
+                }
                 Opcode::LocalLessEqualImm(slot, imm) => {
                     let idx = self.frames[frame_idx].stack_base + slot as usize;
                     match self.stack.get(idx) {
                         Some(Value::Number(a)) => self.stack.push(Value::Bool(*a <= imm)),
-                        _ => return Err(self.error(span, "Invalid operands for <=")),
+                        Some(Value::Int(a)) => {
+                            let le =
+                                crate::runtime::int_f64_cmp(*a, imm).is_some_and(|o| o.is_le());
+                            self.stack.push(Value::Bool(le));
+                        }
+                        Some(other) => {
+                            let res = eval_binary_values("<=", other.clone(), Value::Number(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for <=")),
+                    }
+                }
+                Opcode::AddIntImm(imm) => {
+                    if let Some(Value::Int(a)) = self.stack.last_mut()
+                        && let Some(n) = a.checked_add(imm)
+                    {
+                        *a = n;
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("+", left, Value::Int(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::SubIntImm(imm) => {
+                    if let Some(Value::Int(a)) = self.stack.last_mut()
+                        && let Some(n) = a.checked_sub(imm)
+                    {
+                        *a = n;
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("-", left, Value::Int(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::MulIntImm(imm) => {
+                    if let Some(Value::Int(a)) = self.stack.last_mut()
+                        && let Some(n) = a.checked_mul(imm)
+                    {
+                        *a = n;
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("*", left, Value::Int(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::ModIntImm(imm) => {
+                    if let Some(Value::Int(a)) = self.stack.last_mut()
+                        && let Some(n) = a.checked_rem(imm)
+                    {
+                        *a = n;
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("%", left, Value::Int(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::BitAndIntImm(imm) => {
+                    if let Some(Value::Int(a)) = self.stack.last_mut() {
+                        *a &= imm;
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("&", left, Value::Int(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::BitXorIntImm(imm) => {
+                    if let Some(Value::Int(a)) = self.stack.last_mut() {
+                        *a ^= imm;
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("^", left, Value::Int(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::ShlIntImm(shift) => {
+                    if let Some(Value::Int(a)) = self.stack.last_mut() {
+                        *a <<= shift;
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("<<", left, Value::Int(i64::from(shift)))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::ShrIntImm(shift) => {
+                    if let Some(Value::Int(a)) = self.stack.last_mut() {
+                        *a >>= shift;
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values(">>", left, Value::Int(i64::from(shift)))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::EqualIntImm(imm) => {
+                    if let Some(slot @ Value::Int(_)) = self.stack.last_mut()
+                        && let Value::Int(a) = *slot
+                    {
+                        *slot = Value::Bool(a == imm);
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("==", left, Value::Int(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::LessIntImm(imm) => {
+                    if let Some(slot @ Value::Int(_)) = self.stack.last_mut()
+                        && let Value::Int(a) = *slot
+                    {
+                        *slot = Value::Bool(a < imm);
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("<", left, Value::Int(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::LessEqualIntImm(imm) => {
+                    if let Some(slot @ Value::Int(_)) = self.stack.last_mut()
+                        && let Value::Int(a) = *slot
+                    {
+                        *slot = Value::Bool(a <= imm);
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values("<=", left, Value::Int(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::GreaterIntImm(imm) => {
+                    if let Some(slot @ Value::Int(_)) = self.stack.last_mut()
+                        && let Value::Int(a) = *slot
+                    {
+                        *slot = Value::Bool(a > imm);
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values(">", left, Value::Int(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::GreaterEqualIntImm(imm) => {
+                    if let Some(slot @ Value::Int(_)) = self.stack.last_mut()
+                        && let Value::Int(a) = *slot
+                    {
+                        *slot = Value::Bool(a >= imm);
+                        continue;
+                    }
+                    let left = self.stack.pop().unwrap();
+                    let res = eval_binary_values(">=", left, Value::Int(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack.push(res);
+                }
+                Opcode::LocalAddIntImm(slot, imm) => {
+                    let idx = self.frames[frame_idx].stack_base + slot as usize;
+                    match self.stack.get(idx) {
+                        Some(Value::Int(a)) => {
+                            if let Some(n) = a.checked_add(imm) {
+                                self.stack.push(Value::Int(n));
+                            } else {
+                                return Err(self.error(span, "Integer overflow"));
+                            }
+                        }
+                        Some(other) => {
+                            let res = eval_binary_values("+", other.clone(), Value::Int(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for +")),
+                    }
+                }
+                Opcode::LocalSubIntImm(slot, imm) => {
+                    let idx = self.frames[frame_idx].stack_base + slot as usize;
+                    match self.stack.get(idx) {
+                        Some(Value::Int(a)) => {
+                            if let Some(n) = a.checked_sub(imm) {
+                                self.stack.push(Value::Int(n));
+                            } else {
+                                return Err(self.error(span, "Integer overflow"));
+                            }
+                        }
+                        Some(other) => {
+                            let res = eval_binary_values("-", other.clone(), Value::Int(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for -")),
+                    }
+                }
+                Opcode::LocalMulIntImm(slot, imm) => {
+                    let idx = self.frames[frame_idx].stack_base + slot as usize;
+                    match self.stack.get(idx) {
+                        Some(Value::Int(a)) => {
+                            if let Some(n) = a.checked_mul(imm) {
+                                self.stack.push(Value::Int(n));
+                            } else {
+                                return Err(self.error(span, "Integer overflow"));
+                            }
+                        }
+                        Some(other) => {
+                            let res = eval_binary_values("*", other.clone(), Value::Int(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for *")),
+                    }
+                }
+                Opcode::LocalModIntImm(slot, imm) => {
+                    let idx = self.frames[frame_idx].stack_base + slot as usize;
+                    match self.stack.get(idx) {
+                        Some(Value::Int(a)) => {
+                            if let Some(n) = a.checked_rem(imm) {
+                                self.stack.push(Value::Int(n));
+                            } else {
+                                return Err(self.error(span, "Integer overflow"));
+                            }
+                        }
+                        Some(other) => {
+                            let res = eval_binary_values("%", other.clone(), Value::Int(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for %")),
+                    }
+                }
+                Opcode::LocalBitAndIntImm(slot, imm) => {
+                    let idx = self.frames[frame_idx].stack_base + slot as usize;
+                    match self.stack.get(idx) {
+                        Some(Value::Int(a)) => self.stack.push(Value::Int(*a & imm)),
+                        Some(other) => {
+                            let res = eval_binary_values("&", other.clone(), Value::Int(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for &")),
+                    }
+                }
+                Opcode::LocalEqualIntImm(slot, imm) => {
+                    let idx = self.frames[frame_idx].stack_base + slot as usize;
+                    match self.stack.get(idx) {
+                        Some(Value::Int(a)) => self.stack.push(Value::Bool(*a == imm)),
+                        Some(other) => {
+                            let res = eval_binary_values("==", other.clone(), Value::Int(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for ==")),
+                    }
+                }
+                Opcode::LocalLessIntImm(slot, imm) => {
+                    let idx = self.frames[frame_idx].stack_base + slot as usize;
+                    match self.stack.get(idx) {
+                        Some(Value::Int(a)) => self.stack.push(Value::Bool(*a < imm)),
+                        Some(other) => {
+                            let res = eval_binary_values("<", other.clone(), Value::Int(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for <")),
+                    }
+                }
+                Opcode::LocalLessEqualIntImm(slot, imm) => {
+                    let idx = self.frames[frame_idx].stack_base + slot as usize;
+                    match self.stack.get(idx) {
+                        Some(Value::Int(a)) => self.stack.push(Value::Bool(*a <= imm)),
+                        Some(other) => {
+                            let res = eval_binary_values("<=", other.clone(), Value::Int(imm))
+                                .map_err(|m| self.error(span, m))?;
+                            self.stack.push(res);
+                        }
+                        None => return Err(self.error(span, "Invalid operands for <=")),
                     }
                 }
                 Opcode::AddAssignLocal(slot) => {
                     let right = self.stack.pop().unwrap();
                     let idx = self.frames[frame_idx].stack_base + slot as usize;
-                    if let (Some(Value::Number(a)), Value::Number(b)) =
-                        (self.stack.get_mut(idx), &right)
-                    {
-                        *a += *b;
-                        let updated = *a;
-                        self.stack.push(Value::Number(updated));
-                    } else {
-                        let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
-                        let res = eval_binary_values("+", left, right)
-                            .map_err(|m| self.error(span, m))?;
-                        self.stack[idx] = res.clone();
-                        self.stack.push(res);
+                    match (self.stack.get_mut(idx), &right) {
+                        (Some(Value::Number(a)), Value::Number(b)) if (*a + *b).is_finite() => {
+                            *a += *b;
+                            let updated = *a;
+                            self.stack.push(Value::Number(updated));
+                            continue;
+                        }
+                        (Some(Value::Int(a)), Value::Int(b)) => {
+                            if let Some(updated) = a.checked_add(*b) {
+                                *a = updated;
+                                self.stack.push(Value::Int(updated));
+                                continue;
+                            }
+                        }
+                        (Some(Value::Vector(a)), Value::Vector(b)) if a.len() == b.len() => {
+                            let mut next = *a;
+                            for (x, y) in next.iter_mut().zip(b.as_slice()) {
+                                *x += *y;
+                            }
+                            if next.iter().all(|x| x.is_finite()) {
+                                *a = next;
+                                self.stack.push(Value::Vector(next));
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
+                    let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
+                    let res =
+                        eval_binary_values("+", left, right).map_err(|m| self.error(span, m))?;
+                    self.stack[idx] = res.clone();
+                    self.stack.push(res);
                 }
                 Opcode::StoreAddLocal(slot) => {
                     let right = self.stack.pop().unwrap();
                     let idx = self.frames[frame_idx].stack_base + slot as usize;
-                    if let (Some(Value::Number(a)), Value::Number(b)) =
-                        (self.stack.get_mut(idx), &right)
-                    {
-                        *a += *b;
-                    } else {
-                        let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
-                        let res = eval_binary_values("+", left, right)
-                            .map_err(|m| self.error(span, m))?;
-                        self.stack[idx] = res;
+                    match (self.stack.get_mut(idx), &right) {
+                        (Some(Value::Number(a)), Value::Number(b)) if (*a + *b).is_finite() => {
+                            *a += *b;
+                            continue;
+                        }
+                        (Some(Value::Int(a)), Value::Int(b)) => {
+                            if let Some(updated) = a.checked_add(*b) {
+                                *a = updated;
+                                continue;
+                            }
+                        }
+                        (Some(Value::Vector(a)), Value::Vector(b)) if a.len() == b.len() => {
+                            let mut next = *a;
+                            for (x, y) in next.iter_mut().zip(b.as_slice()) {
+                                *x += *y;
+                            }
+                            if next.iter().all(|x| x.is_finite()) {
+                                *a = next;
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
+                    let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
+                    let res =
+                        eval_binary_values("+", left, right).map_err(|m| self.error(span, m))?;
+                    self.stack[idx] = res;
                 }
                 Opcode::AddAssignLocalImm(slot, imm) => {
                     let idx = self.frames[frame_idx].stack_base + slot as usize;
-                    if let Some(Value::Number(a)) = self.stack.get_mut(idx) {
-                        *a += imm;
-                        let updated = *a;
-                        self.stack.push(Value::Number(updated));
-                    } else {
-                        return Err(self.error(span, "Invalid operands for +="));
+                    match self.stack.get_mut(idx) {
+                        Some(Value::Number(a)) if (*a + imm).is_finite() => {
+                            *a += imm;
+                            let updated = *a;
+                            self.stack.push(Value::Number(updated));
+                            continue;
+                        }
+                        Some(Value::Int(a))
+                            if imm.is_finite()
+                                && imm.fract() == 0.0
+                                && imm.abs() <= 9_007_199_254_740_991.0 =>
+                        {
+                            if let Some(updated) = a.checked_add(imm as i64) {
+                                *a = updated;
+                                self.stack.push(Value::Int(updated));
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
+                    let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
+                    let res = eval_binary_values("+", left, Value::Number(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack[idx] = res.clone();
+                    self.stack.push(res);
                 }
                 Opcode::StoreAddLocalImm(slot, imm) => {
                     let idx = self.frames[frame_idx].stack_base + slot as usize;
-                    if let Some(Value::Number(a)) = self.stack.get_mut(idx) {
-                        *a += imm;
-                    } else {
-                        return Err(self.error(span, "Invalid operands for +="));
+                    match self.stack.get_mut(idx) {
+                        Some(Value::Number(a)) if (*a + imm).is_finite() => {
+                            *a += imm;
+                            continue;
+                        }
+                        Some(Value::Int(a))
+                            if imm.is_finite()
+                                && imm.fract() == 0.0
+                                && imm.abs() <= 9_007_199_254_740_991.0 =>
+                        {
+                            if let Some(updated) = a.checked_add(imm as i64) {
+                                *a = updated;
+                                continue;
+                            }
+                        }
+                        _ => {}
                     }
+                    let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
+                    let res = eval_binary_values("+", left, Value::Number(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack[idx] = res;
+                }
+                Opcode::AddAssignLocalIntImm(slot, imm) => {
+                    let idx = self.frames[frame_idx].stack_base + slot as usize;
+                    if let Some(Value::Int(a)) = self.stack.get_mut(idx)
+                        && let Some(updated) = a.checked_add(imm)
+                    {
+                        *a = updated;
+                        self.stack.push(Value::Int(updated));
+                        continue;
+                    }
+                    let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
+                    let res = eval_binary_values("+", left, Value::Int(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack[idx] = res.clone();
+                    self.stack.push(res);
+                }
+                Opcode::StoreAddLocalIntImm(slot, imm) => {
+                    let idx = self.frames[frame_idx].stack_base + slot as usize;
+                    if let Some(Value::Int(a)) = self.stack.get_mut(idx)
+                        && let Some(updated) = a.checked_add(imm)
+                    {
+                        *a = updated;
+                        continue;
+                    }
+                    let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
+                    let res = eval_binary_values("+", left, Value::Int(imm))
+                        .map_err(|m| self.error(span, m))?;
+                    self.stack[idx] = res;
                 }
                 Opcode::Jump(target) => {
                     self.frames[frame_idx].ip = target;
@@ -755,42 +1694,75 @@ impl<'c> Vm<'c> {
                 }
                 Opcode::BuildRecord(count) => {
                     let start = self.stack.len() - (count * 2);
-                    let mut fields = BTreeMap::new();
+                    let mut pairs = Vec::with_capacity(count);
                     let mut iter = self.stack.drain(start..);
                     while let (Some(k), Some(v)) = (iter.next(), iter.next()) {
                         let Value::String(key) = k else {
                             drop(iter);
                             return Err(self.error(span, "Record key must be a string"));
                         };
-                        fields.insert(key, v);
+                        pairs.push((key, v));
                     }
                     drop(iter);
-                    self.stack.push(Value::Record(fields));
+                    self.stack.push(Value::Record(RecordMap::from_iter(pairs)));
+                }
+                Opcode::BuildRecordShape(shape_idx) => {
+                    let desc = &self.frames[frame_idx].closure.function.chunk.record_shapes
+                        [shape_idx as usize];
+                    let len = desc.shape.len();
+                    let shape = desc.shape.clone();
+                    let start = self.stack.len() - len;
+                    let values = if let Some(perm) = &desc.source_to_slot {
+                        let mut sorted_vals = vec![Value::Null; len];
+                        for (src_i, val) in self.stack.drain(start..).enumerate() {
+                            sorted_vals[perm[src_i]] = val;
+                        }
+                        sorted_vals
+                    } else {
+                        self.stack.split_off(start)
+                    };
+                    self.stack
+                        .push(Value::Record(RecordMap::from_shape_and_values(
+                            shape, values,
+                        )));
                 }
                 Opcode::IndexGet => {
                     let idx = self.stack.pop().unwrap();
                     let obj = self.stack.pop().unwrap();
-                    match (&obj, &idx) {
-                        (Value::List(items), Value::Number(n))
-                        | (Value::Tuple(items), Value::Number(n)) => {
-                            let i = *n as usize;
-                            if *n >= 0.0 && n.fract() == 0.0 && i < items.len() {
-                                self.stack.push(items[i].clone());
-                            } else {
-                                return Err(self.error(span, "Index out of bounds"));
-                            }
-                        }
-                        (Value::Record(fields), Value::String(k)) => {
-                            if let Some(val) = fields.get(k) {
-                                self.stack.push(val.clone());
-                            } else {
-                                return Err(self.error(span, format!("Field '{k}' not found")));
-                            }
-                        }
-                        _ => return Err(self.error(span, "Cannot index value")),
-                    }
+                    let val = Self::read_index(&obj, &idx).map_err(|msg| self.error(span, msg))?;
+                    self.stack.push(val);
+                }
+                Opcode::LocalIndexGet(slot) => {
+                    let idx = self.stack.pop().unwrap();
+                    let target_slot = self.frames[frame_idx].stack_base + slot as usize;
+                    let val = Self::read_index(&self.stack[target_slot], &idx)
+                        .map_err(|msg| self.error(span, msg))?;
+                    self.stack.push(val);
+                }
+                Opcode::UpvalueIndexGet(upval_idx) => {
+                    let idx = self.stack.pop().unwrap();
+                    let upval =
+                        self.frames[frame_idx].closure.upvalues[upval_idx as usize].borrow();
+                    let val_res = match &*upval {
+                        Upvalue::Open(slot_idx) => Self::read_index(&self.stack[*slot_idx], &idx),
+                        Upvalue::Closed(container) => Self::read_index(container, &idx),
+                    };
+                    drop(upval);
+                    let val = val_res.map_err(|msg| self.error(span, msg))?;
+                    self.stack.push(val);
                 }
                 Opcode::IndexSet(slot) => {
+                    let val = self.stack.pop().unwrap();
+                    let idx = self.stack.pop().unwrap();
+                    let target_slot = self.frames[frame_idx].stack_base + slot as usize;
+                    if let Some(msg) =
+                        Self::mutate_index(&mut self.stack[target_slot], &idx, val.clone())
+                    {
+                        return Err(self.error(span, msg));
+                    }
+                    self.stack.push(val);
+                }
+                Opcode::StoreIndexSet(slot) => {
                     let val = self.stack.pop().unwrap();
                     let idx = self.stack.pop().unwrap();
                     let target_slot = self.frames[frame_idx].stack_base + slot as usize;
@@ -800,54 +1772,68 @@ impl<'c> Vm<'c> {
                 }
                 Opcode::MemberGet(field_idx) => {
                     let obj = self.stack.pop().unwrap();
-                    let field_name =
-                        Self::const_str(&self.frames[frame_idx].closure.function.chunk, field_idx);
-                    match &obj {
-                        Value::Record(fields) => {
-                            if let Some(val) = fields.get(field_name) {
-                                self.stack.push(val.clone());
-                            } else {
-                                let err_msg = format!("Field '{field_name}' not found");
-                                return Err(self.error(span, err_msg));
-                            }
+                    let chunk = &self.frames[frame_idx].closure.function.chunk;
+                    let field_name = Self::const_str(chunk, field_idx);
+                    let ic_cell = &chunk.ic_slots[ip];
+                    let val = Self::read_member(&obj, field_name, ic_cell)
+                        .map_err(|msg| self.error(span, msg))?;
+                    self.stack.push(val);
+                }
+                Opcode::LocalMemberGet(slot, field_idx) => {
+                    let chunk = &self.frames[frame_idx].closure.function.chunk;
+                    let field_name = Self::const_str(chunk, field_idx);
+                    let ic_cell = &chunk.ic_slots[ip];
+                    let target_slot = self.frames[frame_idx].stack_base + slot as usize;
+                    let val = Self::read_member(&self.stack[target_slot], field_name, ic_cell)
+                        .map_err(|msg| self.error(span, msg))?;
+                    self.stack.push(val);
+                }
+                Opcode::UpvalueMemberGet(upval_idx, field_idx) => {
+                    let chunk = &self.frames[frame_idx].closure.function.chunk;
+                    let field_name = Self::const_str(chunk, field_idx);
+                    let ic_cell = &chunk.ic_slots[ip];
+                    let upval =
+                        self.frames[frame_idx].closure.upvalues[upval_idx as usize].borrow();
+                    let val_res = match &*upval {
+                        Upvalue::Open(slot_idx) => {
+                            Self::read_member(&self.stack[*slot_idx], field_name, ic_cell)
                         }
-                        Value::UserData(data) if data.variant.is_none() => {
-                            if let Some(Value::Record(fields)) = data.values.first() {
-                                if let Some(val) = fields.get(field_name) {
-                                    self.stack.push(val.clone());
-                                } else {
-                                    let err_msg = format!("Field '{field_name}' not found");
-                                    return Err(self.error(span, err_msg));
-                                }
-                            } else {
-                                return Err(self.error(span, "Cannot access member on value"));
-                            }
+                        Upvalue::Closed(container) => {
+                            Self::read_member(container, field_name, ic_cell)
                         }
-                        Value::Vector(v) => {
-                            let val = match field_name {
-                                "x" if !v.is_empty() => v[0],
-                                "y" if v.len() > 1 => v[1],
-                                "z" if v.len() > 2 => v[2],
-                                "w" if v.len() > 3 => v[3],
-                                _ => {
-                                    let err_msg = format!("Vector field '{field_name}' not found");
-                                    return Err(self.error(span, err_msg));
-                                }
-                            };
-                            self.stack.push(Value::Number(val));
-                        }
-                        _ => return Err(self.error(span, "Cannot access member on value")),
-                    }
+                    };
+                    drop(upval);
+                    let val = val_res.map_err(|msg| self.error(span, msg))?;
+                    self.stack.push(val);
                 }
                 Opcode::MemberSet(slot, field_idx) => {
                     let val = self.stack.pop().unwrap();
-                    let field_name =
-                        Self::const_str(&self.frames[frame_idx].closure.function.chunk, field_idx)
-                            .to_string();
                     let target_slot = self.frames[frame_idx].stack_base + slot as usize;
-                    if let Some(msg) =
-                        Self::mutate_member(&mut self.stack[target_slot], field_name, val)
-                    {
+                    let chunk = &self.frames[frame_idx].closure.function.chunk;
+                    let field_name = Self::const_str(chunk, field_idx);
+                    let ic_cell = &chunk.ic_slots[ip];
+                    if let Some(msg) = Self::mutate_member(
+                        &mut self.stack[target_slot],
+                        field_name,
+                        val.clone(),
+                        Some(ic_cell),
+                    ) {
+                        return Err(self.error(span, msg));
+                    }
+                    self.stack.push(val);
+                }
+                Opcode::StoreMemberSet(slot, field_idx) => {
+                    let val = self.stack.pop().unwrap();
+                    let target_slot = self.frames[frame_idx].stack_base + slot as usize;
+                    let chunk = &self.frames[frame_idx].closure.function.chunk;
+                    let field_name = Self::const_str(chunk, field_idx);
+                    let ic_cell = &chunk.ic_slots[ip];
+                    if let Some(msg) = Self::mutate_member(
+                        &mut self.stack[target_slot],
+                        field_name,
+                        val,
+                        Some(ic_cell),
+                    ) {
                         return Err(self.error(span, msg));
                     }
                 }
@@ -915,7 +1901,80 @@ impl<'c> Vm<'c> {
                                 closure: target_closure,
                                 ip: 0,
                                 stack_base,
+                                coerce_int: false,
                             });
+                        }
+                        _ => return Err(self.error(span, "Value is not callable")),
+                    }
+                }
+                Opcode::TailCall(arg_count) => {
+                    let callee_idx = self.stack.len() - arg_count - 1;
+                    let callee = self.stack[callee_idx].clone();
+                    match callee {
+                        Value::Builtin(b) => {
+                            let arg_start = callee_idx + 1;
+                            if !matches!(
+                                b,
+                                Builtin::Map
+                                    | Builtin::Filter
+                                    | Builtin::Fold
+                                    | Builtin::Range
+                                    | Builtin::RangeIter
+                                    | Builtin::Iter
+                                    | Builtin::Collect
+                                    | Builtin::FlatMap
+                                    | Builtin::Any
+                                    | Builtin::All
+                                    | Builtin::Zip
+                                    | Builtin::GroupBy
+                                    | Builtin::FoldBy
+                            ) {
+                                let res = eval_pure_builtin(b, &self.stack[arg_start..])
+                                    .map_err(|msg| self.error(span, msg))?;
+                                self.stack.truncate(callee_idx);
+                                self.stack.push(res);
+                            } else {
+                                let args: Vec<_> = self.stack.drain(arg_start..).collect();
+                                self.stack.pop(); // pop callee
+                                let res = self.call_builtin(b, &args, span)?;
+                                self.stack.push(res);
+                            }
+                        }
+                        Value::BytecodeFunction(target_closure) => {
+                            if arg_count != target_closure.function.arity {
+                                return Err(self.error(
+                                    span,
+                                    format!(
+                                        "Argument count mismatch: expected {}, got {}",
+                                        target_closure.function.arity, arg_count
+                                    ),
+                                ));
+                            }
+                            let stack_base = self.frames[frame_idx].stack_base;
+                            if !self.open_upvalues.is_empty() {
+                                self.close_upvalues(stack_base);
+                            }
+                            let arg_start = callee_idx + 1;
+                            for i in 0..arg_count {
+                                self.stack.swap(stack_base + i, arg_start + i);
+                            }
+                            let needed = stack_base + target_closure.function.chunk.local_count;
+                            self.stack.truncate(stack_base + arg_count);
+                            if needed > stack_base + arg_count {
+                                self.stack.resize(needed, Value::Null);
+                            }
+                            if self.frames[frame_idx]
+                                .closure
+                                .function
+                                .chunk
+                                .code
+                                .get(ip + 1)
+                                == Some(&Opcode::CoerceInt)
+                            {
+                                self.frames[frame_idx].coerce_int = true;
+                            }
+                            self.frames[frame_idx].closure = target_closure;
+                            self.frames[frame_idx].ip = 0;
                         }
                         _ => return Err(self.error(span, "Value is not callable")),
                     }
@@ -965,13 +2024,32 @@ impl<'c> Vm<'c> {
                 }
                 Opcode::CheckRecordField(field_idx) => {
                     let val = self.stack.pop().unwrap();
-                    let field_name =
-                        Self::const_str(&self.frames[frame_idx].closure.function.chunk, field_idx);
+                    let chunk = &self.frames[frame_idx].closure.function.chunk;
+                    let field_name = Self::const_str(chunk, field_idx);
+                    let ic_cell = &chunk.ic_slots[ip];
+                    let hint = ic_cell.get();
                     let contains = match &val {
-                        Value::Record(fields) => fields.contains_key(field_name),
+                        Value::Record(fields) => {
+                            if let Some(slot) = fields.contains_key_with_hint(field_name, hint) {
+                                if slot != hint {
+                                    ic_cell.set(slot);
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        }
                         Value::UserData(data) if data.variant.is_none() => {
                             if let Some(Value::Record(fields)) = data.values.first() {
-                                fields.contains_key(field_name)
+                                if let Some(slot) = fields.contains_key_with_hint(field_name, hint)
+                                {
+                                    if slot != hint {
+                                        ic_cell.set(slot);
+                                    }
+                                    true
+                                } else {
+                                    false
+                                }
                             } else {
                                 false
                             }
@@ -982,13 +2060,27 @@ impl<'c> Vm<'c> {
                 }
                 Opcode::RecordGetAssert(field_idx) => {
                     let val = self.stack.pop().unwrap();
-                    let field_name =
-                        Self::const_str(&self.frames[frame_idx].closure.function.chunk, field_idx);
+                    let chunk = &self.frames[frame_idx].closure.function.chunk;
+                    let field_name = Self::const_str(chunk, field_idx);
+                    let ic_cell = &chunk.ic_slots[ip];
+                    let hint = ic_cell.get();
                     let found = match &val {
-                        Value::Record(fields) => fields.get(field_name).cloned(),
+                        Value::Record(fields) => {
+                            fields.get_with_hint(field_name, hint).map(|(slot, v)| {
+                                if slot != hint {
+                                    ic_cell.set(slot);
+                                }
+                                v.clone()
+                            })
+                        }
                         Value::UserData(data) if data.variant.is_none() => {
                             if let Some(Value::Record(fields)) = data.values.first() {
-                                fields.get(field_name).cloned()
+                                fields.get_with_hint(field_name, hint).map(|(slot, v)| {
+                                    if slot != hint {
+                                        ic_cell.set(slot);
+                                    }
+                                    v.clone()
+                                })
                             } else {
                                 None
                             }
@@ -1060,17 +2152,10 @@ impl<'c> Vm<'c> {
                 }
                 Opcode::AssertRegionBudget => {
                     let val = self.stack.pop().unwrap();
-                    match val {
-                        Value::Number(number)
-                            if number.is_finite()
-                                && number >= 0.0
-                                && number.fract() == 0.0
-                                && number <= usize::MAX as f64 => {}
-                        _ => {
-                            return Err(
-                                self.error(span, "Region budget must be a non-negative integer")
-                            );
-                        }
+                    if val.as_usize_index().is_none() {
+                        return Err(
+                            self.error(span, "Region budget must be a non-negative integer")
+                        );
                     }
                 }
                 Opcode::IterNext {
@@ -1112,9 +2197,13 @@ impl<'c> Vm<'c> {
                     }
                 }
                 Opcode::Return => {
-                    let ret_val = self.stack.pop().unwrap_or(Value::Null);
+                    let mut ret_val = self.stack.pop().unwrap_or(Value::Null);
                     let exiting = self.frames.pop().unwrap();
+                    let coerce_int = exiting.coerce_int;
                     self.unwind_frame(exiting);
+                    if coerce_int {
+                        self.coerce_int_in_place(&mut ret_val, span)?;
+                    }
                     if self.frames.len() == target_depth {
                         return Ok(ret_val);
                     }
@@ -1127,49 +2216,364 @@ impl<'c> Vm<'c> {
     }
 
     #[inline]
+    fn read_index(obj: &Value<'static>, idx: &Value<'static>) -> Result<Value<'static>, String> {
+        match (obj, idx) {
+            (Value::List(items) | Value::Tuple(items), _) => {
+                if let Some(i) = idx.as_usize_index()
+                    && i < items.len()
+                {
+                    Ok(items[i].clone())
+                } else {
+                    Err("Index out of bounds".to_string())
+                }
+            }
+            (Value::Vector(components), _) => {
+                if let Some(i) = idx.as_usize_index()
+                    && i < components.len()
+                {
+                    Ok(Value::Number(components[i]))
+                } else {
+                    Err("Index out of bounds".to_string())
+                }
+            }
+            (Value::Record(fields), Value::String(k)) => fields
+                .get(k)
+                .cloned()
+                .ok_or_else(|| format!("Field '{k}' not found")),
+            _ => Err("Cannot index value".to_string()),
+        }
+    }
+
+    #[inline]
+    fn read_member(
+        obj: &Value<'static>,
+        field_name: &str,
+        ic_cell: &std::cell::Cell<u32>,
+    ) -> Result<Value<'static>, String> {
+        match obj {
+            Value::Record(fields) => {
+                let hint = ic_cell.get();
+                if let Some((slot, val)) = fields.get_with_hint(field_name, hint) {
+                    if slot != hint {
+                        ic_cell.set(slot);
+                    }
+                    Ok(val.clone())
+                } else {
+                    Err(format!("Field '{field_name}' not found"))
+                }
+            }
+            Value::UserData(data) if data.variant.is_none() => {
+                if let Some(Value::Record(fields)) = data.values.first() {
+                    let hint = ic_cell.get();
+                    if let Some((slot, val)) = fields.get_with_hint(field_name, hint) {
+                        if slot != hint {
+                            ic_cell.set(slot);
+                        }
+                        Ok(val.clone())
+                    } else {
+                        Err(format!("Field '{field_name}' not found"))
+                    }
+                } else {
+                    Err("Cannot access member on value".to_string())
+                }
+            }
+            Value::Vector(v) => {
+                let val = match field_name {
+                    "x" if !v.is_empty() => v[0],
+                    "y" if v.len() > 1 => v[1],
+                    "z" if v.len() > 2 => v[2],
+                    "w" if v.len() > 3 => v[3],
+                    _ => return Err(format!("Vector field '{field_name}' not found")),
+                };
+                Ok(Value::Number(val))
+            }
+            _ => Err("Cannot access member on value".to_string()),
+        }
+    }
+
+    #[inline]
     fn mutate_index(
         container: &mut Value<'static>,
         idx: &Value<'static>,
         val: Value<'static>,
     ) -> Option<&'static str> {
         match (container, idx) {
-            (Value::List(items), Value::Number(n)) => {
-                let i = *n as usize;
-                if *n >= 0.0 && n.fract() == 0.0 && i < items.len() {
-                    items[i] = val;
-                    None
-                } else {
+            (Value::List(items), _) => {
+                if let Some(i) = idx.as_usize_index() {
+                    if i < items.len() {
+                        items[i] = val;
+                        None
+                    } else {
+                        Some("Index out of bounds")
+                    }
+                } else if matches!(idx, Value::Int(_) | Value::Number(_)) {
                     Some("Index out of bounds")
+                } else {
+                    Some("Index must be an integer")
                 }
             }
             (Value::Record(fields), Value::String(k)) => {
-                fields.insert(k.clone(), val);
+                if let Some(slot) = fields.get_mut(k.as_str()) {
+                    *slot = val;
+                } else {
+                    fields.insert(k.clone(), val);
+                }
                 None
             }
-            _ => Some("Cannot mutate target by index"),
+            (Value::Record(_), _) => Some("Record index must be a string"),
+            (Value::Vector(components), _) => {
+                if let Some(i) = idx.as_usize_index() {
+                    if i < components.len() {
+                        let Some(num) = val.as_f64() else {
+                            return Some("Vector component must be a number");
+                        };
+                        if !num.is_finite() {
+                            return Some("Non-finite vector result");
+                        }
+                        components[i] = num;
+                        None
+                    } else {
+                        Some("Index out of bounds")
+                    }
+                } else if matches!(idx, Value::Int(_) | Value::Number(_)) {
+                    Some("Index out of bounds")
+                } else {
+                    Some("Index must be an integer")
+                }
+            }
+            _ => Some("Indexing requires a list, record or vector"),
         }
     }
 
     #[inline]
     fn mutate_member(
         container: &mut Value<'static>,
-        field_name: String,
+        field_name: &str,
         val: Value<'static>,
+        ic_cell: Option<&std::cell::Cell<u32>>,
     ) -> Option<&'static str> {
         match container {
             Value::Record(fields) => {
-                fields.insert(field_name, val);
+                let hint = ic_cell.map_or(u32::MAX, std::cell::Cell::get);
+                if let Some((slot_idx, slot)) = fields.get_mut_with_hint(field_name, hint) {
+                    if let Some(cell) = ic_cell
+                        && slot_idx != hint
+                    {
+                        cell.set(slot_idx);
+                    }
+                    *slot = val;
+                } else {
+                    fields.insert(field_name.to_owned(), val);
+                }
                 None
             }
             Value::UserData(data) if data.variant.is_none() => {
                 if let Some(Value::Record(fields)) = data.values.first_mut() {
-                    fields.insert(field_name, val);
+                    let hint = ic_cell.map_or(u32::MAX, std::cell::Cell::get);
+                    let Some((slot_idx, slot)) = fields.get_mut_with_hint(field_name, hint) else {
+                        return Some("Unknown struct field");
+                    };
+                    if let Some(cell) = ic_cell
+                        && slot_idx != hint
+                    {
+                        cell.set(slot_idx);
+                    }
+                    *slot = val;
                     None
                 } else {
-                    Some("Cannot mutate member on value")
+                    Some("Member access requires a struct or record")
                 }
             }
-            _ => Some("Cannot mutate member on value"),
+            Value::Vector(components) => {
+                let axis = match field_name {
+                    "x" => 0,
+                    "y" => 1,
+                    "z" => 2,
+                    "w" => 3,
+                    _ => return Some("Unknown vector component"),
+                };
+                if axis >= components.len() {
+                    return Some("Vector component out of bounds");
+                }
+                let Some(num) = val.as_f64() else {
+                    return Some("Vector component must be a number");
+                };
+                if !num.is_finite() {
+                    return Some("Non-finite vector result");
+                }
+                components[axis] = num;
+                None
+            }
+            _ => Some("Member access requires a record, struct or vector"),
+        }
+    }
+
+    fn read_path_vm(
+        current: &Value<'static>,
+        keys: &[Value<'static>],
+        member_mask: u32,
+        step_idx: usize,
+    ) -> Result<Value<'static>, &'static str> {
+        let Some((head, rest)) = keys.split_first() else {
+            return Ok(current.clone());
+        };
+        let is_member = (member_mask & (1u32 << step_idx)) != 0;
+        if is_member {
+            let Value::String(field_name) = head else {
+                return Err("Invalid member name");
+            };
+            match current {
+                Value::Record(fields) => {
+                    let sub = fields.get(field_name).ok_or("Unknown field")?;
+                    Self::read_path_vm(sub, rest, member_mask, step_idx + 1)
+                }
+                Value::UserData(data) if data.variant.is_none() => {
+                    let Some(Value::Record(fields)) = data.values.first() else {
+                        return Err("Member access requires a struct or record");
+                    };
+                    let sub = fields.get(field_name).ok_or("Unknown struct field")?;
+                    Self::read_path_vm(sub, rest, member_mask, step_idx + 1)
+                }
+                Value::Vector(components) => {
+                    let axis = match field_name.as_str() {
+                        "x" => 0,
+                        "y" => 1,
+                        "z" => 2,
+                        "w" => 3,
+                        _ => return Err("Unknown vector component"),
+                    };
+                    if axis >= components.len() {
+                        return Err("Vector component out of bounds");
+                    }
+                    if rest.is_empty() {
+                        Ok(Value::Number(components[axis]))
+                    } else {
+                        Err("Vector components do not support nested access")
+                    }
+                }
+                _ => Err("Member access requires a record, struct or vector"),
+            }
+        } else {
+            match (current, head) {
+                (Value::List(items) | Value::Tuple(items), _) => {
+                    if let Some(i) = head.as_usize_index() {
+                        if i < items.len() {
+                            Self::read_path_vm(&items[i], rest, member_mask, step_idx + 1)
+                        } else {
+                            Err("Index out of bounds")
+                        }
+                    } else if matches!(head, Value::Int(_) | Value::Number(_)) {
+                        Err("Index out of bounds")
+                    } else {
+                        Err("Index must be an integer")
+                    }
+                }
+                (Value::Record(fields), Value::String(k)) => {
+                    let sub = fields.get(k).ok_or("Unknown field")?;
+                    Self::read_path_vm(sub, rest, member_mask, step_idx + 1)
+                }
+                (Value::Record(_), _) => Err("Record index must be a string"),
+                (Value::Vector(components), _) => {
+                    if let Some(i) = head.as_usize_index() {
+                        if i < components.len() {
+                            if rest.is_empty() {
+                                Ok(Value::Number(components[i]))
+                            } else {
+                                Err("Vector components do not support nested access")
+                            }
+                        } else {
+                            Err("Index out of bounds")
+                        }
+                    } else if matches!(head, Value::Int(_) | Value::Number(_)) {
+                        Err("Index out of bounds")
+                    } else {
+                        Err("Index must be an integer")
+                    }
+                }
+                _ => Err("Indexing requires a list, record or vector"),
+            }
+        }
+    }
+
+    fn mutate_path_vm(
+        current: &mut Value<'static>,
+        keys: &[Value<'static>],
+        member_mask: u32,
+        step_idx: usize,
+        val: Value<'static>,
+    ) -> Option<&'static str> {
+        let Some((head, rest)) = keys.split_first() else {
+            *current = val;
+            return None;
+        };
+        let is_member = (member_mask & (1u32 << step_idx)) != 0;
+        if rest.is_empty() {
+            if is_member {
+                let Value::String(field_name) = head else {
+                    return Some("Invalid member name");
+                };
+                return Self::mutate_member(current, field_name.as_str(), val, None);
+            } else {
+                return Self::mutate_index(current, head, val);
+            }
+        }
+        if is_member {
+            let Value::String(field_name) = head else {
+                return Some("Invalid member name");
+            };
+            match current {
+                Value::Record(fields) => {
+                    let Some(sub) = fields.get_mut(field_name) else {
+                        return Some("Unknown field");
+                    };
+                    Self::mutate_path_vm(sub, rest, member_mask, step_idx + 1, val)
+                }
+                Value::UserData(data) if data.variant.is_none() => {
+                    let Some(Value::Record(fields)) = data.values.first_mut() else {
+                        return Some("Member access requires a struct or record");
+                    };
+                    let Some(sub) = fields.get_mut(field_name) else {
+                        return Some("Unknown struct field");
+                    };
+                    Self::mutate_path_vm(sub, rest, member_mask, step_idx + 1, val)
+                }
+                Value::Vector(_) => Some("Vector components do not support nested access"),
+                _ => Some("Member access requires a record, struct or vector"),
+            }
+        } else {
+            match (current, head) {
+                (Value::List(items), _) => {
+                    if let Some(i) = head.as_usize_index() {
+                        if i < items.len() {
+                            Self::mutate_path_vm(
+                                &mut items[i],
+                                rest,
+                                member_mask,
+                                step_idx + 1,
+                                val,
+                            )
+                        } else {
+                            Some("Index out of bounds")
+                        }
+                    } else if matches!(head, Value::Int(_) | Value::Number(_)) {
+                        Some("Index out of bounds")
+                    } else {
+                        Some("Index must be an integer")
+                    }
+                }
+                (Value::Record(fields), Value::String(k)) => {
+                    let Some(sub) = fields.get_mut(k) else {
+                        return Some("Unknown field");
+                    };
+                    Self::mutate_path_vm(sub, rest, member_mask, step_idx + 1, val)
+                }
+                (Value::Record(_), _) => Some("Record index must be a string"),
+                (Value::Vector(_), Value::Int(_) | Value::Number(_)) => {
+                    Some("Vector components do not support nested access")
+                }
+                (Value::Vector(_), _) => Some("Index must be an integer"),
+                _ => Some("Indexing requires a list, record or vector"),
+            }
         }
     }
 
@@ -1406,16 +2810,28 @@ impl<'c> Vm<'c> {
                     let next = self.invoke_callable(fold_fn, &[current, item.clone()], span)?;
                     groups.insert(key, next);
                 }
-                Ok(Value::Record(groups))
+                Ok(Value::Record(RecordMap::from(groups)))
             }
             Builtin::Range | Builtin::RangeIter => {
                 let (start, end, step) = match args {
-                    [Value::Number(start), Value::Number(end)] => (*start, *end, 1.0),
-                    [
-                        Value::Number(start),
-                        Value::Number(end),
-                        Value::Number(step),
-                    ] => (*start, *end, *step),
+                    [a, b] => {
+                        let (Some(start), Some(end)) = (a.as_f64(), b.as_f64()) else {
+                            return Err(
+                                self.error(span, "range expects start, end and optional step")
+                            );
+                        };
+                        (start, end, 1.0)
+                    }
+                    [a, b, c] => {
+                        let (Some(start), Some(end), Some(step)) =
+                            (a.as_f64(), b.as_f64(), c.as_f64())
+                        else {
+                            return Err(
+                                self.error(span, "range expects start, end and optional step")
+                            );
+                        };
+                        (start, end, step)
+                    }
                     _ => return Err(self.error(span, "range expects start, end and optional step")),
                 };
                 if step == 0.0 {
@@ -1483,22 +2899,17 @@ impl<'c> Vm<'c> {
                     );
                 }
                 let source = &args[0];
-                let Value::Number(limit) = &args[1] else {
+                let Some(max_count) = args[1].as_usize_index() else {
+                    if matches!(args[1], Value::Int(_) | Value::Number(_)) {
+                        return Err(self.error(
+                            span,
+                            "Collection limit must be a nonnegative representable integer",
+                        ));
+                    }
                     return Err(
                         self.error(span, "collect requires a sequence and maximum item count")
                     );
                 };
-                if !limit.is_finite()
-                    || *limit < 0.0
-                    || limit.fract() != 0.0
-                    || *limit >= usize::MAX as f64
-                {
-                    return Err(self.error(
-                        span,
-                        "Collection limit must be a nonnegative representable integer",
-                    ));
-                }
-                let max_count = *limit as usize;
                 let mut iter = BytecodeIterator::new(source, span)?;
                 let mut output = Vec::new();
                 for _ in 0..max_count {

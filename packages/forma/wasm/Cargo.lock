@@ -22,7 +22,7 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "forma-language-wasm"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "js-sys",
  "serde_json",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "themoretheless-tokenizer-forma"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "serde_json",
 ]

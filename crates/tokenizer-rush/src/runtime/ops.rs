@@ -25,6 +25,7 @@ pub(crate) fn is_truthy(value: &Value<'_>) -> bool {
     match value {
         Value::Null => false,
         Value::Bool(b) => *b,
+        Value::Int(i) => *i != 0,
         Value::Number(n) => *n != 0.0,
         Value::String(s) => !s.is_empty(),
         Value::List(l) => !l.is_empty(),
@@ -48,7 +49,9 @@ pub(crate) fn is_non_comparable(value: &Value<'_>) -> bool {
 }
 
 #[inline]
-pub(crate) fn check_vector_finite(values: Vec<f64>) -> Result<Value<'static>, &'static str> {
+pub(crate) fn check_vector_finite(
+    values: crate::InlineVec,
+) -> Result<Value<'static>, &'static str> {
     if values.iter().all(|x| x.is_finite()) {
         Ok(Value::Vector(values))
     } else {
@@ -64,6 +67,17 @@ pub(crate) fn eval_unary_value<'s>(
     strict_bool_not: bool,
 ) -> Result<Value<'s>, &'static str> {
     match (operator, value) {
+        ("-", Value::Int(i)) => i.checked_neg().map(Value::Int).ok_or("Integer overflow"),
+        ("+", Value::Int(i)) => Ok(Value::Int(i)),
+        ("~", Value::Int(i)) => Ok(Value::Int(!i)),
+        ("~", Value::Number(n)) => {
+            if let Some(i) = Value::Number(n).as_exact_i64() {
+                Ok(Value::Int(!i))
+            } else {
+                Err("Bitwise operations require integer operands")
+            }
+        }
+        ("~", _) => Err("Bitwise operations require integer operands"),
         ("-", Value::Number(n)) => {
             let res = -n;
             if res.is_finite() {
@@ -102,6 +116,95 @@ pub(crate) fn eval_unary_value<'s>(
     }
 }
 
+#[inline]
+pub(crate) fn eval_int_binary(
+    operator: &str,
+    a: i64,
+    b: i64,
+) -> Result<Value<'static>, &'static str> {
+    match operator {
+        "+" => a.checked_add(b).map(Value::Int).ok_or("Integer overflow"),
+        "-" => a.checked_sub(b).map(Value::Int).ok_or("Integer overflow"),
+        "*" => a.checked_mul(b).map(Value::Int).ok_or("Integer overflow"),
+        "/" => {
+            if b == 0 {
+                Err("Division by zero")
+            } else {
+                a.checked_div(b).map(Value::Int).ok_or("Integer overflow")
+            }
+        }
+        "%" => {
+            if b == 0 {
+                Err("Division by zero")
+            } else {
+                a.checked_rem(b).map(Value::Int).ok_or("Integer overflow")
+            }
+        }
+        "**" => {
+            if b < 0 {
+                Err("Negative exponent in integer power")
+            } else {
+                u32::try_from(b)
+                    .ok()
+                    .and_then(|e| a.checked_pow(e))
+                    .map(Value::Int)
+                    .ok_or("Integer overflow")
+            }
+        }
+        "&" => Ok(Value::Int(a & b)),
+        "^" => Ok(Value::Int(a ^ b)),
+        "<<" => u32::try_from(b)
+            .ok()
+            .and_then(|s| a.checked_shl(s))
+            .map(Value::Int)
+            .ok_or("Invalid shift count"),
+        ">>" => u32::try_from(b)
+            .ok()
+            .and_then(|s| a.checked_shr(s))
+            .map(Value::Int)
+            .ok_or("Invalid shift count"),
+        "<" => Ok(Value::Bool(a < b)),
+        ">" => Ok(Value::Bool(a > b)),
+        "<=" => Ok(Value::Bool(a <= b)),
+        ">=" => Ok(Value::Bool(a >= b)),
+        _ => Err("Unsupported binary operator"),
+    }
+}
+
+pub(crate) fn values_equal(left: &Value<'_>, right: &Value<'_>) -> bool {
+    match (left, right) {
+        (Value::Int(a), Value::Int(b)) => a == b,
+        (Value::Number(a), Value::Number(b)) => a == b,
+        (Value::Int(i), Value::Number(f)) | (Value::Number(f), Value::Int(i)) => {
+            super::int_f64_eq(*i, *f)
+        }
+        (Value::List(a), Value::List(b)) | (Value::Tuple(a), Value::Tuple(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(x, y)| values_equal(x, y))
+        }
+        (Value::Record(a), Value::Record(b)) => {
+            a.len() == b.len()
+                && (std::rc::Rc::ptr_eq(a.shape(), b.shape()) || a.keys_slice() == b.keys_slice())
+                && a.values_slice()
+                    .iter()
+                    .zip(b.values_slice())
+                    .all(|(va, vb)| values_equal(va, vb))
+        }
+        (Value::Variant(ta, va), Value::Variant(tb, vb)) => {
+            ta == tb && va.len() == vb.len() && va.iter().zip(vb).all(|(x, y)| values_equal(x, y))
+        }
+        (Value::UserData(a), Value::UserData(b)) => {
+            a.type_name == b.type_name
+                && a.variant == b.variant
+                && a.values.len() == b.values.len()
+                && a.values
+                    .iter()
+                    .zip(&b.values)
+                    .all(|(x, y)| values_equal(x, y))
+        }
+        _ => left == right,
+    }
+}
+
 /// Shared binary arithmetic, comparison, vector/matrix/quaternion/angle/collection evaluation.
 #[inline]
 pub(crate) fn eval_binary_values<'s>(
@@ -113,11 +216,65 @@ pub(crate) fn eval_binary_values<'s>(
         if is_non_comparable(&left) || is_non_comparable(&right) {
             return Err("Functions and lazy sequences cannot be compared");
         }
-        return Ok(Value::Bool(if operator == "==" {
-            left == right
-        } else {
-            left != right
-        }));
+        let eq = values_equal(&left, &right);
+        return Ok(Value::Bool(if operator == "==" { eq } else { !eq }));
+    }
+
+    // Fast path for Int op Int
+    if let (Value::Int(a), Value::Int(b)) = (&left, &right) {
+        return eval_int_binary(operator, *a, *b);
+    }
+
+    // Bitwise operators on Int or exact-integer Number
+    if matches!(operator, "&" | "^" | "<<" | ">>") {
+        if let (Some(a), Some(b)) = (left.as_exact_i64(), right.as_exact_i64()) {
+            return eval_int_binary(operator, a, b);
+        }
+        return Err("Bitwise operations require integer operands");
+    }
+
+    // Mixed Int and Number
+    if let (Value::Int(i), Value::Number(f)) = (&left, &right) {
+        let (i, f) = (*i, *f);
+        if matches!(operator, "<" | ">" | "<=" | ">=") {
+            let Some(ord) = super::int_f64_cmp(i, f) else {
+                return Ok(Value::Bool(false));
+            };
+            let res = match operator {
+                "<" => ord.is_lt(),
+                ">" => ord.is_gt(),
+                "<=" => ord.is_le(),
+                ">=" => ord.is_ge(),
+                _ => unreachable!(),
+            };
+            return Ok(Value::Bool(res));
+        }
+        if f.is_finite() && f.fract() == 0.0 && f.abs() <= 9_007_199_254_740_991.0 {
+            return eval_int_binary(operator, i, f as i64);
+        }
+        let a = i as f64;
+        return eval_binary_values(operator, Value::Number(a), Value::Number(f));
+    }
+    if let (Value::Number(f), Value::Int(i)) = (&left, &right) {
+        let (f, i) = (*f, *i);
+        if matches!(operator, "<" | ">" | "<=" | ">=") {
+            let Some(ord) = super::int_f64_cmp(i, f) else {
+                return Ok(Value::Bool(false));
+            };
+            let res = match operator {
+                "<" => ord.is_gt(),
+                ">" => ord.is_lt(),
+                "<=" => ord.is_ge(),
+                ">=" => ord.is_le(),
+                _ => unreachable!(),
+            };
+            return Ok(Value::Bool(res));
+        }
+        if f.is_finite() && f.fract() == 0.0 && f.abs() <= 9_007_199_254_740_991.0 {
+            return eval_int_binary(operator, f as i64, i);
+        }
+        let b = i as f64;
+        return eval_binary_values(operator, Value::Number(f), Value::Number(b));
     }
 
     // Fast path for Number op Number
@@ -198,8 +355,24 @@ pub(crate) fn eval_binary_values<'s>(
                 Err("Non-finite angle")
             }
         }
+        (Value::Angle(a), Value::Int(b), "*") | (Value::Int(b), Value::Angle(a), "*") => {
+            let r = a * (b as f64);
+            if r.is_finite() {
+                Ok(Value::Angle(r))
+            } else {
+                Err("Non-finite angle")
+            }
+        }
         (Value::Angle(a), Value::Number(b), "/") => {
             let r = a / b;
+            if r.is_finite() {
+                Ok(Value::Angle(r))
+            } else {
+                Err("Non-finite angle")
+            }
+        }
+        (Value::Angle(a), Value::Int(b), "/") => {
+            let r = a / (b as f64);
             if r.is_finite() {
                 Ok(Value::Angle(r))
             } else {
@@ -244,6 +417,17 @@ pub(crate) fn eval_binary_values<'s>(
                 Err("Non-finite vector result")
             }
         }
+        (Value::Vector(mut a), Value::Int(b), "*") => {
+            let b = b as f64;
+            for x in &mut a {
+                *x *= b;
+            }
+            if a.iter().all(|x| x.is_finite()) {
+                Ok(Value::Vector(a))
+            } else {
+                Err("Non-finite vector result")
+            }
+        }
         (Value::Vector(mut a), Value::Number(b), "/") => {
             for x in &mut a {
                 *x /= b;
@@ -254,7 +438,29 @@ pub(crate) fn eval_binary_values<'s>(
                 Err("Non-finite vector result")
             }
         }
+        (Value::Vector(mut a), Value::Int(b), "/") => {
+            let b = b as f64;
+            for x in &mut a {
+                *x /= b;
+            }
+            if a.iter().all(|x| x.is_finite()) {
+                Ok(Value::Vector(a))
+            } else {
+                Err("Non-finite vector result")
+            }
+        }
         (Value::Number(a), Value::Vector(mut b), "*") => {
+            for x in &mut b {
+                *x *= a;
+            }
+            if b.iter().all(|x| x.is_finite()) {
+                Ok(Value::Vector(b))
+            } else {
+                Err("Non-finite vector result")
+            }
+        }
+        (Value::Int(a), Value::Vector(mut b), "*") => {
+            let a = a as f64;
             for x in &mut b {
                 *x *= a;
             }
@@ -279,8 +485,11 @@ pub(crate) fn format_value_for_display(value: &Value<'_>, out: &mut String, dept
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Value::Int(i) => {
+            let _ = write!(out, "{i}");
+        }
         Value::Number(n) => {
-            if n.fract() == 0.0 && *n >= (i64::MIN as f64) && *n <= (i64::MAX as f64) {
+            if n.fract() == 0.0 && *n >= (i64::MIN as f64) && *n < 9_223_372_036_854_775_808.0 {
                 let _ = write!(out, "{}", *n as i64);
             } else {
                 let _ = write!(out, "{}", n);
@@ -429,5 +638,56 @@ pub(crate) fn format_value_for_display(value: &Value<'_>, out: &mut String, dept
         Value::Polygon(_) => out.push_str("<Polygon>"),
         Value::Matrix(_) => out.push_str("<Matrix4>"),
         Value::Quaternion(_) => out.push_str("<Quaternion>"),
+    }
+}
+
+#[cfg(test)]
+mod remainder_tests {
+    use super::exact_remainder;
+    #[test]
+    fn optimized_remainder_matches_ieee_bits() {
+        let edge = [
+            0.,
+            -0.,
+            1.,
+            -1.,
+            3.,
+            -3.,
+            0.25,
+            -0.25,
+            9_007_199_254_740_990.,
+            -9_007_199_254_740_990.,
+            9_007_199_254_740_991.,
+            -9_007_199_254_740_991.,
+            9_007_199_254_740_992.,
+            f64::MAX,
+            f64::MIN_POSITIVE,
+            f64::from_bits(1),
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        for a in edge {
+            for b in edge {
+                compare(a, b);
+            }
+        }
+        let mut state = 0x1234567812345678u64;
+        for _ in 0..100_000 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let a = (state as i64 % 9_007_199_254_740_991) as f64;
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let b = (state as i64 % 9_007_199_254_740_991) as f64;
+            compare(a, b);
+            compare(f64::from_bits(state), a);
+        }
+    }
+    fn compare(a: f64, b: f64) {
+        let expected = a % b;
+        let actual = exact_remainder(a, b);
+        if expected.is_nan() {
+            assert!(actual.is_nan());
+        } else {
+            assert_eq!(actual.to_bits(), expected.to_bits(), "{a} % {b}");
+        }
     }
 }

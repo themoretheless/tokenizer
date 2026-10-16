@@ -436,12 +436,12 @@ impl<'s> Writer<'s> {
             | ExprKind::Match { .. } => 0,
             ExprKind::Pipeline { .. } => 1,
             ExprKind::Binary { operator, .. } => crate::parser::binding(operator).unwrap().0,
-            ExprKind::Unary { .. } => 13,
+            ExprKind::Unary { .. } => 19,
             ExprKind::Try(_)
             | ExprKind::Call { .. }
             | ExprKind::Member { .. }
-            | ExprKind::Index { .. } => 20,
-            _ => 21,
+            | ExprKind::Index { .. } => 22,
+            _ => 23,
         };
         // Keeping comments with newlines inside grouping preserves expression continuation.
         let multiline_comment = self.comments[self.next..]
@@ -462,13 +462,13 @@ impl<'s> Writer<'s> {
             ExprKind::Bool(value) => self.text(if *value { "true" } else { "false" }),
             ExprKind::Null => self.text("null"),
             ExprKind::Try(value) => {
-                self.expr(value, 20);
+                self.expr(value, 22);
                 self.text("?");
             }
             ExprKind::Unary { operator, value } => {
                 self.text(operator);
                 self.text(" ");
-                self.expr(value, 13);
+                self.expr(value, 19);
             }
             ExprKind::Binary {
                 operator,
@@ -494,18 +494,18 @@ impl<'s> Writer<'s> {
                 self.expr(value, 0);
             }
             ExprKind::Call { callee, arguments } => {
-                self.expr(callee, 20);
+                self.expr(callee, 22);
                 self.text("(");
                 self.items(arguments);
                 self.text(")");
             }
             ExprKind::Member { object, field } => {
-                self.expr(object, 20);
+                self.expr(object, 22);
                 self.text(".");
                 self.name(field);
             }
             ExprKind::Index { object, index } => {
-                self.expr(object, 20);
+                self.expr(object, 22);
                 self.text("[");
                 self.expr(index, 0);
                 self.text("]");
