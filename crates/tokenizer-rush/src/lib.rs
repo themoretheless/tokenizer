@@ -37,7 +37,9 @@ pub use runtime::{
     SourceLocation, StateValue, UserData, Value, ValueType, WakeRequest, builtin_catalog, evaluate,
     json_parse, json_stringify,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub mod repl;
+#[cfg(not(target_arch = "wasm32"))]
 pub use repl::{ReplCommand, ReplOutcome, ReplSession, is_input_complete, pretty_print_value};
 pub mod bytecode;
 pub use bytecode::{
