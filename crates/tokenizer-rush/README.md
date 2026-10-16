@@ -295,8 +295,8 @@ assert!(!analyze(source).is_valid());
   loop bindings and match bindings are immutable.
 - Nested blocks may shadow outer names. A match binding belongs only to its arm;
   `_` does not declare a binding. Names retain exact spelling, including `$`.
-- This analysis pass accepts member/index assignment syntax; runtime currently
-  rejects such writes even for `mut`. Only assignment to a mutable name executes.
+- This analysis pass accepts member/index assignment syntax; runtime executes
+  member and index mutations when the root binding is `mut`.
 - Declarations become visible in source order, including while inspecting nested
   function bodies. References to later declarations are not resolved. Unknown
   names remain accepted for external commands and host-provided pipeline fields.
@@ -561,12 +561,13 @@ language direction. Existing mutable declarations must use `mut` or `let mut`.
 Mutable declarations execute with run-local cells. Immutable `let` executes
 exactly like `const`.
 
-`mut` variables support `=`, `+=`, `-=`, `*=`, `/=` and `%=`. Closures share
+`mut` variables support `=`, `+=`, `-=`, `*=`, `/=` and `%=` (including member
+and index paths on lists, records, structs and vectors). Closures share
 captured mutable cells, including when returned from a function. Each program
 run owns fresh cells; typed variables validate every assigned value. Cells use
 arena indices so closure/cell cycles do not form reference-counting leaks.
 Returned closures are inspection values: this API does not invoke them after
-their run ends. Field/index mutation remains unsupported by the evaluator.
+their run ends.
 
 `for name in list` and boolean `while` loops now execute with scoped bodies,
 `break`, `continue` and propagation of function `return`. For bindings are fresh
@@ -734,8 +735,8 @@ cargo run -p themoretheless-tokenizer-rush --bin rush -- \
 - `x` and `$x` are distinct names; `$` alone is invalid.
 - Declarations are visible in source order. Named functions can call themselves;
   mutual recursion and references to later bindings are not supported.
-- `let` and `const` are immutable. Explicit `mut` enables reassignment; captured
-  mutable bindings are shared within a run. Field/index assignment is not implemented.
+- `let` and `const` are immutable. Explicit `mut` enables reassignment and
+  member/index mutation; captured mutable bindings are shared within a run.
 - Numbers are finite IEEE 754 f64 values. There is no separate integer type;
   integer precision above 2^53 is not guaranteed. Non-finite results are errors.
 - Missing names, fields and indices produce errors. A function without an explicit

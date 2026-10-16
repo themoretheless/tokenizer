@@ -767,8 +767,8 @@ impl<'a> Parser<'a> {
                 self.error("Unexpected content after component; only one component is supported")
             );
         }
-        if buttons.len() > 256 {
-            return Err(self.error("At most 256 controls per scene"));
+        if buttons.len() > 1024 {
+            return Err(self.error("At most 1024 controls per scene"));
         }
         if seen.contains("clip") && seen.contains("overflow") {
             return Err(self.error("Use clip or legacy overflow, not both"));
@@ -866,8 +866,8 @@ impl<'a> Parser<'a> {
             let name = self.ident()?;
             if name == "Button" {
                 buttons.push(self.button()?);
-                if buttons.len() > 256 {
-                    return Err(self.error("At most 256 controls per scene"));
+                if buttons.len() > 1024 {
+                    return Err(self.error("At most 1024 controls per scene"));
                 }
                 continue;
             }

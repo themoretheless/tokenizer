@@ -123,29 +123,60 @@ pub(crate) fn run(source: &str, limits: InputLimits) -> (Lexed, bool) {
             }
             kind = SyntaxKind::StringLit;
         } else if c.is_ascii_digit() {
-            i += 1;
-            while i < source.len() && source.as_bytes()[i].is_ascii_digit() {
-                i += 1;
-            }
-            if source.as_bytes().get(i) == Some(&b'.')
-                && source.as_bytes().get(i + 1).is_some_and(u8::is_ascii_digit)
+            let bytes = source.as_bytes();
+            let mut is_float = false;
+            if c == '0'
+                && matches!(
+                    bytes.get(i + 1),
+                    Some(b'x' | b'X' | b'b' | b'B' | b'o' | b'O')
+                )
             {
+                let radix_char = bytes[i + 1];
+                i += 2;
+                let digits_start = i;
+                while i < bytes.len() {
+                    let b = bytes[i];
+                    let ok = match radix_char {
+                        b'x' | b'X' => b.is_ascii_hexdigit() || b == b'_',
+                        b'b' | b'B' => matches!(b, b'0' | b'1' | b'_'),
+                        b'o' | b'O' => matches!(b, b'0'..=b'7' | b'_'),
+                        _ => false,
+                    };
+                    if ok {
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let has_digit = source[digits_start..i].bytes().any(|b| b != b'_');
+                if !has_digit {
+                    error = Some(("invalid-number", "Expected digits after radix prefix"));
+                }
+            } else {
                 i += 1;
-                while i < source.len() && source.as_bytes()[i].is_ascii_digit() {
+                while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'_') {
                     i += 1;
                 }
-            }
-            if matches!(source.as_bytes().get(i), Some(b'e' | b'E')) {
-                i += 1;
-                if matches!(source.as_bytes().get(i), Some(b'+' | b'-')) {
+                if bytes.get(i) == Some(&b'.') && bytes.get(i + 1).is_some_and(u8::is_ascii_digit) {
+                    is_float = true;
                     i += 1;
+                    while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'_') {
+                        i += 1;
+                    }
                 }
-                let digits = i;
-                while i < source.len() && source.as_bytes()[i].is_ascii_digit() {
+                if matches!(bytes.get(i), Some(b'e' | b'E')) {
+                    is_float = true;
                     i += 1;
-                }
-                if digits == i {
-                    error = Some(("invalid-number", "Expected exponent digits"));
+                    if matches!(bytes.get(i), Some(b'+' | b'-')) {
+                        i += 1;
+                    }
+                    let digits = i;
+                    while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'_') {
+                        i += 1;
+                    }
+                    if !source[digits..i].bytes().any(|b| b.is_ascii_digit()) {
+                        error = Some(("invalid-number", "Expected exponent digits"));
+                    }
                 }
             }
             if source[i..]
@@ -153,6 +184,7 @@ pub(crate) fn run(source: &str, limits: InputLimits) -> (Lexed, bool) {
                 .next()
                 .is_some_and(|ch| ch.is_alphabetic() || ch == '_')
             {
+                let suffix_start = i;
                 while i < source.len() {
                     let ch = source[i..].chars().next().unwrap();
                     if !ch.is_alphanumeric() && ch != '_' {
@@ -160,10 +192,14 @@ pub(crate) fn run(source: &str, limits: InputLimits) -> (Lexed, bool) {
                     }
                     i += ch.len_utf8();
                 }
-                error = Some((
-                    "invalid-number",
-                    "A number cannot contain an identifier suffix",
-                ));
+                let suffix = &source[suffix_start..i];
+                let valid_int_suffix = !is_float && matches!(suffix, "i" | "i64");
+                if !valid_int_suffix && error.is_none() {
+                    error = Some((
+                        "invalid-number",
+                        "A number cannot contain an identifier suffix",
+                    ));
+                }
             }
             kind = SyntaxKind::NumberLit;
         } else if c.is_alphabetic() || c == '_' || c == '$' {
@@ -197,17 +233,22 @@ pub(crate) fn run(source: &str, limits: InputLimits) -> (Lexed, bool) {
             };
         } else {
             let operator = match rest.as_bytes() {
+                [b'<', b'<', b'=', ..] | [b'>', b'>', b'=', ..] => Some(3usize),
                 [b'-', b'>', ..]
                 | [b'=', b'>', ..]
                 | [b'=', b'=', ..]
                 | [b'!', b'=', ..]
                 | [b'<', b'=', ..]
                 | [b'>', b'=', ..]
+                | [b'<', b'<', ..]
+                | [b'>', b'>', ..]
                 | [b'+', b'=', ..]
                 | [b'-', b'=', ..]
                 | [b'*', b'=', ..]
                 | [b'/', b'=', ..]
                 | [b'%', b'=', ..]
+                | [b'&', b'=', ..]
+                | [b'^', b'=', ..]
                 | [b'*', b'*', ..]
                 | [b'&', b'&', ..]
                 | [b'|', b'|', ..] => Some(2usize),
@@ -222,7 +263,19 @@ pub(crate) fn run(source: &str, limits: InputLimits) -> (Lexed, bool) {
                     SyntaxKind::Punctuation
                 } else if matches!(
                     c,
-                    '+' | '-' | '*' | '/' | '%' | '=' | '<' | '>' | '!' | '|' | '?'
+                    '+' | '-'
+                        | '*'
+                        | '/'
+                        | '%'
+                        | '='
+                        | '<'
+                        | '>'
+                        | '!'
+                        | '|'
+                        | '?'
+                        | '&'
+                        | '^'
+                        | '~'
                 ) {
                     SyntaxKind::Operator
                 } else {
@@ -288,6 +341,6 @@ fn is_keyword(text: &str) -> bool {
 fn is_type_name(text: &str) -> bool {
     matches!(
         text,
-        "int" | "f64" | "str" | "bool" | "list" | "map" | "float" | "string"
+        "int" | "i64" | "f64" | "str" | "bool" | "list" | "map" | "float" | "string"
     )
 }

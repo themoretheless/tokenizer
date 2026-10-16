@@ -41,7 +41,7 @@ fn matrices_compose_right_to_left_and_distinguish_directions() {
     let source = "const m = translation(vec3(10, 20, 30)) * scaling(vec3(2, 3, 4))\ntransform_point(m, vec3(1, 1, 1))";
     assert_eq!(
         evaluate(source, 200).unwrap(),
-        Value::Vector(vec![12., 23., 34.])
+        Value::vec3(12., 23., 34.)
     );
     assert_eq!(
         evaluate(
@@ -49,7 +49,7 @@ fn matrices_compose_right_to_left_and_distinguish_directions() {
             100
         )
         .unwrap(),
-        Value::Vector(vec![1., 2., 3.])
+        Value::vec3(1., 2., 3.)
     );
     let Value::Vector(v) =
         evaluate("transform_point(rotation_z(deg(90)), vec3(1,0,0))", 100).unwrap()
@@ -374,7 +374,7 @@ fn unary_vectors_preserve_dimensions_and_negate_components() {
     ] {
         assert_eq!(
             evaluate(source, 1000).unwrap(),
-            Value::Vector(expected),
+            Value::Vector(expected.into()),
             "{source}"
         );
     }

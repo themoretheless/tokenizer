@@ -31,11 +31,11 @@ fn bezier_endpoints_midpoint_and_tangents() {
     );
     assert_eq!(
         run("import curves\ncurves.quadratic(vec2(0,0),vec2(1,2),vec2(2,0),0.5)"),
-        Value::Vector(vec![1., 1.])
+        Value::vec2(1., 1.)
     );
     assert_eq!(
         run("import curves\ncurves.quadratic_tangent(vec2(0,0),vec2(1,2),vec2(2,0),0.5)"),
-        Value::Vector(vec![2., 0.])
+        Value::vec2(2., 0.)
     );
 }
 

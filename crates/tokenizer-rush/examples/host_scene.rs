@@ -32,7 +32,7 @@ fn create<'s>(args: &[Value<'s>], _: &CancellationToken) -> Result<Value<'s>, St
     Ok(Value::HostObject(reference))
 }
 fn position<'s>(args: &[Value<'s>], _: &CancellationToken) -> Result<Value<'s>, String> {
-    Ok(Value::Vector(point(&args[0])?.borrow().to_vec()))
+    Ok(Value::Vector((*point(&args[0])?.borrow()).into()))
 }
 fn translate<'s>(args: &[Value<'s>], _: &CancellationToken) -> Result<Value<'s>, String> {
     let owner = point(&args[0])?;

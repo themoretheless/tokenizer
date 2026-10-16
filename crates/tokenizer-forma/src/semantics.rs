@@ -118,6 +118,18 @@ pub fn evaluate_value(
                 optional || env["allowMissingState"] == true,
             );
         }
+        if let Some(tail) = raw.strip_prefix("tokens.") {
+            let tokens = &env["tokens"];
+            if own(tokens, tail) {
+                return evaluate_value(&tokens[tail], props, state, stack, expand, env);
+            }
+            return read_path(
+                tokens.clone(),
+                &tail.split('.').collect::<Vec<_>>(),
+                raw,
+                optional,
+            );
+        }
         if raw.starts_with("base.") {
             return Err(format!("{raw} допустим только внутри override"));
         }
@@ -126,14 +138,16 @@ pub fn evaluate_value(
             return read_path(value.clone(), &parts[1..], raw, optional);
         }
         if let Some(variants) = env["enums"].get(parts[0]) {
-            if parts.len() != 2
-                || !variants
-                    .as_array()
-                    .is_some_and(|a| a.contains(&json!(parts[1])))
-            {
-                return Err(format!("Неизвестный вариант {raw}"));
+            if variants.is_array() {
+                if parts.len() != 2
+                    || !variants
+                        .as_array()
+                        .is_some_and(|a| a.contains(&json!(parts[1])))
+                {
+                    return Err(format!("Неизвестный вариант {raw}"));
+                }
+                return Ok(json!(raw));
             }
-            return Ok(json!(raw));
         }
         Ok(json!({"expr":raw}))
     })
@@ -229,9 +243,12 @@ pub fn evaluate_properties(node: &V, props: &V, state: &V, env: &V) -> R<V> {
 }
 pub fn validate_type_name(ty: &str, enums: &V) -> R<()> {
     let name = ty.strip_suffix('?').unwrap_or(ty);
+    if let Some(inner) = name.strip_prefix("List<").and_then(|s| s.strip_suffix('>')) {
+        return validate_type_name(inner, enums);
+    }
     if ![
         "String", "Bool", "Boolean", "Number", "Int", "Float", "Color", "Length", "Duration",
-        "Asset",
+        "Asset", "List", "Object",
     ]
     .contains(&name)
         && !own(enums, name)
@@ -252,10 +269,28 @@ pub fn matches_type(value: &V, ty: &str, enums: &V) -> bool {
     if let Some(ty) = ty.strip_suffix('?') {
         return value.is_null() || matches_type(value, ty, enums);
     }
+    if let Some(inner) = ty.strip_prefix("List<").and_then(|s| s.strip_suffix('>')) {
+        return value
+            .as_array()
+            .is_some_and(|a| a.iter().all(|v| matches_type(v, inner, enums)));
+    }
     if let Some(a) = enums[ty].as_array() {
         return value.as_str().is_some_and(|s| {
             a.iter()
                 .any(|v| v.as_str().is_some_and(|v| s == format!("{ty}.{v}")))
+        });
+    }
+    if let Some(fields) = enums[ty].as_object() {
+        return value.as_object().is_some_and(|obj| {
+            fields.iter().all(|(field, fty)| {
+                let Some(fty) = fty.as_str() else {
+                    return false;
+                };
+                match obj.get(field) {
+                    Some(v) => matches_type(v, fty, enums),
+                    None => fty.ends_with('?'),
+                }
+            })
         });
     }
     let raw = value.get("expr").unwrap_or(value);
@@ -275,7 +310,9 @@ pub fn matches_type(value: &V, ty: &str, enums: &V) -> bool {
             raw.as_f64().is_some_and(|n| n.is_finite() && n >= 0.)
                 || raw.as_str().is_some_and(|s| unit(s, "px") || unit(s, "%"))
         }
-        "Duration" => raw.as_str().is_some_and(|s| unit(s, "ms")),
+        "Duration" => raw.as_str().is_some_and(|s| unit(s, "ms") || unit(s, "s")),
+        "List" => value.is_array(),
+        "Object" => value.is_object(),
         _ => false,
     }
 }
@@ -363,6 +400,12 @@ where
                     if own(&env["locals"], item) {
                         return Err(format!("Вложенный for повторяет имя {item}"));
                     }
+                    let idx_name = node["index"].as_str();
+                    if let Some(idx) = idx_name {
+                        if own(&env["locals"], idx) {
+                            return Err(format!("Вложенный for повторяет имя {idx}"));
+                        }
+                    }
                     let collection = evaluate_value(
                         &node["collection"],
                         self.props,
@@ -387,6 +430,9 @@ where
                             local["locals"] = json!({})
                         }
                         local["locals"][item] = v.clone();
+                        if let Some(idx) = idx_name {
+                            local["locals"][idx] = json!(item_index);
+                        }
                         if !local["_formaBindings"].is_object() {
                             local["_formaBindings"] = json!({})
                         }

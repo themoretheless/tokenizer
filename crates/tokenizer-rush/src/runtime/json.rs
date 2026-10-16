@@ -1,6 +1,5 @@
 //! Native JSON parser and serializer for Rush runtime.
-use crate::Value;
-use std::collections::BTreeMap;
+use crate::{RecordMap, Value};
 use themoretheless_tokenizer_json::Value as JsonValue;
 
 /// Parse a JSON string into a Rush `Value`.
@@ -39,16 +38,16 @@ fn convert_json_value(value: JsonValue<'_>) -> Result<Value<'static>, String> {
             Ok(Value::List(items))
         }
         JsonValue::Object(obj) => {
-            let mut fields = BTreeMap::new();
+            let mut fields = Vec::with_capacity(obj.len());
             for member in obj.members() {
                 let key = member
                     .key()
                     .decoded()
                     .ok_or_else(|| "Malformed JSON object key".to_string())?;
                 let val = convert_json_value(member.value().clone())?;
-                fields.insert(key.to_owned(), val);
+                fields.push((key.to_owned(), val));
             }
-            Ok(Value::Record(fields))
+            Ok(Value::Record(RecordMap::from_iter(fields)))
         }
         _ => Err("Unknown JSON value".to_string()),
     }
@@ -75,6 +74,10 @@ fn encode_value(value: &Value<'_>, out: &mut String) -> Result<(), String> {
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Value::Int(i) => {
+            use std::fmt::Write as _;
+            let _ = write!(out, "{i}");
+        }
         Value::Number(n) => {
             if !n.is_finite() {
                 return Err("Non-finite number cannot be serialized to JSON".into());

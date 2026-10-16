@@ -175,6 +175,9 @@ impl<'s> Coroutine<'s> {
                     // Keep the code alive independently of the frame stack. Executing a
                     // statement can push/pop frames; only the Rc is copied, not its AST.
                     let code = statements.clone();
+                    if *next == 0 && !code.is_empty() {
+                        runtime.hoist_scope_declarations(&code, environment, true)?;
+                    }
                     let Some(statement) = code.get(*next) else {
                         self.frames.pop();
                         runtime.reclaim_cells();
@@ -182,6 +185,11 @@ impl<'s> Coroutine<'s> {
                     };
                     *next += 1;
                     match &statement.kind {
+                        StmtKind::Struct { .. }
+                        | StmtKind::Enum { .. }
+                        | StmtKind::Function { .. } => {
+                            runtime.charge(1, statement.span)?;
+                        }
                         StmtKind::Yield(expression) => {
                             let value = runtime.expr(expression, environment)?;
                             return Ok(CoroutineState::Yielded(value));
@@ -262,6 +270,17 @@ impl<'s> Coroutine<'s> {
                         _ => {
                             let (value, flow) =
                                 runtime.statements(std::slice::from_ref(statement), environment)?;
+                            if matches!(
+                                statement.kind,
+                                StmtKind::Import(_)
+                                    | StmtKind::Destructure { .. }
+                                    | StmtKind::Declaration { .. }
+                            ) && code[*next..]
+                                .iter()
+                                .any(|s| matches!(s.kind, StmtKind::Function { .. }))
+                            {
+                                runtime.hoist_scope_functions(&code, environment)?;
+                            }
                             if flow == Flow::Return {
                                 self.unwind(runtime)?;
                                 return Ok(CoroutineState::Complete(value));
@@ -320,17 +339,37 @@ impl<'a, 's> ScriptInstance<'a, 's> {
             return self
                 .runtime
                 .error(self.span, "Argument does not match its type annotation");
-        }
+        };
         let mut environment = Environment::child(function.environment.clone());
+        for sib in function.siblings.iter() {
+            if sib.name == function.name {
+                continue;
+            }
+            if let Some(sib_name) = sib.name {
+                let mut bound = sib.clone();
+                bound.siblings = function.siblings.clone();
+                environment
+                    .insert(sib_name, Value::Function(Rc::new(bound)))
+                    .map_err(|e| self.runtime.environment_error(self.span, e))?;
+            }
+        }
         if let Some(name) = function.name {
             environment
                 .insert(name, Value::Function(function.clone()))
                 .map_err(|e| self.runtime.environment_error(self.span, e))?;
         }
-        for (parameter, value) in function.parameters.iter().zip(arguments) {
+        for ((parameter, ty), value) in function
+            .parameters
+            .iter()
+            .zip(&function.parameter_types)
+            .zip(arguments)
+        {
             self.runtime.host_value_size(value, self.span, 0)?;
+            let coerced = ty
+                .as_ref()
+                .map_or_else(|| value.clone(), |t| value.clone().coerce_for_type(t));
             self.runtime
-                .bind_pattern(parameter, value, &mut environment)?;
+                .bind_pattern(parameter, &coerced, &mut environment)?;
         }
         let frames = vec![Frame::Block {
             statements: body.stmts.clone(),
@@ -402,15 +441,22 @@ impl<'a, 's> ScriptInstance<'a, 's> {
             self.runtime.truncate_regions(region_base);
         }
         let result = match result {
-            Ok(CoroutineState::Complete(value))
+            Ok(CoroutineState::Complete(value)) => {
                 if task
                     .function
                     .result_type
                     .as_ref()
-                    .is_some_and(|ty| !ty.accepts(&value)) =>
-            {
-                self.runtime
-                    .error(self.span, "Return value does not match its type annotation")
+                    .is_some_and(|ty| !ty.accepts(&value))
+                {
+                    self.runtime
+                        .error(self.span, "Return value does not match its type annotation")
+                } else {
+                    let value = match task.function.result_type.as_ref() {
+                        Some(ty) => value.coerce_for_type(ty),
+                        None => value,
+                    };
+                    Ok(CoroutineState::Complete(value))
+                }
             }
             result => result,
         };

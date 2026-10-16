@@ -80,10 +80,9 @@ fn captured_host_context_and_arbitrary_inputs_and_events() {
         )
         .unwrap();
     assert_eq!(instance.initial_value(), &Value::String("scene A".into()));
-    let event = Value::Record(std::collections::BTreeMap::from([(
-        "message".into(),
-        Value::String("hit".into()),
-    )]));
+    let event = Value::Record(
+        std::collections::BTreeMap::from([("message".into(), Value::String("hit".into()))]).into(),
+    );
     assert_eq!(
         instance.call("event", &[event], limits()).unwrap(),
         Value::String("hit".into())
@@ -92,10 +91,9 @@ fn captured_host_context_and_arbitrary_inputs_and_events() {
         instance
             .call(
                 "event",
-                &[Value::Record(std::collections::BTreeMap::from([(
-                    "message".into(),
-                    Value::Bool(true)
-                )]))],
+                &[Value::Record(
+                    std::collections::BTreeMap::from([("message".into(), Value::Bool(true))]).into()
+                )],
                 limits()
             )
             .is_err()

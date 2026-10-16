@@ -50,7 +50,7 @@ fn main() {
     instance
         .call(
             "set_velocity",
-            &[Value::Vector(vec![0.0, 3.0, 0.0])],
+            &[Value::vec3(0.0, 3.0, 0.0)],
             limits,
         )
         .unwrap();
@@ -62,7 +62,7 @@ fn main() {
         assert!((actual - expected).abs() < 1e-12);
     }
     assert_eq!(scene.updates, 121);
-    assert_eq!(result, Value::Vector(scene.position.to_vec()));
+    assert_eq!(result, Value::Vector(scene.position.into()));
     println!("{} updates; position = {:?}", scene.updates, scene.position);
 }
 
