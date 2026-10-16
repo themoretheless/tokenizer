@@ -10,9 +10,14 @@ fn original_studio_corpus_preserves_existing_ast_fields_and_editor_offsets() {
         // The 0.8 document schema adds explicit empty declaration collections.
         // Preserve exact comparison of every existing field and source range.
         for (key, value) in [
+            ("uses", json!([])),
+            ("stateDefinitions", json!({})),
             ("structs", json!({})),
+            ("structConstraints", json!({})),
             ("lets", json!({})),
             ("tokens", json!({})),
+            ("i18n", json!({})),
+            ("styles", json!({})),
             ("slotDefinitions", json!({})),
             ("shortcuts", json!([])),
         ] {

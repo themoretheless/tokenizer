@@ -1,4 +1,4 @@
-@top Document { (Component | Attribute | Design | Node)* }
+@top Document { (Component | Attribute | Design | EnumDeclaration | StructDeclaration | TokensDeclaration | I18nDeclaration | StyleDeclaration | UseDeclaration | Node)* }
 @skip { space | LineComment | BlockComment }
 @precedence { call, typed, member @left, prefix, multiply @left, add @left, compare @left, equal @left, and @left, or @left, pipe @left, nullish @left, conditional @right }
 
@@ -7,25 +7,32 @@ Design { design ComponentName "{" (DesignOverride | DesignState)* "}" }
 DesignOverride { TypeName Block }
 DesignState { state String Block }
 Attribute { "#[" AttributeName Arguments? "]" }
-Block { "{" (Node | If | For | Property | Attribute | Override | PropDeclaration | LetDeclaration | EventDeclaration | EnumDeclaration | StructDeclaration | TokensDeclaration | SlotDeclaration | SlotFill | ShortcutDeclaration | Forward | GroupMatch)* "}" }
+Block { "{" (Node | If | For | Property | Attribute | Override | PropDeclaration | StateDeclaration | LetDeclaration | EventDeclaration | EnumDeclaration | StructDeclaration | TokensDeclaration | I18nDeclaration | StyleDeclaration | ApplyStatement | UseDeclaration | SlotDeclaration | SlotFill | ShortcutDeclaration | Forward | GroupMatch)* "}" }
 Override { override (PropertyName | String) (Block ";"? | ":" Value+ ";" | from String (Block ";"? | ";")) }
 PropDeclaration { required? prop PropertyName ":" TypeReference ("=" Value+)? ";" }
+StateDeclaration { state PropertyName ":" TypeReference ("=" Value+)? ";" }
 LetDeclaration { let PropertyName "=" Value+ ";" }
+UseDeclaration { use String ";"? }
 EventDeclaration { event PropertyName "(" (Parameter ("," Parameter)* ","?)? ")" ";" }
 Parameter { PropertyName ":" TypeReference }
 TypeReference { TypeName ("<" TypeReference ">")? "?"? }
 EnumDeclaration { enum TypeName "{" (TypeName ("," TypeName)* ","?)? "}" ";"? }
 StructDeclaration { struct TypeName "{" (StructField (("," | ";") StructField)* ("," | ";")?)? "}" ";"? }
-StructField { PropertyName ":" TypeReference }
+StructField { Attribute* PropertyName ":" TypeReference }
 TokensDeclaration { tokens (PropertyName | TypeName)? "{" (PropertyName ":" Value+ ";")* "}" ";"? }
-SlotDeclaration { slot PropertyName (ChildBlock ";"? | ";") }
-SlotFill { "@" PropertyName ChildBlock ";"? }
+I18nDeclaration { i18n (PropertyName | TypeName)? "{" (PropertyName ":" Value+ ";")* "}" ";"? }
+StyleDeclaration { style (PropertyName | TypeName) "{" Property* "}" ";"? }
+ApplyStatement { apply (PropertyName | TypeName) ("," (PropertyName | TypeName))* ";" }
+SlotDeclaration { slot PropertyName SlotArgs? (ChildBlock ";"? | ";") }
+SlotArgs { "(" (PropertyName ":" Value+ ("," PropertyName ":" Value+)* ","?)? ")" }
+SlotFill { "@" PropertyName SlotParams? ChildBlock ";"? }
+SlotParams { "(" (PropertyName ("," PropertyName)* ","?)? ")" }
 ShortcutDeclaration { shortcut String EventArrow Call ";" }
 Forward { forward props "{" (PropertyName ("," PropertyName)* ","?)? "}" ";" }
 Node { TypeName Block }
 If { if Value ChildBlock (else (If | ChildBlock))? }
-For { for PropertyName ("," PropertyName)? in Value (key Value)? ChildBlock (empty ChildBlock)? }
-ChildBlock { "{" (Node | If | For)* "}" }
+For { for PropertyName ("," PropertyName)? in Value (where Value)? (key Value)? ChildBlock (empty ChildBlock)? }
+ChildBlock { "{" (Node | If | For | LetDeclaration | GroupMatch)* "}" }
 Property { PropertyName (":" Value+ | Binding Path | EventArrow Call) ";" }
 Value {
   String | Number | Color | Boolean | Null | Star | Dash | Array | Object | Match | Call | Path | TypedValue | Parenthesized |
@@ -54,13 +61,14 @@ Match { match Subject "{" Branch* "}" }
 GroupMatch { match Subject "{" GroupBranch* "}" ";"? }
 Subject { Value | Tuple }
 Tuple { "(" Value ("," Value)+ ")" }
-Branch { Pattern MatchArrow Value+ ";" }
-GroupBranch { Pattern MatchArrow "{" Property* "}" ";"? }
-Pattern { Wildcard | Boolean | Null | String | Number | Path | Dash Number | Comparison Number | "(" Pattern ("," Pattern)+ ")" }
+Branch { Pattern (if Value)? MatchArrow Value+ ";" }
+GroupBranch { Pattern (if Value)? MatchArrow ("{" (Property | Node | If | For | LetDeclaration | GroupMatch)* "}" ";"? | Node ";"?) }
+Pattern { SinglePattern ("|" SinglePattern)* }
+SinglePattern { Wildcard | Boolean | Null | String | Number (RangeOp Number)? | Path | Dash Number | Comparison Number | "(" Pattern ("," Pattern)+ ")" }
 Path { Identifier | TypeName }
 ComponentName { TypeName }
 PropertyName { Identifier }
-AttributeName { Identifier | design }
+AttributeName { Identifier | design | use }
 component { @specialize<Identifier, "component"> }
 design { @specialize<Identifier, "design"> }
 match { @specialize<Identifier, "match"> }
@@ -68,11 +76,16 @@ override { @specialize<Identifier, "override"> }
 from { @specialize<Identifier, "from"> }
 prop { @specialize<Identifier, "prop"> }
 let { @specialize<Identifier, "let"> }
+use { @extend<Identifier, "use"> }
+where { @extend<Identifier, "where"> }
 required { @specialize<Identifier, "required"> }
 event { @specialize<Identifier, "event"> }
 enum { @specialize<Identifier, "enum"> }
 struct { @specialize<Identifier, "struct"> }
 tokens { @extend<Identifier, "tokens"> }
+i18n { @extend<Identifier, "i18n"> }
+style { @extend<Identifier, "style"> }
+apply { @extend<Identifier, "apply"> }
 slot { @extend<Identifier, "slot"> }
 shortcut { @specialize<Identifier, "shortcut"> }
 forward { @specialize<Identifier, "forward"> }

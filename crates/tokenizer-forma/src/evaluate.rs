@@ -53,12 +53,324 @@ fn compare(a: &V, b: &V) -> Option<std::cmp::Ordering> {
         _ => None,
     }
 }
+fn parse_hex_color(v: &V) -> R<(u8, u8, u8, u8)> {
+    let raw = text(v)?;
+    let s = raw
+        .trim()
+        .strip_prefix('#')
+        .ok_or("Функция цвета ожидает hex-цвет (#rgb, #rrggbb или #rrggbbaa)")?;
+    let hex = |slice: &str| {
+        u8::from_str_radix(slice, 16).map_err(|_| String::from("Некорректный hex-цвет"))
+    };
+    match s.len() {
+        3 => {
+            let r = hex(&s[0..1])?;
+            let g = hex(&s[1..2])?;
+            let b = hex(&s[2..3])?;
+            Ok((r * 17, g * 17, b * 17, 255))
+        }
+        6 => Ok((hex(&s[0..2])?, hex(&s[2..4])?, hex(&s[4..6])?, 255)),
+        8 => Ok((
+            hex(&s[0..2])?,
+            hex(&s[2..4])?,
+            hex(&s[4..6])?,
+            hex(&s[6..8])?,
+        )),
+        _ => Err("Функция цвета ожидает #rgb, #rrggbb или #rrggbbaa".into()),
+    }
+}
+fn format_hex_color(r: u8, g: u8, b: u8, a: u8, as_expr: bool) -> V {
+    let s = if a == 255 {
+        format!("#{r:02x}{g:02x}{b:02x}")
+    } else {
+        format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+    };
+    if as_expr {
+        json!({"expr": s})
+    } else {
+        json!(s)
+    }
+}
+pub fn matches_constraint_pattern(s: &str, pat: &str) -> bool {
+    match pat {
+        "nonempty" => !s.trim().is_empty(),
+        "digits" => !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()),
+        "alpha" => !s.is_empty() && s.chars().all(|c| c.is_alphabetic()),
+        "alphanumeric" => !s.is_empty() && s.chars().all(|c| c.is_alphanumeric()),
+        "email" => {
+            let Some((user, domain)) = s.split_once('@') else {
+                return false;
+            };
+            !user.is_empty()
+                && !user.contains('@')
+                && domain.contains('.')
+                && !domain.starts_with('.')
+                && !domain.ends_with('.')
+                && domain.split('.').all(|p| !p.is_empty())
+        }
+        "url" => {
+            let rest = s
+                .strip_prefix("https://")
+                .or_else(|| s.strip_prefix("http://"));
+            rest.is_some_and(|r| !r.is_empty() && !r.starts_with('/') && !r.contains(' '))
+        }
+        "hex" => s.strip_prefix('#').is_some_and(|h| {
+            [3, 6, 8].contains(&h.len()) && h.bytes().all(|b| b.is_ascii_hexdigit())
+        }),
+        _ => regex_like_match(s, pat),
+    }
+}
+
+#[derive(Clone)]
+enum Atom {
+    Any,
+    Literal(char),
+    Digit,
+    NonDigit,
+    Word,
+    NonWord,
+    Space,
+    NonSpace,
+    Class(Vec<(char, char)>, bool),
+}
+
+impl Atom {
+    fn matches(&self, c: char) -> bool {
+        match self {
+            Atom::Any => c != '\n',
+            Atom::Literal(expected) => c == *expected,
+            Atom::Digit => c.is_ascii_digit(),
+            Atom::NonDigit => !c.is_ascii_digit(),
+            Atom::Word => c.is_alphanumeric() || c == '_',
+            Atom::NonWord => !(c.is_alphanumeric() || c == '_'),
+            Atom::Space => c.is_whitespace(),
+            Atom::NonSpace => !c.is_whitespace(),
+            Atom::Class(ranges, neg) => {
+                let hit = ranges.iter().any(|(lo, hi)| c >= *lo && c <= *hi);
+                if *neg { !hit } else { hit }
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct TokenPat {
+    atom: Atom,
+    min: usize,
+    max: Option<usize>,
+}
+
+fn parse_regex_tokens(pat: &str) -> (bool, bool, Vec<TokenPat>) {
+    let mut chars: Vec<char> = pat.chars().collect();
+    let anchored_start = if chars.first() == Some(&'^') {
+        chars.remove(0);
+        true
+    } else {
+        false
+    };
+    let anchored_end =
+        if chars.last() == Some(&'$') && (chars.len() < 2 || chars[chars.len() - 2] != '\\') {
+            chars.pop();
+            true
+        } else {
+            false
+        };
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let atom = match chars[i] {
+            '.' => {
+                i += 1;
+                Atom::Any
+            }
+            '\\' if i + 1 < chars.len() => {
+                let esc = chars[i + 1];
+                i += 2;
+                match esc {
+                    'd' => Atom::Digit,
+                    'D' => Atom::NonDigit,
+                    'w' => Atom::Word,
+                    'W' => Atom::NonWord,
+                    's' => Atom::Space,
+                    'S' => Atom::NonSpace,
+                    'n' => Atom::Literal('\n'),
+                    'r' => Atom::Literal('\r'),
+                    't' => Atom::Literal('\t'),
+                    other => Atom::Literal(other),
+                }
+            }
+            '[' => {
+                i += 1;
+                let neg = if i < chars.len() && chars[i] == '^' {
+                    i += 1;
+                    true
+                } else {
+                    false
+                };
+                let mut ranges = Vec::new();
+                while i < chars.len() && chars[i] != ']' {
+                    let c1 = if chars[i] == '\\' && i + 1 < chars.len() {
+                        i += 2;
+                        chars[i - 1]
+                    } else {
+                        let c = chars[i];
+                        i += 1;
+                        c
+                    };
+                    if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] != ']' {
+                        i += 1;
+                        let c2 = if chars[i] == '\\' && i + 1 < chars.len() {
+                            i += 2;
+                            chars[i - 1]
+                        } else {
+                            let c = chars[i];
+                            i += 1;
+                            c
+                        };
+                        ranges.push((c1, c2));
+                    } else {
+                        ranges.push((c1, c1));
+                    }
+                }
+                if i < chars.len() && chars[i] == ']' {
+                    i += 1;
+                }
+                Atom::Class(ranges, neg)
+            }
+            c => {
+                i += 1;
+                Atom::Literal(c)
+            }
+        };
+        let (min, max) = if i < chars.len() {
+            match chars[i] {
+                '*' => {
+                    i += 1;
+                    (0, None)
+                }
+                '+' => {
+                    i += 1;
+                    (1, None)
+                }
+                '?' => {
+                    i += 1;
+                    (0, Some(1))
+                }
+                '{' => {
+                    let save = i;
+                    i += 1;
+                    let mut n1 = String::new();
+                    while i < chars.len() && chars[i].is_ascii_digit() {
+                        n1.push(chars[i]);
+                        i += 1;
+                    }
+                    if let Ok(lo) = n1.parse::<usize>() {
+                        if i < chars.len() && chars[i] == '}' {
+                            i += 1;
+                            (lo, Some(lo))
+                        } else if i < chars.len() && chars[i] == ',' {
+                            i += 1;
+                            let mut n2 = String::new();
+                            while i < chars.len() && chars[i].is_ascii_digit() {
+                                n2.push(chars[i]);
+                                i += 1;
+                            }
+                            if i < chars.len() && chars[i] == '}' {
+                                i += 1;
+                                let hi = if n2.is_empty() {
+                                    None
+                                } else {
+                                    n2.parse::<usize>().ok()
+                                };
+                                (lo, hi)
+                            } else {
+                                i = save;
+                                (1, Some(1))
+                            }
+                        } else {
+                            i = save;
+                            (1, Some(1))
+                        }
+                    } else {
+                        i = save;
+                        (1, Some(1))
+                    }
+                }
+                _ => (1, Some(1)),
+            }
+        } else {
+            (1, Some(1))
+        };
+        tokens.push(TokenPat { atom, min, max });
+    }
+    (anchored_start, anchored_end, tokens)
+}
+
+fn match_tokens_at(
+    tokens: &[TokenPat],
+    ti: usize,
+    chars: &[char],
+    ci: usize,
+    anchored_end: bool,
+    steps: &mut usize,
+) -> bool {
+    *steps += 1;
+    if *steps > 8192 {
+        return false;
+    }
+    if ti == tokens.len() {
+        return !anchored_end || ci == chars.len();
+    }
+    let tok = &tokens[ti];
+    let mut count = 0usize;
+    let mut end_ci = ci;
+    while end_ci < chars.len()
+        && tok.max.is_none_or(|m| count < m)
+        && tok.atom.matches(chars[end_ci])
+    {
+        end_ci += 1;
+        count += 1;
+    }
+    if count < tok.min {
+        return false;
+    }
+    for k in (tok.min..=count).rev() {
+        if match_tokens_at(tokens, ti + 1, chars, ci + k, anchored_end, steps) {
+            return true;
+        }
+    }
+    false
+}
+
+fn regex_like_match(s: &str, pat: &str) -> bool {
+    if pat.contains('|') && !pat.contains('[') {
+        return pat.split('|').any(|sub| regex_like_match(s, sub));
+    }
+    let (anchored_start, anchored_end, tokens) = parse_regex_tokens(pat);
+    let chars: Vec<char> = s.chars().collect();
+    let mut steps = 0usize;
+    if anchored_start {
+        match_tokens_at(&tokens, 0, &chars, 0, anchored_end, &mut steps)
+    } else {
+        (0..=chars.len())
+            .any(|start| match_tokens_at(&tokens, 0, &chars, start, anchored_end, &mut steps))
+    }
+}
+
 pub fn matches_pattern<F>(p: &V, v: &V, evaluate: &mut F) -> R<bool>
 where
     F: FnMut(&V) -> R<V>,
 {
     if p["expr"] == "_" {
         return Ok(true);
+    }
+    if let Some(alts) = p["or"].as_array() {
+        for alt in alts {
+            if matches_pattern(alt, v, evaluate)? {
+                return Ok(true);
+            }
+        }
+        return Ok(false);
     }
     if let Some(a) = p.as_array() {
         let Some(b) = v.as_array() else {
@@ -82,6 +394,23 @@ where
             ">" => o.is_gt(),
             _ => !o.is_lt(),
         }));
+    }
+    if p["expression"]["kind"] == "binary"
+        && let Some(op) = p["expression"]["operator"].as_str()
+        && (op == ".." || op == "..=")
+    {
+        let lo = evaluate(&p["expression"]["left"])?;
+        let hi = evaluate(&p["expression"]["right"])?;
+        let Some(vn) = v.as_f64() else {
+            return Ok(false);
+        };
+        let lo = number(&lo)?;
+        let hi = number(&hi)?;
+        return Ok(if op == "..=" {
+            vn >= lo && vn <= hi
+        } else {
+            vn >= lo && vn < hi
+        });
     }
     Ok(equal(&evaluate(p)?, v))
 }
@@ -135,6 +464,11 @@ where
             if matches_pattern(&branch["pattern"], &actual, &mut |p| {
                 run(p, false, next, resolver)
             })? {
+                if let Some(g) = branch.get("guard")
+                    && !truth(&run(g, false, next, resolver)?)?
+                {
+                    continue;
+                }
                 return run(&branch["value"], false, next, resolver);
             }
         }
@@ -215,12 +549,12 @@ where
             let count = args.len();
             let valid = match name {
                 "min" | "max" => count >= 1,
-                "clamp" | "replace" => count == 3,
-                "contains" | "startsWith" | "endsWith" | "split" | "take" | "skip" | "range" => {
-                    count == 2
-                }
-                "slice" => count == 2 || count == 3,
-                "join" | "formatNumber" => count == 1 || count == 2,
+                "clamp" | "replace" | "find" => count == 3,
+                "plural" => count == 3 || count == 4,
+                "contains" | "startsWith" | "endsWith" | "split" | "take" | "skip" | "range"
+                | "pluck" | "alpha" | "lighten" | "darken" | "groupBy" => count == 2,
+                "slice" | "mix" | "isValid" => count == 2 || count == 3,
+                "join" | "formatNumber" | "sortBy" | "unique" => count == 1 || count == 2,
                 _ => count == 1,
             };
             if !valid {
@@ -252,6 +586,98 @@ where
                     } else {
                         Err("len ожидает строку или массив".into())
                     }
+                }
+                "count" => {
+                    let a = args[0].as_array().ok_or("count ожидает массив")?;
+                    Ok(json!(a.len()))
+                }
+                "any" => {
+                    let a = args[0].as_array().ok_or("any ожидает массив")?;
+                    let mut res = false;
+                    for item in a {
+                        if truth(item)? {
+                            res = true;
+                            break;
+                        }
+                    }
+                    Ok(json!(res))
+                }
+                "all" => {
+                    let a = args[0].as_array().ok_or("all ожидает массив")?;
+                    let mut res = true;
+                    for item in a {
+                        if !truth(item)? {
+                            res = false;
+                            break;
+                        }
+                    }
+                    Ok(json!(res))
+                }
+                "pluck" => {
+                    let a = args[0].as_array().ok_or("pluck ожидает массив")?;
+                    let key = args[1].as_str().ok_or("pluck ожидает имя поля-строку")?;
+                    let mut out = Vec::with_capacity(a.len());
+                    for item in a {
+                        out.push(item.get(key).cloned().unwrap_or(V::Null));
+                    }
+                    Ok(V::Array(out))
+                }
+                "sortBy" => {
+                    let a = args[0].as_array().ok_or("sortBy ожидает массив")?;
+                    let key = if count == 2 {
+                        Some(args[1].as_str().ok_or("sortBy ожидает имя поля-строку")?)
+                    } else {
+                        None
+                    };
+                    let mut v = a.clone();
+                    v.sort_by(|x, y| {
+                        let kx = key.map_or(x, |k| x.get(k).unwrap_or(&V::Null));
+                        let ky = key.map_or(y, |k| y.get(k).unwrap_or(&V::Null));
+                        compare(kx, ky).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    Ok(V::Array(v))
+                }
+                "alpha" => {
+                    let (r, g, b, _) = parse_hex_color(&args[0])?;
+                    let a = (number(&args[1])?.clamp(0.0, 1.0) * 255.0).round() as u8;
+                    Ok(format_hex_color(r, g, b, a, args[0].get("expr").is_some()))
+                }
+                "lighten" | "darken" => {
+                    let (r, g, b, a) = parse_hex_color(&args[0])?;
+                    let amt = number(&args[1])?.clamp(0.0, 1.0);
+                    let shift = |c: u8| -> u8 {
+                        if name == "lighten" {
+                            (c as f64 + (255.0 - c as f64) * amt).round() as u8
+                        } else {
+                            (c as f64 * (1.0 - amt)).round() as u8
+                        }
+                    };
+                    Ok(format_hex_color(
+                        shift(r),
+                        shift(g),
+                        shift(b),
+                        a,
+                        args[0].get("expr").is_some(),
+                    ))
+                }
+                "mix" => {
+                    let (r1, g1, b1, a1) = parse_hex_color(&args[0])?;
+                    let (r2, g2, b2, a2) = parse_hex_color(&args[1])?;
+                    let w = if count == 3 {
+                        number(&args[2])?.clamp(0.0, 1.0)
+                    } else {
+                        0.5
+                    };
+                    let lerp = |c1: u8, c2: u8| -> u8 {
+                        (c1 as f64 * (1.0 - w) + c2 as f64 * w).round() as u8
+                    };
+                    Ok(format_hex_color(
+                        lerp(r1, r2),
+                        lerp(g1, g2),
+                        lerp(b1, b2),
+                        lerp(a1, a2),
+                        args[0].get("expr").is_some() || args[1].get("expr").is_some(),
+                    ))
                 }
                 "min" | "max" => {
                     let numbers = args.iter().map(number).collect::<R<Vec<_>>>()?;
@@ -416,6 +842,118 @@ where
                         Ok(json!(format!("{n:.dec$}")))
                     } else {
                         text(&json!(n)).map(|s| json!(s))
+                    }
+                }
+                "unique" => {
+                    let a = args[0].as_array().ok_or("unique ожидает массив")?;
+                    let key = if count == 2 {
+                        Some(args[1].as_str().ok_or("unique ожидает имя поля-строку")?)
+                    } else {
+                        None
+                    };
+                    let mut out = Vec::new();
+                    for item in a {
+                        let k = key.map_or(item, |f| item.get(f).unwrap_or(&V::Null));
+                        let exists = out.iter().any(|existing: &V| {
+                            let ek = key.map_or(existing, |f| existing.get(f).unwrap_or(&V::Null));
+                            equal(ek, k)
+                        });
+                        if !exists {
+                            out.push(item.clone());
+                        }
+                    }
+                    Ok(V::Array(out))
+                }
+                "find" => {
+                    let a = args[0].as_array().ok_or("find ожидает массив")?;
+                    let key = args[1].as_str().ok_or("find ожидает имя поля-строку")?;
+                    let target = &args[2];
+                    let found = a
+                        .iter()
+                        .find(|item| item.get(key).is_some_and(|v| equal(v, target)))
+                        .cloned()
+                        .unwrap_or(V::Null);
+                    Ok(found)
+                }
+                "compact" => {
+                    let a = args[0].as_array().ok_or("compact ожидает массив")?;
+                    let out: Vec<V> = a
+                        .iter()
+                        .filter(|v| !v.is_null() && *v != &V::Bool(false) && v.as_str() != Some(""))
+                        .cloned()
+                        .collect();
+                    Ok(V::Array(out))
+                }
+                "first" => {
+                    let a = args[0].as_array().ok_or("first ожидает массив")?;
+                    Ok(a.first().cloned().unwrap_or(V::Null))
+                }
+                "last" => {
+                    let a = args[0].as_array().ok_or("last ожидает массив")?;
+                    Ok(a.last().cloned().unwrap_or(V::Null))
+                }
+                "groupBy" => {
+                    let a = args[0].as_array().ok_or("groupBy ожидает массив")?;
+                    let key = args[1].as_str().ok_or("groupBy ожидает имя поля-строку")?;
+                    let mut groups: Vec<(V, Vec<V>)> = Vec::new();
+                    for item in a {
+                        let k = item.get(key).cloned().unwrap_or(V::Null);
+                        if let Some((_, items)) = groups.iter_mut().find(|(gk, _)| equal(gk, &k)) {
+                            items.push(item.clone());
+                        } else {
+                            groups.push((k, vec![item.clone()]));
+                        }
+                    }
+                    Ok(V::Array(
+                        groups
+                            .into_iter()
+                            .map(|(k, items)| json!({"key": k, "items": items}))
+                            .collect(),
+                    ))
+                }
+                "plural" => {
+                    let n = number(&args[0])?;
+                    if count == 3 {
+                        let idx = if n.abs() == 1.0 { 1 } else { 2 };
+                        Ok(json!(text(&args[idx])?))
+                    } else {
+                        let abs_int = (n.abs().trunc() as i64).abs();
+                        let mod10 = abs_int % 10;
+                        let mod100 = abs_int % 100;
+                        let idx = if n.fract() != 0.0 {
+                            2
+                        } else if mod10 == 1 && mod100 != 11 {
+                            1
+                        } else if (2..=4).contains(&mod10) && !(12..=14).contains(&mod100) {
+                            2
+                        } else {
+                            3
+                        };
+                        Ok(json!(text(&args[idx])?))
+                    }
+                }
+                "isValid" => {
+                    if count == 3 {
+                        let min = number(&args[1])?;
+                        let max = number(&args[2])?;
+                        let ok = if let Some(n) = args[0].as_f64() {
+                            n >= min && n <= max
+                        } else if let Some(s) = args[0].as_str() {
+                            let len = s.chars().count() as f64;
+                            len >= min && len <= max
+                        } else if let Some(a) = args[0].as_array() {
+                            let len = a.len() as f64;
+                            len >= min && len <= max
+                        } else {
+                            false
+                        };
+                        Ok(json!(ok))
+                    } else {
+                        let pat = args[1]
+                            .as_str()
+                            .ok_or("isValid ожидает строковый шаблон или правило")?;
+                        let s = text(&args[0])?;
+                        Ok(json!(matches_constraint_pattern(&s, pat)))
                     }
                 }
                 _ => Err(format!("Неизвестная чистая функция {name}")),

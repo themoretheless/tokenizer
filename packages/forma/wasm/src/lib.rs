@@ -66,6 +66,8 @@ pub fn operation_json(
  "validateDesign"=>{s::validate_design(arg("component"),arg("design"))?;Ok(V::Null)},
  "designStatePatch"=>s::design_state_patch(arg("design"),v["stateName"].as_str()),
  "matchesType"=>Ok(json!(s::matches_type(arg("value"),v["type"].as_str().unwrap_or(""),arg("enums")))),"validateTypeName"=>{s::validate_type_name(v["type"].as_str().unwrap_or(""),arg("enums"))?;Ok(V::Null)},"validateContract"=>{s::validate_contract(arg("definitions"),arg("values"),arg("enums"),v["label"].as_str().unwrap_or("component"))?;Ok(V::Null)},
+ "format"=>Ok(json!(f::format_source(v["source"].as_str().unwrap_or("")).map_err(|e|e.to_string())?)),
+ "lint"=>f::lint_document(v["source"].as_str().unwrap_or("")).map_err(|e|e.to_string()),
  _=>Err(format!("Unknown Forma operation {operation}"))
  }
     })();

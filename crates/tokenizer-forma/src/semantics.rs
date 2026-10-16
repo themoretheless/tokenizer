@@ -5,20 +5,26 @@ type R<T> = Result<T, String>;
 fn own(v: &V, k: &str) -> bool {
     v.as_object().is_some_and(|o| o.contains_key(k))
 }
-fn read_path(mut value: V, parts: &[&str], path: &str, optional: bool) -> R<V> {
+#[inline]
+fn read_path<'a>(
+    mut value: &'a V,
+    parts: impl IntoIterator<Item = &'a str>,
+    path: &str,
+    optional: bool,
+) -> R<V> {
     for part in parts {
         let next = if let Some(a) = value.as_array() {
             part.parse::<usize>().ok().and_then(|i| a.get(i))
         } else {
-            value.as_object().and_then(|o| o.get(*part))
+            value.as_object().and_then(|o| o.get(part))
         };
-        value = match next {
-            Some(v) => v.clone(),
+        match next {
+            Some(v) => value = v,
             None if optional => return Ok(V::Null),
             None => return Err(format!("Нет значения {path}")),
-        };
+        }
     }
-    Ok(value)
+    Ok(value.clone())
 }
 pub fn evaluate_value(
     value: &V,
@@ -40,7 +46,7 @@ pub fn evaluate_value(
         out["children"] = V::Array(
             value["children"]
                 .as_array()
-                .unwrap_or(&vec![])
+                .map_or(&[][..], Vec::as_slice)
                 .iter()
                 .map(|c| evaluate_value(c, props, state, stack, true, env))
                 .collect::<R<_>>()?,
@@ -54,6 +60,12 @@ pub fn evaluate_value(
             .ok_or("Некорректные ветки match")?
         {
             if pattern(&b["pattern"], &actual, props, state, env)? {
+                if let Some(g) = b.get("guard") {
+                    let cond = evaluate_value(g, props, state, stack, false, env)?;
+                    if !evaluate::truth(&cond)? {
+                        continue;
+                    }
+                }
                 return evaluate_value(&b["value"], props, state, stack, expand, env);
             }
         }
@@ -71,7 +83,7 @@ pub fn evaluate_value(
         && !own(value, "expression")
         && !own(value, "interpolation")
     {
-        let mut out = serde_json::Map::new();
+        let mut out = serde_json::Map::with_capacity(o.len());
         for (k, v) in o {
             out.insert(
                 k.clone(),
@@ -81,15 +93,44 @@ pub fn evaluate_value(
         return Ok(V::Object(out));
     }
     evaluate::evaluate(value, &mut |raw, optional| {
-        if let Some(tail) = raw.strip_prefix("props.") {
-            let parts: Vec<_> = if tail == "font.size" {
-                vec!["fontSize"]
-            } else if own(props, tail) {
-                vec![tail]
+        if let Some(tail) = raw.strip_prefix("viewport.") {
+            let vp = &env["viewport"];
+            let default_vp;
+            let vp = if vp.is_object() {
+                vp
             } else {
-                tail.split('.').collect()
+                default_vp = json!({"width": 360, "height": 220, "compact": true});
+                &default_vp
             };
-            let key = parts[0];
+            return read_path(vp, tail.split('.'), raw, optional);
+        }
+        let (head_local, rest_local) = raw.split_once('.').unwrap_or((raw, ""));
+        if !matches!(head_local, "props" | "state" | "tokens" | "i18n" | "base")
+            && let Some(value) = env["locals"].get(head_local)
+        {
+            return if rest_local.is_empty() {
+                Ok(value.clone())
+            } else {
+                read_path(value, rest_local.split('.'), raw, optional)
+            };
+        }
+        if let Some(tail) = raw.strip_prefix("props.") {
+            let (key, rest) = if tail == "font.size" {
+                ("fontSize", None)
+            } else if own(props, tail) {
+                (tail, None)
+            } else {
+                match tail.split_once('.') {
+                    Some((head, sub)) => (head, Some(sub)),
+                    None => (tail, None),
+                }
+            };
+            if let Some(local_val) = env["locals"].get(key) {
+                return match rest {
+                    Some(sub) => read_path(local_val, sub.split('.'), raw, optional),
+                    None => Ok(local_val.clone()),
+                };
+            }
             let Some(value) = props.get(key) else {
                 if optional {
                     return Ok(V::Null);
@@ -101,19 +142,27 @@ pub fn evaluate_value(
                 cycle.push(key.into());
                 return Err(format!("Циклическая ссылка props: {}", cycle.join(" → ")));
             }
-            let mut next = stack.to_vec();
+            let mut next = Vec::with_capacity(stack.len() + 1);
+            next.extend_from_slice(stack);
             next.push(key.into());
-            return read_path(
-                evaluate_value(value, props, state, &next, expand, env)?,
-                &parts[1..],
-                raw,
-                optional,
-            );
+            let evaluated = evaluate_value(value, props, state, &next, expand, env)?;
+            return match rest {
+                Some(sub) => read_path(&evaluated, sub.split('.'), raw, optional),
+                None => Ok(evaluated),
+            };
         }
         if let Some(tail) = raw.strip_prefix("state.") {
+            if let Ok(val) = read_path(state, tail.split('.'), raw, false) {
+                return Ok(val);
+            }
+            if env["stateDefaults"].is_object()
+                && let Ok(val) = read_path(&env["stateDefaults"], tail.split('.'), raw, false)
+            {
+                return evaluate_value(&val, props, state, stack, expand, env);
+            }
             return read_path(
-                state.clone(),
-                &tail.split('.').collect::<Vec<_>>(),
+                state,
+                tail.split('.'),
                 raw,
                 optional || env["allowMissingState"] == true,
             );
@@ -123,27 +172,35 @@ pub fn evaluate_value(
             if own(tokens, tail) {
                 return evaluate_value(&tokens[tail], props, state, stack, expand, env);
             }
-            return read_path(
-                tokens.clone(),
-                &tail.split('.').collect::<Vec<_>>(),
-                raw,
-                optional,
-            );
+            return read_path(tokens, tail.split('.'), raw, optional);
+        }
+        if let Some(tail) = raw.strip_prefix("i18n.") {
+            let i18n = &env["i18n"];
+            if let Some(locale) = env["locale"].as_str()
+                && let Some(loc_dict) = i18n.get(locale)
+                && loc_dict.is_object()
+            {
+                if own(loc_dict, tail) {
+                    return evaluate_value(&loc_dict[tail], props, state, stack, expand, env);
+                }
+                if let Ok(val) = read_path(loc_dict, tail.split('.'), raw, false) {
+                    return evaluate_value(&val, props, state, stack, expand, env);
+                }
+            }
+            if own(i18n, tail) {
+                return evaluate_value(&i18n[tail], props, state, stack, expand, env);
+            }
+            let val = read_path(i18n, tail.split('.'), raw, optional)?;
+            return evaluate_value(&val, props, state, stack, expand, env);
         }
         if raw.starts_with("base.") {
             return Err(format!("{raw} допустим только внутри override"));
         }
-        let parts: Vec<_> = raw.split('.').collect();
-        if let Some(value) = env["locals"].get(parts[0]) {
-            return read_path(value.clone(), &parts[1..], raw, optional);
-        }
-        if let Some(variants) = env["enums"].get(parts[0])
-            && variants.is_array()
-        {
-            if parts.len() != 2
-                || !variants
-                    .as_array()
-                    .is_some_and(|a| a.contains(&json!(parts[1])))
+        let (head, rest) = raw.split_once('.').unwrap_or((raw, ""));
+        if let Some(variants) = env["enums"].get(head).and_then(V::as_array) {
+            if rest.is_empty()
+                || rest.contains('.')
+                || !variants.iter().any(|v| v.as_str() == Some(rest))
             {
                 return Err(format!("Неизвестный вариант {raw}"));
             }
@@ -165,6 +222,12 @@ pub fn selected_properties(groups: &V, props: &V, state: &V, env: &V) -> R<V> {
             let mut found = false;
             for b in g["branches"].as_array().ok_or("Некорректные ветки match")? {
                 if pattern(&b["pattern"], &actual, props, state, env)? {
+                    if let Some(guard) = b.get("guard") {
+                        let cond = evaluate_value(guard, props, state, &[], false, env)?;
+                        if !evaluate::truth(&cond)? {
+                            continue;
+                        }
+                    }
                     for (k, v) in b["props"]
                         .as_object()
                         .ok_or("Некорректные свойства match")?
@@ -192,6 +255,12 @@ pub fn selected_sources(groups: &V, props: &V, state: &V, env: &V) -> R<V> {
             let actual = evaluate_value(&g["match"], props, state, &[], false, env)?;
             for b in g["branches"].as_array().ok_or("Некорректные ветки match")? {
                 if pattern(&b["pattern"], &actual, props, state, env)? {
+                    if let Some(guard) = b.get("guard") {
+                        let cond = evaluate_value(guard, props, state, &[], false, env)?;
+                        if !evaluate::truth(&cond)? {
+                            continue;
+                        }
+                    }
                     if let Some(o) = b["propertySources"].as_object() {
                         for (k, v) in o {
                             out[k] = v.clone()
@@ -205,41 +274,52 @@ pub fn selected_sources(groups: &V, props: &V, state: &V, env: &V) -> R<V> {
     Ok(out)
 }
 pub fn evaluate_properties(node: &V, props: &V, state: &V, env: &V) -> R<V> {
-    let mut values = json!({});
+    let mut values = serde_json::Map::new();
+    if let Some(applies) = node["apply"].as_array() {
+        for style_val in applies {
+            let style_name = style_val.as_str().ok_or("Некорректный apply")?;
+            let Some(style_props) = env["styles"].get(style_name).and_then(V::as_object) else {
+                return Err(format!("Неизвестный стиль {style_name}"));
+            };
+            for (k, v) in style_props {
+                values.insert(k.clone(), v.clone());
+            }
+        }
+    }
     if let Some(keys) = node["forward"].as_array() {
         for k in keys {
             let k = k.as_str().ok_or("Некорректный forward")?;
             if !own(props, k) {
                 return Err(format!("forward: неизвестное свойство props.{k}"));
             }
-            values[k] = json!({"expr":format!("props.{k}")})
+            values.insert(k.to_owned(), json!({"expr":format!("props.{k}")}));
         }
     }
-    for map in [
-        selected_properties(&node["matches"], props, state, env)?,
-        node["props"].clone(),
-    ] {
-        if let Some(o) = map.as_object() {
-            for (k, v) in o {
-                values[k] = v.clone()
-            }
+    if let V::Object(matched) = selected_properties(&node["matches"], props, state, env)? {
+        for (k, v) in matched {
+            values.insert(k, v);
+        }
+    }
+    if let Some(o) = node["props"].as_object() {
+        for (k, v) in o {
+            values.insert(k.clone(), v.clone());
         }
     }
     if let Some(bindings) = node["bindings"].as_object() {
         for (k, v) in bindings {
-            if own(&values, k) {
+            if values.contains_key(k) {
                 return Err(format!(
                     "Свойство {k} одновременно имеет значение и двустороннюю привязку"
                 ));
             }
-            values[k] = json!({"expr":v})
+            values.insert(k.clone(), json!({"expr":v}));
         }
     }
-    let mut out = json!({});
-    for (k, v) in values.as_object().unwrap() {
-        out[k] = evaluate_value(v, props, state, &[], false, env)?
+    let mut out = serde_json::Map::with_capacity(values.len());
+    for (k, v) in &values {
+        out.insert(k.clone(), evaluate_value(v, props, state, &[], false, env)?);
     }
-    Ok(out)
+    Ok(V::Object(out))
 }
 pub fn validate_type_name(ty: &str, enums: &V) -> R<()> {
     let name = ty.strip_suffix('?').unwrap_or(ty);
@@ -316,6 +396,49 @@ pub fn matches_type(value: &V, ty: &str, enums: &V) -> bool {
         _ => false,
     }
 }
+fn check_constraints(val: &V, constraints: &V, path_label: &str) -> R<()> {
+    if val.is_null() {
+        return Ok(());
+    }
+    if let Some(range) = constraints["range"].as_array()
+        && range.len() == 2
+    {
+        let min_v = evaluate::evaluate(&range[0], &mut |_, _| Ok(V::Null))?;
+        let max_v = evaluate::evaluate(&range[1], &mut |_, _| Ok(V::Null))?;
+        if let (Some(min), Some(max)) = (min_v.as_f64(), max_v.as_f64()) {
+            if let Some(n) = val.as_f64() {
+                if n < min || n > max {
+                    return Err(format!(
+                        "{path_label}: значение {n} вне допустимого диапазона {min}..={max}"
+                    ));
+                }
+            } else if let Some(s) = val.as_str() {
+                let len = s.chars().count() as f64;
+                if len < min || len > max {
+                    return Err(format!(
+                        "{path_label}: длина строки {len} вне допустимого диапазона {min}..={max}"
+                    ));
+                }
+            } else if let Some(a) = val.as_array() {
+                let len = a.len() as f64;
+                if len < min || len > max {
+                    return Err(format!(
+                        "{path_label}: длина списка {len} вне допустимого диапазона {min}..={max}"
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(pat) = constraints["pattern"].as_str() {
+        let s = evaluate::text(val)?;
+        if !evaluate::matches_constraint_pattern(&s, pat) {
+            return Err(format!(
+                "{path_label}: значение не соответствует шаблону '{pat}'"
+            ));
+        }
+    }
+    Ok(())
+}
 pub fn validate_contract(defs: &V, values: &V, enums: &V, label: &str) -> R<()> {
     if let Some(o) = defs.as_object() {
         for (name, d) in o {
@@ -329,6 +452,21 @@ pub fn validate_contract(defs: &V, values: &V, enums: &V, label: &str) -> R<()> 
             }
             if !matches_type(&values[name], ty, enums) {
                 return Err(format!("{label}.{name}: ожидался {ty}"));
+            }
+            if d["constraints"].is_object() {
+                check_constraints(&values[name], &d["constraints"], &format!("{label}.{name}"))?;
+            }
+            let base_ty = ty.strip_suffix('?').unwrap_or(ty);
+            if let Some(struct_cons) = enums["_structConstraints"]
+                .get(base_ty)
+                .and_then(V::as_object)
+                && let Some(obj) = values[name].as_object()
+            {
+                for (field, fcons) in struct_cons {
+                    if let Some(fval) = obj.get(field) {
+                        check_constraints(fval, fcons, &format!("{label}.{name}.{field}"))?;
+                    }
+                }
             }
         }
     }
@@ -361,6 +499,13 @@ where
             }
             let mut out = Vec::new();
             let empty_nodes = json!([]);
+            let mut current_env = env.clone();
+            if !current_env.is_object() {
+                current_env = json!({});
+            }
+            if !current_env["locals"].is_object() {
+                current_env["locals"] = json!({});
+            }
             for (index, node) in nodes
                 .as_array()
                 .ok_or("Ожидался список узлов")?
@@ -371,6 +516,19 @@ where
                 if self.count > 16384 {
                     return Err("Превышен предел размера разметки".into());
                 }
+                if node["type"] == "Let" {
+                    let name = node["name"].as_str().ok_or("Некорректный let")?;
+                    let val = evaluate_value(
+                        &node["value"],
+                        self.props,
+                        self.state,
+                        &[],
+                        false,
+                        &current_env,
+                    )?;
+                    current_env["locals"][name] = val;
+                    continue;
+                }
                 if node["type"] == "If" {
                     let c = evaluate_value(
                         &node["condition"],
@@ -378,7 +536,7 @@ where
                         self.state,
                         &[],
                         false,
-                        env,
+                        &current_env,
                     )?;
                     if !c.is_boolean() {
                         return Err("if ожидает Bool".into());
@@ -389,20 +547,63 @@ where
                         } else {
                             node.get("elseChildren").unwrap_or(&empty_nodes)
                         },
-                        env,
+                        &current_env,
                         prefix,
                         depth + 1,
                     )?);
                     continue;
                 }
+                if node["type"] == "Match" {
+                    let actual = evaluate_value(
+                        &node["match"],
+                        self.props,
+                        self.state,
+                        &[],
+                        false,
+                        &current_env,
+                    )?;
+                    let mut found = false;
+                    for b in node["branches"]
+                        .as_array()
+                        .ok_or("Некорректные ветки match")?
+                    {
+                        if pattern(&b["pattern"], &actual, self.props, self.state, &current_env)? {
+                            if let Some(guard) = b.get("guard") {
+                                let cond = evaluate_value(
+                                    guard,
+                                    self.props,
+                                    self.state,
+                                    &[],
+                                    false,
+                                    &current_env,
+                                )?;
+                                if !evaluate::truth(&cond)? {
+                                    continue;
+                                }
+                            }
+                            out.extend(self.walk(
+                                b.get("children").unwrap_or(&empty_nodes),
+                                &current_env,
+                                prefix,
+                                depth + 1,
+                            )?);
+                            found = true;
+                            break;
+                        }
+                    }
+                    if !found {
+                        return Err("match: нет подходящей ветки; добавьте _ => …".into());
+                    }
+                    continue;
+                }
                 if node["type"] == "For" {
                     let item = node["item"].as_str().ok_or("Некорректный for")?;
-                    if own(&env["locals"], item) {
+                    if own(&current_env["locals"], item) {
                         return Err(format!("Вложенный for повторяет имя {item}"));
                     }
                     let idx_name = node["index"].as_str();
                     if let Some(idx) = idx_name
-                        && own(&env["locals"], idx)
+                        && own(&current_env["locals"], idx)
                     {
                         return Err(format!("Вложенный for повторяет имя {idx}"));
                     }
@@ -412,30 +613,35 @@ where
                         self.state,
                         &[],
                         false,
-                        env,
+                        &current_env,
                     )?;
                     let collection = collection.as_array().ok_or("for ожидает коллекцию")?;
-                    if collection.is_empty() {
-                        out.extend(self.walk(
-                            node.get("emptyChildren").unwrap_or(&empty_nodes),
-                            env,
-                            prefix,
-                            depth + 1,
-                        )?)
+                    let mut keys = std::collections::HashSet::with_capacity(collection.len());
+                    let mut local = current_env.clone();
+                    if !local["_formaBindings"].is_object() {
+                        local["_formaBindings"] = json!({});
                     }
-                    let mut keys = std::collections::HashSet::new();
+                    let node_start = node["start"].as_u64().unwrap_or(index as u64);
+                    let mut matched_any = false;
                     for (item_index, v) in collection.iter().enumerate() {
-                        let mut local = env.clone();
-                        if !local["locals"].is_object() {
-                            local["locals"] = json!({})
-                        }
                         local["locals"][item] = v.clone();
                         if let Some(idx) = idx_name {
                             local["locals"][idx] = json!(item_index);
                         }
-                        if !local["_formaBindings"].is_object() {
-                            local["_formaBindings"] = json!({})
+                        if let Some(where_expr) = node.get("where") {
+                            let cond = evaluate_value(
+                                where_expr,
+                                self.props,
+                                self.state,
+                                &[],
+                                false,
+                                &local,
+                            )?;
+                            if !evaluate::truth(&cond)? {
+                                continue;
+                            }
                         }
+                        matched_any = true;
                         local["_formaBindings"][item] =
                             json!({"collection":node["collection"],"index":item_index});
                         let key = evaluate_value(
@@ -460,10 +666,15 @@ where
                         out.extend(self.walk(
                             &node["children"],
                             &local,
-                            &format!(
-                                "{prefix}@{}:{identity}/",
-                                node["start"].as_u64().unwrap_or(index as u64)
-                            ),
+                            &format!("{prefix}@{node_start}:{identity}/"),
+                            depth + 1,
+                        )?)
+                    }
+                    if !matched_any {
+                        out.extend(self.walk(
+                            node.get("emptyChildren").unwrap_or(&empty_nodes),
+                            &current_env,
+                            prefix,
                             depth + 1,
                         )?)
                     }
@@ -472,7 +683,7 @@ where
                 let values = if self.options["evaluateProps"] == false {
                     node["props"].clone()
                 } else {
-                    evaluate_properties(node, self.props, self.state, env)?
+                    evaluate_properties(node, self.props, self.state, &current_env)?
                 };
                 let mut args = json!({});
                 if let Some(o) = node["eventArgs"].as_object() {
@@ -481,7 +692,16 @@ where
                             a.as_array()
                                 .ok_or("Некорректные аргументы события")?
                                 .iter()
-                                .map(|v| evaluate_value(v, self.props, self.state, &[], false, env))
+                                .map(|v| {
+                                    evaluate_value(
+                                        v,
+                                        self.props,
+                                        self.state,
+                                        &[],
+                                        false,
+                                        &current_env,
+                                    )
+                                })
                                 .collect::<R<_>>()?,
                         )
                     }
@@ -490,8 +710,8 @@ where
                 result["props"] = values.clone();
                 result["eventArgs"] = args;
                 result["eventArgExpressions"] = node.get("eventArgs").cloned().unwrap_or(json!({}));
-                result["environment"] = env.clone();
-                let annotation = (self.hook)(node, env)?;
+                result["environment"] = current_env.clone();
+                let annotation = (self.hook)(node, &current_env)?;
                 if let Some(v) = annotation.get("propertyOrigins") {
                     result["propertyOrigins"] = v.clone()
                 }
@@ -502,7 +722,7 @@ where
                             .as_str()
                             .is_some_and(|s| !s.is_empty())
                             || path.is_some_and(|s| s.starts_with("state.")
-                                || own(&env["locals"], s.split('.').next().unwrap_or("")))
+                                || own(&current_env["locals"], s.split('.').next().unwrap_or("")))
                     )
                 }
                 if !prefix.is_empty() {
@@ -519,7 +739,7 @@ where
                     } else {
                         V::Array(self.walk(
                             node.get("children").unwrap_or(&empty_nodes),
-                            env,
+                            &current_env,
                             prefix,
                             depth + 1,
                         )?)
@@ -554,6 +774,11 @@ pub fn validate_design(component: &V, design: &V) -> R<()> {
                 }
                 for k in ["children", "elseChildren", "emptyChildren"] {
                     collect(&n[k], keys)
+                }
+                if let Some(branches) = n["branches"].as_array() {
+                    for b in branches {
+                        collect(&b["children"], keys);
+                    }
                 }
             }
         }

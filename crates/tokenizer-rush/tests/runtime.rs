@@ -1076,3 +1076,49 @@ while i < 32i64 {
     let vm_val = evaluate_bytecode(src, 100_000).unwrap();
     assert_eq!(ast_val, vm_val);
 }
+
+#[test]
+fn inline_cache_member_access_and_tail_call_optimization() {
+    use themoretheless_tokenizer_rush::bytecode::{BytecodeProgram, Opcode};
+    use themoretheless_tokenizer_rush::{ExecutionLimits, Value};
+
+    let src = "\
+struct Counter { a: int, b: int, c: int, target: int }
+fn step_a(n: int, acc: int) -> int {
+    if n <= 0i64 { return acc }
+    return step_b(n - 1i64, acc + n)
+}
+fn step_b(n: int, acc: int) -> int {
+    if n <= 0i64 { return acc }
+    return step_a(n - 1i64, acc + 1i64)
+}
+mut obj = Counter({ a: 1i64, b: 2i64, c: 3i64, target: 0i64 })
+mut i = 0i64
+while i < 50i64 {
+    obj.target = obj.target + obj.a + obj.b + obj.c
+    i += 1i64
+}
+let rec_sum = step_a(200i64, 0i64)
+obj.target + rec_sum";
+
+    let prog = BytecodeProgram::compile(src).unwrap();
+    assert_eq!(prog.chunk.code.len(), prog.chunk.ic_slots.len());
+    // Both step_a and step_b should emit Opcode::TailCall
+    for func in &prog.chunk.functions[1..=2] {
+        assert_eq!(func.chunk.code.len(), func.chunk.ic_slots.len());
+        assert!(
+            func.chunk
+                .code
+                .iter()
+                .any(|op| matches!(op, Opcode::TailCall(2)))
+        );
+    }
+
+    // Run with tight max_depth = 8 while recursing 200 levels deep via mutual tail calls
+    let limits = ExecutionLimits {
+        max_depth: 8,
+        ..ExecutionLimits::new(100_000)
+    };
+    let vm_val = prog.execute_with_limits(limits, None).unwrap();
+    assert_eq!(vm_val, Value::Int(50 * 6 + 10100 + 100));
+}
