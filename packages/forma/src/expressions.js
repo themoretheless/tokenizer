@@ -1,6 +1,6 @@
 // Host adapters to the Rust frontend. No JavaScript parser or interpreter.
 import {operation,expressionRust} from './rust.js';
-export const pureFunctions=new Set(['min','max','clamp','abs','round','floor','ceil','len','String','Number','Bool','trim','upper','lower','contains','startsWith','endsWith','replace','slice','split','join','reverse','take','skip','sum','range','formatNumber']);
+export const pureFunctions=new Set(['min','max','clamp','abs','round','floor','ceil','len','String','Number','Bool','trim','upper','lower','contains','startsWith','endsWith','replace','slice','split','join','reverse','take','skip','sum','range','formatNumber','sortBy','pluck','count','any','all','unique','find','compact','first','last','groupBy','plural','isValid','alpha','mix','lighten','darken']);
 export const tokenize=(source,offset=0)=>operation('tokenize',{source,offset});
 export const parseExpression=expressionRust;
 export const parseString=expressionRust;
