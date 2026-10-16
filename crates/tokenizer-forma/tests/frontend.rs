@@ -1,12 +1,28 @@
 use serde_json::{Value, json};
 use themoretheless_tokenizer_forma::{evaluate, parse, parse_expression, semantics};
 #[test]
-fn original_studio_corpus_has_identical_ast_and_editor_offsets() {
+fn original_studio_corpus_preserves_existing_ast_fields_and_editor_offsets() {
     let cases: Value = serde_json::from_str(include_str!("fixtures/forma-corpus.json")).unwrap();
     assert_eq!(cases.as_array().unwrap().len(), 87);
     for case in cases.as_array().unwrap() {
         let got = parse(case["source"].as_str().unwrap()).unwrap();
-        assert!(evaluate::equal(&got, &case["ast"]), "{}", case["file"]);
+        let mut expected = case["ast"].clone();
+        // The 0.8 document schema adds explicit empty declaration collections.
+        // Preserve exact comparison of every existing field and source range.
+        for (key, value) in [
+            ("structs", json!({})),
+            ("lets", json!({})),
+            ("tokens", json!({})),
+            ("slotDefinitions", json!({})),
+            ("shortcuts", json!([])),
+        ] {
+            expected
+                .as_object_mut()
+                .unwrap()
+                .entry(key)
+                .or_insert(value);
+        }
+        assert!(evaluate::equal(&got, &expected), "{}", case["file"]);
     }
 }
 #[test]
