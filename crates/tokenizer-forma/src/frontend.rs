@@ -1284,7 +1284,9 @@ impl<'a> Parser<'a> {
         while self.peek() != "}" {
             match self.peek() {
                 "#" | "required" | "prop" | "state" | "event" | "enum" | "struct" | "tokens"
-                | "i18n" | "style" | "shortcut" | "use" => {
+                | "i18n" | "style" | "shortcut" | "use"
+                    if !matches!(self.next(), ":" | "<->" | "->") =>
+                {
                     if !component {
                         return self.err(
                             "Объявления prop, state, event, enum, struct, tokens, i18n, style, use и shortcut разрешены только в component",
@@ -1293,7 +1295,7 @@ impl<'a> Parser<'a> {
                     self.declaration(&mut n)?;
                     continue;
                 }
-                "apply" => {
+                "apply" if !matches!(self.next(), ":" | "<->" | "->") => {
                     self.i += 1;
                     let mut applies = n
                         .get("apply")
@@ -1360,7 +1362,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 "match" => {
-                    if self.is_markup_match() {
+                    if !component && self.is_markup_match() {
                         push(&mut n, "children", self.match_node()?);
                     } else {
                         push(&mut n, "matches", self.match_value(true)?);
@@ -2114,14 +2116,75 @@ pub fn lint_document(source: &str) -> R<V> {
         }
     }
 
+    let mut used_states = HashSet::new();
+    let mut used_styles = HashSet::new();
+
+    fn collect_state_and_style_refs(
+        v: &V,
+        used_states: &mut HashSet<String>,
+        used_styles: &mut HashSet<String>,
+    ) {
+        if let Some(s) = v["expr"].as_str() {
+            let s = s.strip_prefix('!').unwrap_or(s);
+            if let Some(rest) = s.strip_prefix("state.")
+                && let Some(head) = rest.split('.').next()
+            {
+                used_states.insert(head.to_string());
+            }
+        }
+        if let Some(applies) = v["apply"].as_array() {
+            for a in applies {
+                if let Some(sn) = a.as_str() {
+                    used_styles.insert(sn.to_string());
+                }
+            }
+        }
+        if let Some(bindings) = v["bindings"].as_object() {
+            for (_, bval) in bindings {
+                if let Some(s) = bval.as_str()
+                    && let Some(rest) = s.strip_prefix("state.")
+                    && let Some(head) = rest.split('.').next()
+                {
+                    used_states.insert(head.to_string());
+                }
+            }
+        }
+        if let Some(a) = v.as_array() {
+            for item in a {
+                collect_state_and_style_refs(item, used_states, used_styles);
+            }
+        } else if let Some(o) = v.as_object() {
+            for (k, val) in o {
+                if !matches!(
+                    k.as_str(),
+                    "propDefinitions"
+                        | "stateDefinitions"
+                        | "styles"
+                        | "defaultRanges"
+                        | "statementRanges"
+                ) {
+                    collect_state_and_style_refs(val, used_states, used_styles);
+                }
+            }
+        }
+    }
+
     collect_refs(&doc["nodes"], &mut used_props);
     collect_refs(&doc["matches"], &mut used_props);
     collect_refs(&doc["shortcuts"], &mut used_props);
+    collect_refs(&doc["styles"], &mut used_props);
+    collect_refs(&doc["i18n"], &mut used_props);
     for (k, v) in doc["defaults"].as_object().cloned().unwrap_or_default() {
         if doc["lets"].get(&k).is_some() {
             collect_refs(&v, &mut used_props);
         }
     }
+    collect_state_and_style_refs(&doc["nodes"], &mut used_states, &mut used_styles);
+    collect_state_and_style_refs(&doc["matches"], &mut used_states, &mut used_styles);
+    collect_state_and_style_refs(&doc["shortcuts"], &mut used_states, &mut used_styles);
+    collect_state_and_style_refs(&doc["styles"], &mut used_states, &mut used_styles);
+    collect_state_and_style_refs(&doc["i18n"], &mut used_states, &mut used_styles);
+    collect_state_and_style_refs(&doc["defaults"], &mut used_states, &mut used_styles);
 
     for (name, _) in doc["lets"].as_object().cloned().unwrap_or_default() {
         if !used_props.contains(&name) {
@@ -2148,6 +2211,31 @@ pub fn lint_document(source: &str) -> R<V> {
                 "from": range["from"],
                 "to": range["to"],
                 "message": format!("Неиспользуемое свойство prop {name}")
+            }));
+        }
+    }
+    for (name, _) in doc["stateDefinitions"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default()
+    {
+        if !used_states.contains(&name) {
+            let range = &doc["defaultRanges"][&name];
+            warnings.push(json!({
+                "code": "unused-state",
+                "name": name,
+                "from": range["from"],
+                "to": range["to"],
+                "message": format!("Неиспользуемое состояние state {name}")
+            }));
+        }
+    }
+    for (name, _) in doc["styles"].as_object().cloned().unwrap_or_default() {
+        if !used_styles.contains(&name) {
+            warnings.push(json!({
+                "code": "unused-style",
+                "name": name,
+                "message": format!("Неиспользуемый стиль style {name}")
             }));
         }
     }
