@@ -137,17 +137,17 @@ pub fn evaluate_value(
         if let Some(value) = env["locals"].get(parts[0]) {
             return read_path(value.clone(), &parts[1..], raw, optional);
         }
-        if let Some(variants) = env["enums"].get(parts[0]) {
-            if variants.is_array() {
-                if parts.len() != 2
-                    || !variants
-                        .as_array()
-                        .is_some_and(|a| a.contains(&json!(parts[1])))
-                {
-                    return Err(format!("Неизвестный вариант {raw}"));
-                }
-                return Ok(json!(raw));
+        if let Some(variants) = env["enums"].get(parts[0])
+            && variants.is_array()
+        {
+            if parts.len() != 2
+                || !variants
+                    .as_array()
+                    .is_some_and(|a| a.contains(&json!(parts[1])))
+            {
+                return Err(format!("Неизвестный вариант {raw}"));
             }
+            return Ok(json!(raw));
         }
         Ok(json!({"expr":raw}))
     })
@@ -401,10 +401,10 @@ where
                         return Err(format!("Вложенный for повторяет имя {item}"));
                     }
                     let idx_name = node["index"].as_str();
-                    if let Some(idx) = idx_name {
-                        if own(&env["locals"], idx) {
-                            return Err(format!("Вложенный for повторяет имя {idx}"));
-                        }
+                    if let Some(idx) = idx_name
+                        && own(&env["locals"], idx)
+                    {
+                        return Err(format!("Вложенный for повторяет имя {idx}"));
                     }
                     let collection = evaluate_value(
                         &node["collection"],
