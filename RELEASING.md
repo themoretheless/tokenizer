@@ -1,7 +1,6 @@
 # Releasing
 
-Releases publish versioned source archives and release notes on GitHub. Registry
-publication is not part of this process and no registry token is required.
+Releases publish versioned source archives and release notes on GitHub.
 
 ## Prepare the version
 
