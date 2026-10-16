@@ -319,10 +319,7 @@ fn vector_components_and_collection_indices() {
 #[test]
 fn annotations_enforce_function_and_binding_contracts() {
     let source = "fn scale(p: vec2, factor: number) -> vec2 { return p * factor }\nconst result: list[vec2] = [scale(vec2(1, 2), 3)]\nresult[0]";
-    assert_eq!(
-        evaluate(source, 100).unwrap(),
-        Value::vec2(3.0, 6.0)
-    );
+    assert_eq!(evaluate(source, 100).unwrap(), Value::vec2(3.0, 6.0));
     for source in [
         "const x: number = true",
         "const x: list[number] = [1, false]",
@@ -340,10 +337,7 @@ fn tuples_and_zip_combine_coordinates() {
     let source = "zip([1, 2, 3], [10, 20]) | map(pair => vec2(pair[0], pair[1]))";
     assert_eq!(
         evaluate(source, 200).unwrap(),
-        Value::List(vec![
-            Value::vec2(1., 10.),
-            Value::vec2(2., 20.)
-        ])
+        Value::List(vec![Value::vec2(1., 10.), Value::vec2(2., 20.)])
     );
     assert_eq!(evaluate("(1, true)[1]", 100).unwrap(), Value::Bool(true));
     assert_eq!(
@@ -771,7 +765,10 @@ let bases = 0xFF_00 + 0b1010_0101 + 0o77 + 1_000i
     ]);
     let prog = Program::compile_strict(exact_src).unwrap();
     assert_eq!(prog.run(10_000, &token, &[]).unwrap(), expected_exact);
-    assert_eq!(evaluate_bytecode(exact_src, 10_000).unwrap(), expected_exact);
+    assert_eq!(
+        evaluate_bytecode(exact_src, 10_000).unwrap(),
+        expected_exact
+    );
 
     // 2. Integer arithmetic (truncating division, remainder, power) & bitwise ops
     let bitwise_src = "\
@@ -874,7 +871,10 @@ let v = vec3(4, 5, 6)
         "1i << 64i",
         "1i >> -1i",
     ] {
-        assert!(evaluate(bad, 1_000).is_err(), "expected AST error for {bad}");
+        assert!(
+            evaluate(bad, 1_000).is_err(),
+            "expected AST error for {bad}"
+        );
         assert!(
             evaluate_bytecode(bad, 1_000).is_err(),
             "expected VM error for {bad}"
@@ -958,8 +958,14 @@ let r_dyn = { b: (seq += 1), a: (seq += 10) }
             assert!(Rc::ptr_eq(r1.shape(), r2.shape()));
         }
         assert_eq!(r1.keys_slice(), &["x".to_string(), "y".to_string()]);
-        assert_eq!(r1.values_slice(), &[Value::Number(15.0), Value::Number(20.0)]);
-        assert_eq!(r2.values_slice(), &[Value::Number(10.0), Value::Number(17.0)]);
+        assert_eq!(
+            r1.values_slice(),
+            &[Value::Number(15.0), Value::Number(20.0)]
+        );
+        assert_eq!(
+            r2.values_slice(),
+            &[Value::Number(10.0), Value::Number(17.0)]
+        );
         assert_eq!(items[2], Value::Bool(true));
 
         let expected_const = Value::Record(RecordMap::from([
@@ -1004,54 +1010,67 @@ while i < 32i64 {
 
     let prog = BytecodeProgram::compile(src).unwrap();
     // Verify zero-clone local member/index and int superinstructions are emitted in top-level chunk
-    assert!(prog
-        .chunk
-        .code
-        .iter()
-        .any(|op| matches!(op, Opcode::LocalLessIntImm(_, 32))));
-    assert!(prog
-        .chunk
-        .code
-        .iter()
-        .any(|op| matches!(op, Opcode::StoreAddLocalIntImm(_, 1))));
-    assert!(prog
-        .chunk
-        .code
-        .iter()
-        .any(|op| matches!(op, Opcode::StoreMemberSet(_, _))));
-    assert!(prog
-        .chunk
-        .code
-        .iter()
-        .any(|op| matches!(op, Opcode::LocalMemberGet(_, _))));
-    assert!(prog
-        .chunk
-        .code
-        .iter()
-        .any(|op| matches!(op, Opcode::LocalIndexGet(_))));
+    assert!(
+        prog.chunk
+            .code
+            .iter()
+            .any(|op| matches!(op, Opcode::LocalLessIntImm(_, 32)))
+    );
+    assert!(
+        prog.chunk
+            .code
+            .iter()
+            .any(|op| matches!(op, Opcode::StoreAddLocalIntImm(_, 1)))
+    );
+    assert!(
+        prog.chunk
+            .code
+            .iter()
+            .any(|op| matches!(op, Opcode::StoreMemberSet(_, _)))
+    );
+    assert!(
+        prog.chunk
+            .code
+            .iter()
+            .any(|op| matches!(op, Opcode::LocalMemberGet(_, _)))
+    );
+    assert!(
+        prog.chunk
+            .code
+            .iter()
+            .any(|op| matches!(op, Opcode::LocalIndexGet(_)))
+    );
 
     // Verify upvalue member/index superinstructions inside closure `step`
     let step_fn = &prog.chunk.functions[1];
-    assert!(step_fn
-        .chunk
-        .code
-        .iter()
-        .any(|op| matches!(op, Opcode::UpvalueMemberGet(_, _))));
-    assert!(step_fn
-        .chunk
-        .code
-        .iter()
-        .any(|op| matches!(op, Opcode::UpvalueIndexGet(_))));
-    assert!(step_fn
-        .chunk
-        .code
-        .iter()
-        .any(|op| matches!(op, Opcode::LocalBitAndIntImm(_, 0xff))));
-    assert!(step_fn
-        .chunk
-        .code
-        .iter()
-        .any(|op| matches!(op, Opcode::LocalModIntImm(_, 4))));
+    assert!(
+        step_fn
+            .chunk
+            .code
+            .iter()
+            .any(|op| matches!(op, Opcode::UpvalueMemberGet(_, _)))
+    );
+    assert!(
+        step_fn
+            .chunk
+            .code
+            .iter()
+            .any(|op| matches!(op, Opcode::UpvalueIndexGet(_)))
+    );
+    assert!(
+        step_fn
+            .chunk
+            .code
+            .iter()
+            .any(|op| matches!(op, Opcode::LocalBitAndIntImm(_, 0xff)))
+    );
+    assert!(
+        step_fn
+            .chunk
+            .code
+            .iter()
+            .any(|op| matches!(op, Opcode::LocalModIntImm(_, 4)))
+    );
 
     let ast_val = evaluate(src, 100_000).unwrap();
     let vm_val = evaluate_bytecode(src, 100_000).unwrap();

@@ -48,11 +48,7 @@ fn main() {
             .unwrap();
     }
     instance
-        .call(
-            "set_velocity",
-            &[Value::vec3(0.0, 3.0, 0.0)],
-            limits,
-        )
+        .call("set_velocity", &[Value::vec3(0.0, 3.0, 0.0)], limits)
         .unwrap();
     let result = instance
         .call("update", &[Value::Number(0.5)], limits)

@@ -332,9 +332,7 @@ impl Usage {
                     self.environment(&f.environment);
                 }
                 if !f.siblings.is_empty()
-                    && self
-                        .seen
-                        .insert((21, Rc::as_ptr(&f.siblings) as usize))
+                    && self.seen.insert((21, Rc::as_ptr(&f.siblings) as usize))
                 {
                     for sib in f.siblings.iter() {
                         if self

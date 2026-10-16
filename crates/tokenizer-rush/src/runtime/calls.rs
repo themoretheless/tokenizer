@@ -994,12 +994,8 @@ impl<'s> Runtime<'_, 's> {
         types: Vec<ValueType>,
     ) -> Result<Value<'s>> {
         fields.sort_by(|(a, _), (b, _)| a.cmp(b));
-        let shape: RecordShape = Rc::from(
-            fields
-                .iter()
-                .map(|(n, _)| n.clone())
-                .collect::<Vec<_>>(),
-        );
+        let shape: RecordShape =
+            Rc::from(fields.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>());
         let count = if variant.is_none() { 1 } else { types.len() };
         Ok(Value::Function(Rc::new(Closure {
             module: self.module,

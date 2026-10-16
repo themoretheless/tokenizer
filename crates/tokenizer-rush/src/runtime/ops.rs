@@ -49,7 +49,9 @@ pub(crate) fn is_non_comparable(value: &Value<'_>) -> bool {
 }
 
 #[inline]
-pub(crate) fn check_vector_finite(values: crate::InlineVec) -> Result<Value<'static>, &'static str> {
+pub(crate) fn check_vector_finite(
+    values: crate::InlineVec,
+) -> Result<Value<'static>, &'static str> {
     if values.iter().all(|x| x.is_finite()) {
         Ok(Value::Vector(values))
     } else {
@@ -689,4 +691,3 @@ mod remainder_tests {
         }
     }
 }
-

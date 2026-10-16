@@ -496,9 +496,7 @@ pub(crate) fn eval_math_builtin<'s>(
         }
         (
             Builtin::RotationX | Builtin::RotationY | Builtin::RotationZ,
-            [
-                angle @ (Value::Number(_) | Value::Int(_) | Value::Angle(_)),
-            ],
+            [angle @ (Value::Number(_) | Value::Int(_) | Value::Angle(_))],
         ) => {
             let rad = match angle {
                 Value::Angle(a) => *a,
@@ -589,16 +587,13 @@ pub(crate) fn eval_math_builtin<'s>(
     }
 
     let number = match (builtin, arguments) {
-        (Builtin::Random, [seed, index])
-            if seed.as_f64().is_some() && index.as_f64().is_some() =>
-        {
+        (Builtin::Random, [seed, index]) if seed.as_f64().is_some() && index.as_f64().is_some() => {
             crate::noise::random(seed.as_f64().unwrap(), index.as_f64().unwrap())
                 .ok_or("random requires nonnegative exact integer seed and index")?
         }
         (Builtin::Noise, [x, seed]) if x.as_f64().is_some() && seed.as_f64().is_some() => {
-            crate::noise::noise(x.as_f64().unwrap(), seed.as_f64().unwrap()).ok_or(
-                "noise requires a bounded coordinate and nonnegative exact integer seed",
-            )?
+            crate::noise::noise(x.as_f64().unwrap(), seed.as_f64().unwrap())
+                .ok_or("noise requires a bounded coordinate and nonnegative exact integer seed")?
         }
         (Builtin::Cross, [Value::Vector(a), Value::Vector(b)]) if a.len() == 3 && b.len() == 3 => {
             let x = a[1] * b[2] - a[2] * b[1];
@@ -624,7 +619,11 @@ pub(crate) fn eval_math_builtin<'s>(
         (Builtin::Lerp, [a, b, t])
             if a.as_f64().is_some() && b.as_f64().is_some() && t.as_f64().is_some() =>
         {
-            let (a, b, t) = (a.as_f64().unwrap(), b.as_f64().unwrap(), t.as_f64().unwrap());
+            let (a, b, t) = (
+                a.as_f64().unwrap(),
+                b.as_f64().unwrap(),
+                t.as_f64().unwrap(),
+            );
             a * (1.0 - t) + b * t
         }
         (Builtin::Clamp, [x, low, high])
@@ -764,11 +763,11 @@ pub(crate) fn eval_pure_builtin<'s>(
                 (Value::String(s), Value::String(needle)) => {
                     Ok(Value::Bool(s.contains(needle.as_str())))
                 }
-                (Value::List(items), needle) => Ok(Value::Bool(
-                    items
-                        .iter()
-                        .any(|item| crate::runtime::ops::values_equal(item, needle)),
-                )),
+                (Value::List(items), needle) => {
+                    Ok(Value::Bool(items.iter().any(|item| {
+                        crate::runtime::ops::values_equal(item, needle)
+                    })))
+                }
                 (Value::Record(fields), Value::String(k)) => {
                     Ok(Value::Bool(fields.contains_key(k)))
                 }

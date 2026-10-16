@@ -101,10 +101,7 @@ impl<'c> Vm<'c> {
             }
             Ok(())
         } else {
-            Err(self.error(
-                span,
-                "Binding value does not match its type annotation",
-            ))
+            Err(self.error(span, "Binding value does not match its type annotation"))
         }
     }
 
@@ -419,8 +416,8 @@ impl<'c> Vm<'c> {
                             )
                         }
                         PathTarget::Upvalue(upval_idx) => {
-                            let cell = self.frames[frame_idx].closure.upvalues[upval_idx as usize]
-                                .clone();
+                            let cell =
+                                self.frames[frame_idx].closure.upvalues[upval_idx as usize].clone();
                             let borrow = cell.borrow();
                             match &*borrow {
                                 Upvalue::Open(s) => Self::read_path_vm(
@@ -429,12 +426,9 @@ impl<'c> Vm<'c> {
                                     member_mask,
                                     0,
                                 ),
-                                Upvalue::Closed(c) => Self::read_path_vm(
-                                    c,
-                                    &self.stack[keys_start..],
-                                    member_mask,
-                                    0,
-                                ),
+                                Upvalue::Closed(c) => {
+                                    Self::read_path_vm(c, &self.stack[keys_start..], member_mask, 0)
+                                }
                             }
                         }
                         PathTarget::Global(name_idx) => {
@@ -474,8 +468,8 @@ impl<'c> Vm<'c> {
                             )
                         }
                         PathTarget::Upvalue(upval_idx) => {
-                            let cell = self.frames[frame_idx].closure.upvalues[upval_idx as usize]
-                                .clone();
+                            let cell =
+                                self.frames[frame_idx].closure.upvalues[upval_idx as usize].clone();
                             let mut borrow = cell.borrow_mut();
                             match &mut *borrow {
                                 Upvalue::Open(s) => {
@@ -783,10 +777,8 @@ impl<'c> Vm<'c> {
                                 }
                             }
                         } else {
-                            return Err(self.error(
-                                span,
-                                "Binding value does not match its type annotation",
-                            ));
+                            return Err(self
+                                .error(span, "Binding value does not match its type annotation"));
                         }
                     }
                 }
@@ -1712,8 +1704,7 @@ impl<'c> Vm<'c> {
                         pairs.push((key, v));
                     }
                     drop(iter);
-                    self.stack
-                        .push(Value::Record(RecordMap::from_iter(pairs)));
+                    self.stack.push(Value::Record(RecordMap::from_iter(pairs)));
                 }
                 Opcode::BuildRecordShape(shape_idx) => {
                     let desc = &self.frames[frame_idx].closure.function.chunk.record_shapes
@@ -1730,9 +1721,10 @@ impl<'c> Vm<'c> {
                     } else {
                         self.stack.split_off(start)
                     };
-                    self.stack.push(Value::Record(RecordMap::from_shape_and_values(
-                        shape, values,
-                    )));
+                    self.stack
+                        .push(Value::Record(RecordMap::from_shape_and_values(
+                            shape, values,
+                        )));
                 }
                 Opcode::IndexGet => {
                     let idx = self.stack.pop().unwrap();
@@ -2178,7 +2170,7 @@ impl<'c> Vm<'c> {
                             match next_item {
                                 Some(item) => {
                                     self.stack.push(item);
-                                                                }
+                                }
                                 None => {
                                     self.frames[frame_idx].ip = exit_jump;
                                 }

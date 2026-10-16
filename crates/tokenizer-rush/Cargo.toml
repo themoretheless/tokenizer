@@ -1,6 +1,6 @@
 [package]
 name = "themoretheless-tokenizer-rush"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 authors = ["Denis Mezhov"]
 description = "Full rush engine (lex/parse/AST/semantic) for themoretheless-tokenizer"
@@ -18,8 +18,8 @@ path = "src/lib.rs"
 [dependencies]
 self_cell = "1"
 serde = { version = "1", features = ["derive"] }
-themoretheless-tokenizer-core = { path = "../tokenizer-core", version = "0.7.0" }
-themoretheless-tokenizer-json = { path = "../tokenizer-json", version = "0.7.0" }
+themoretheless-tokenizer-core = { path = "../tokenizer-core", version = "0.8.0" }
+themoretheless-tokenizer-json = { path = "../tokenizer-json", version = "0.8.0" }
 
 [package.metadata.docs.rs]
 all-features = true

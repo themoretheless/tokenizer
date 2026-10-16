@@ -48,17 +48,17 @@ pub use types::{
 
 type Result<T> = std::result::Result<T, RuntimeError>;
 
-pub(crate) use ops::{exact_remainder, format_value_for_display};
-pub(crate) use types::{
-    int_f64_cmp, int_f64_eq, is_int_literal, parse_f64_literal, parse_int_literal,
-    parse_neg_int_literal, parse_signed_int_str,
-};
 use env::{Binding, CaptureReference, CellId, Environment};
+pub(crate) use ops::{exact_remainder, format_value_for_display};
 use regions::RegionFrame;
 #[allow(unused_imports)]
 use sequence::{HostSource, SequenceCursor, SequenceSource, SequenceStage, SequenceStages};
 use stmt::Flow;
 use types::{ContextualHostCallback, FunctionBody};
+pub(crate) use types::{
+    int_f64_cmp, int_f64_eq, is_int_literal, parse_f64_literal, parse_int_literal,
+    parse_neg_int_literal, parse_signed_int_str,
+};
 
 /// One initialized script. Mutable captures and module caches survive calls.
 /// Source and cancellation token must outlive the instance. Errors do not roll back mutations.

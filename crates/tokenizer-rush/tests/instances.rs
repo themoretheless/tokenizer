@@ -92,7 +92,8 @@ fn captured_host_context_and_arbitrary_inputs_and_events() {
             .call(
                 "event",
                 &[Value::Record(
-                    std::collections::BTreeMap::from([("message".into(), Value::Bool(true))]).into()
+                    std::collections::BTreeMap::from([("message".into(), Value::Bool(true))])
+                        .into()
                 )],
                 limits()
             )

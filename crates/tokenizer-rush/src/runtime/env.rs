@@ -130,7 +130,10 @@ impl<'s> Environment<'s> {
         self.insert_binding(name, Binding::Value(value))
     }
 
-    pub(super) fn extend(&mut self, mut other: Self) -> std::result::Result<(), memory::AllocationError> {
+    pub(super) fn extend(
+        &mut self,
+        mut other: Self,
+    ) -> std::result::Result<(), memory::AllocationError> {
         debug_assert!(other.parent.is_none());
         let additional = other
             .bindings

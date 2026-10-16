@@ -644,7 +644,11 @@ impl<'s> Checker<'s> {
                     {
                         let valid = match (a, b, *operator) {
                             (ValueType::Vector(a), ValueType::Vector(b), "+" | "-") => a == b,
-                            (ValueType::Vector(_), ValueType::Number | ValueType::Int, "*" | "/")
+                            (
+                                ValueType::Vector(_),
+                                ValueType::Number | ValueType::Int,
+                                "*" | "/",
+                            )
                             | (ValueType::Number | ValueType::Int, ValueType::Vector(_), "*") => {
                                 true
                             }
@@ -674,7 +678,11 @@ impl<'s> Checker<'s> {
                             (ValueType::Matrix4, ValueType::Matrix4, "*")
                                 | (ValueType::Quaternion, ValueType::Quaternion, "*")
                                 | (ValueType::Angle, ValueType::Angle, "+" | "-")
-                                | (ValueType::Angle, ValueType::Number | ValueType::Int, "*" | "/")
+                                | (
+                                    ValueType::Angle,
+                                    ValueType::Number | ValueType::Int,
+                                    "*" | "/"
+                                )
                                 | (ValueType::Number | ValueType::Int, ValueType::Angle, "*")
                         );
                         if !valid {

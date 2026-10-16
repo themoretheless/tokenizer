@@ -346,9 +346,7 @@ impl<'s> Compiler<'s> {
                         self.current()
                             .chunk
                             .emit(Opcode::GetLocal(p_idx as u32), p.pattern.span);
-                        self.current()
-                            .chunk
-                            .emit(Opcode::CoerceInt, p.pattern.span);
+                        self.current().chunk.emit(Opcode::CoerceInt, p.pattern.span);
                         self.current()
                             .chunk
                             .emit(Opcode::StoreLocal(p_idx as u32), p.pattern.span);
@@ -1968,9 +1966,7 @@ fn expr_may_mutate(expr: &Expr<'_>) -> bool {
             then_value,
             else_value,
         } => {
-            expr_may_mutate(condition)
-                || expr_may_mutate(then_value)
-                || expr_may_mutate(else_value)
+            expr_may_mutate(condition) || expr_may_mutate(then_value) || expr_may_mutate(else_value)
         }
         _ => true,
     }

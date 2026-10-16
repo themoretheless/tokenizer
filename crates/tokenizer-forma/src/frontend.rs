@@ -696,8 +696,11 @@ impl<'a> Parser<'a> {
                 self.take("key")?;
                 n["key"] = self.expression(0)?;
             } else if (n["collection"]["expression"]["kind"] == "binary"
-                && ["..", "..="]
-                    .contains(&n["collection"]["expression"]["operator"].as_str().unwrap_or("")))
+                && ["..", "..="].contains(
+                    &n["collection"]["expression"]["operator"]
+                        .as_str()
+                        .unwrap_or(""),
+                ))
                 || (n["collection"]["expression"]["kind"] == "call"
                     && n["collection"]["expression"]["name"] == "range")
             {
@@ -853,9 +856,14 @@ impl<'a> Parser<'a> {
             push(n, "children", presenter);
             return Ok(());
         }
-        if ["statementRanges", "propDefinitions", "eventDefinitions", "lets"]
-            .iter()
-            .any(|k| has(&n[k], &name))
+        if [
+            "statementRanges",
+            "propDefinitions",
+            "eventDefinitions",
+            "lets",
+        ]
+        .iter()
+        .any(|k| has(&n[k], &name))
         {
             return self.err(format!("Повторное свойство или событие {name}"));
         }

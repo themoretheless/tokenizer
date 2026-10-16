@@ -287,17 +287,17 @@ impl<'s> Runtime<'_, 's> {
         if self.loading.contains(&name.text) {
             return self.error(name.span, "Cyclic module import");
         }
-        let module =
-            self.modules
-                .get(name.text)
-                .cloned()
-                .ok_or_else(|| RuntimeError {
-                    stack: Vec::new(),
-                    location: None,
-                    module: self.module.map(str::to_owned),
-                    span: name.span,
-                    message: format!("Unknown module: {}", name.text),
-                })?;
+        let module = self
+            .modules
+            .get(name.text)
+            .cloned()
+            .ok_or_else(|| RuntimeError {
+                stack: Vec::new(),
+                location: None,
+                module: self.module.map(str::to_owned),
+                span: name.span,
+                message: format!("Unknown module: {}", name.text),
+            })?;
         if self.depth >= self.max_depth {
             return self.error(name.span, "Execution limit exceeded");
         }
@@ -368,8 +368,7 @@ impl<'s> Runtime<'_, 's> {
         else {
             unreachable!("function declaration");
         };
-        let shared_body =
-            self.shared_body(statement.span, || FunctionBody::Block(body.clone()));
+        let shared_body = self.shared_body(statement.span, || FunctionBody::Block(body.clone()));
         Ok(Closure {
             parameters: parameters.iter().map(|p| p.pattern.clone()).collect(),
             parameter_types: parameters
@@ -517,7 +516,10 @@ impl<'s> Runtime<'_, 's> {
             }
         }
         for statement in statements {
-            if matches!(statement.kind, StmtKind::Struct { .. } | StmtKind::Enum { .. }) {
+            if matches!(
+                statement.kind,
+                StmtKind::Struct { .. } | StmtKind::Enum { .. }
+            ) {
                 self.declare_type(statement, environment)?;
             }
         }
@@ -586,8 +588,10 @@ impl<'s> Runtime<'_, 's> {
                     value = self.expr(expression, environment)?;
                     if let Some(ty) = &contract {
                         if !ty.accepts(&value) {
-                            return self
-                                .error(expression.span, "Value does not match its type annotation");
+                            return self.error(
+                                expression.span,
+                                "Value does not match its type annotation",
+                            );
                         }
                         value = value.coerce_for_type(ty);
                     }

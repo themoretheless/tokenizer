@@ -201,7 +201,8 @@ impl<'s> Checker<'s> {
                         definition.fields = Some(fields);
                         definition.field_spans = field_spans;
                     }
-                    self.constructor_aliases.insert(name.span.start, (id.clone(), None));
+                    self.constructor_aliases
+                        .insert(name.span.start, (id.clone(), None));
                     self.function_results
                         .insert(name.span.start, ValueType::User(id));
                 }
@@ -249,9 +250,10 @@ impl<'s> Checker<'s> {
                 ..
             } = &statements[idx].kind
             {
-                if let Some(ty) = result.as_ref().and_then(|ty| {
-                    ValueType::annotation_with(ty, &|n| self.resolve_type(n)).ok()
-                }) {
+                if let Some(ty) = result
+                    .as_ref()
+                    .and_then(|ty| ValueType::annotation_with(ty, &|n| self.resolve_type(n)).ok())
+                {
                     self.function_results.insert(name.span.start, ty);
                 }
                 let parameter_types = parameters
@@ -325,10 +327,7 @@ impl<'s> Checker<'s> {
                             }
                         })
                         .collect();
-                    if seed.is_none()
-                        && !known.is_empty()
-                        && known.iter().all(|t| t == &known[0])
-                    {
+                    if seed.is_none() && !known.is_empty() && known.iter().all(|t| t == &known[0]) {
                         seed = Some(known[0].clone());
                         self.function_results
                             .insert(name.span.start, known[0].clone());
@@ -402,9 +401,9 @@ impl<'s> Checker<'s> {
             } => {
                 Self::expr_calls_suspending(condition, scopes, suspending)
                     || Self::body_calls_suspending(&then_block.stmts, scopes, suspending)
-                    || else_block.as_ref().is_some_and(|b| {
-                        Self::body_calls_suspending(&b.stmts, scopes, suspending)
-                    })
+                    || else_block
+                        .as_ref()
+                        .is_some_and(|b| Self::body_calls_suspending(&b.stmts, scopes, suspending))
             }
             StmtKind::While { condition, body } => {
                 Self::expr_calls_suspending(condition, scopes, suspending)
@@ -559,18 +558,16 @@ impl<'s> Checker<'s> {
         let identity = self.identity(name.text);
         self.type_names
             .insert(name.text.to_owned(), identity.clone());
-        self.user_types
-            .entry(identity)
-            .or_insert_with(|| {
-                Rc::new(UserDefinition {
-                    span: name.span,
-                    module: self.module.clone(),
-                    field_spans: HashMap::new(),
-                    variant_spans: HashMap::new(),
-                    fields: None,
-                    variants: Default::default(),
-                })
-            });
+        self.user_types.entry(identity).or_insert_with(|| {
+            Rc::new(UserDefinition {
+                span: name.span,
+                module: self.module.clone(),
+                field_spans: HashMap::new(),
+                variant_spans: HashMap::new(),
+                fields: None,
+                variants: Default::default(),
+            })
+        });
     }
 
     pub(super) fn statement(&mut self, statement: &Stmt<'s>) {

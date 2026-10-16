@@ -304,7 +304,9 @@ where
                 }
                 "startsWith" => {
                     let s = args[0].as_str().ok_or("startsWith ожидает строку")?;
-                    let p = args[1].as_str().ok_or("startsWith ожидает префикс-строку")?;
+                    let p = args[1]
+                        .as_str()
+                        .ok_or("startsWith ожидает префикс-строку")?;
                     Ok(json!(s.starts_with(p)))
                 }
                 "endsWith" => {
@@ -314,7 +316,9 @@ where
                 }
                 "replace" => {
                     let s = args[0].as_str().ok_or("replace ожидает строку")?;
-                    let from = args[1].as_str().ok_or("replace ожидает искомую подстроку")?;
+                    let from = args[1]
+                        .as_str()
+                        .ok_or("replace ожидает искомую подстроку")?;
                     let to = args[2].as_str().ok_or("replace ожидает строку замены")?;
                     Ok(json!(s.replace(from, to)))
                 }

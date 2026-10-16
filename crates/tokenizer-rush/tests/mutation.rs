@@ -1,6 +1,5 @@
 use themoretheless_tokenizer_rush::{
-    CancellationToken, CoroutineState, ExecutionLimits, Program, Value, evaluate,
-    evaluate_bytecode,
+    CancellationToken, CoroutineState, ExecutionLimits, Program, Value, evaluate, evaluate_bytecode,
 };
 
 #[test]
@@ -64,7 +63,8 @@ fn struct_field_mutation() {
 
 #[test]
 fn struct_field_type_violation_is_rejected() {
-    let direct = "struct Point { x: number, y: number }\nmut p = Point({ x: 1, y: 2 }); p.x = 'bad'";
+    let direct =
+        "struct Point { x: number, y: number }\nmut p = Point({ x: 1, y: 2 }); p.x = 'bad'";
     let err = evaluate(direct, 1000).unwrap_err();
     assert_eq!(err.message, "Assignment violates variable type");
 
@@ -72,7 +72,8 @@ fn struct_field_type_violation_is_rejected() {
     let err = evaluate(nested_in_list, 1000).unwrap_err();
     assert_eq!(err.message, "Assignment violates variable type");
 
-    let nested_list_in_struct = "struct Bag { items: list[number] }\nmut b = Bag({ items: [1, 2] }); b.items[0] = 'bad'";
+    let nested_list_in_struct =
+        "struct Bag { items: list[number] }\nmut b = Bag({ items: [1, 2] }); b.items[0] = 'bad'";
     let err = evaluate(nested_list_in_struct, 1000).unwrap_err();
     assert_eq!(err.message, "Assignment violates variable type");
 }

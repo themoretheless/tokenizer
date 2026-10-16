@@ -85,7 +85,9 @@ pub(super) struct SequenceStage<'s> {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(super) struct SequenceStages<'s>(pub(super) Option<memory::Shared<memory::Slots<SequenceStage<'s>>>>);
+pub(super) struct SequenceStages<'s>(
+    pub(super) Option<memory::Shared<memory::Slots<SequenceStage<'s>>>>,
+);
 
 impl PartialEq for SequenceStages<'_> {
     fn eq(&self, other: &Self) -> bool {
@@ -137,7 +139,11 @@ pub(super) struct SequenceCursor<'s> {
 }
 
 impl<'s> Runtime<'_, 's> {
-    pub(super) fn sequence_cursor(&mut self, value: Value<'s>, span: Span) -> Result<SequenceCursor<'s>> {
+    pub(super) fn sequence_cursor(
+        &mut self,
+        value: Value<'s>,
+        span: Span,
+    ) -> Result<SequenceCursor<'s>> {
         let sequence = match value {
             Value::Sequence(sequence) => sequence,
             Value::BytecodeSequence(seq) => {

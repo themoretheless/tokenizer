@@ -39,10 +39,7 @@ fn malformed_geometry_is_rejected() {
 #[test]
 fn matrices_compose_right_to_left_and_distinguish_directions() {
     let source = "const m = translation(vec3(10, 20, 30)) * scaling(vec3(2, 3, 4))\ntransform_point(m, vec3(1, 1, 1))";
-    assert_eq!(
-        evaluate(source, 200).unwrap(),
-        Value::vec3(12., 23., 34.)
-    );
+    assert_eq!(evaluate(source, 200).unwrap(), Value::vec3(12., 23., 34.));
     assert_eq!(
         evaluate(
             "transform_direction(translation(vec3(10,20,30)), vec3(1,2,3))",

@@ -18,8 +18,11 @@ impl<'s> Checker<'s> {
         }
         let shape = self.shape(value);
         if let Some(fields) = self.struct_fields(&shape) {
-            let covered = arms.iter().filter(|arm| arm.guard.is_none()).any(|arm| {
-                match &arm.pattern.kind {
+            let covered =
+                arms.iter()
+                    .filter(|arm| arm.guard.is_none())
+                    .any(|arm| {
+                        match &arm.pattern.kind {
                     ExprKind::Name(_) => true,
                     ExprKind::Map(patterns) => patterns.iter().all(|(key, pattern)| {
                         matches!(&key.kind, ExprKind::Name(name) if fields.contains_key(name.text))
@@ -27,7 +30,7 @@ impl<'s> Checker<'s> {
                     }),
                     _ => false,
                 }
-            });
+                    });
             if !covered {
                 self.error(
                     value.span,

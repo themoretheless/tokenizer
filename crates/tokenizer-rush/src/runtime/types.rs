@@ -1,8 +1,8 @@
+use super::sequence::HostSource;
 use super::{
     Builtin, CaptureReference, Environment, Result, Runtime, Sequence, SequenceSource,
     SequenceStages, memory,
 };
-use super::sequence::HostSource;
 use crate::{Block, Expr};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -402,7 +402,10 @@ impl<'s> RecordMap<'s> {
     }
 
     pub fn insert(&mut self, key: String, value: Value<'s>) -> Option<Value<'s>> {
-        match self.shape.binary_search_by(|k| k.as_str().cmp(key.as_str())) {
+        match self
+            .shape
+            .binary_search_by(|k| k.as_str().cmp(key.as_str()))
+        {
             Ok(slot) => Some(std::mem::replace(&mut self.values[slot], value)),
             Err(insert_idx) => {
                 let mut new_keys = Vec::with_capacity(self.shape.len() + 1);
@@ -1175,7 +1178,12 @@ impl<'s> Runtime<'_, 's> {
         })
     }
 
-    pub(super) fn equal(&mut self, left: &Value<'_>, right: &Value<'_>, span: Span) -> Result<bool> {
+    pub(super) fn equal(
+        &mut self,
+        left: &Value<'_>,
+        right: &Value<'_>,
+        span: Span,
+    ) -> Result<bool> {
         // Scalar fast path: identical step accounting without a worklist
         // allocation. Compound and mismatched values use the general walk.
         match (left, right) {
@@ -1334,24 +1342,16 @@ pub(crate) fn parse_int_u128(text: &str) -> Option<u128> {
         .strip_suffix("i64")
         .or_else(|| text.strip_suffix('i'))
         .unwrap_or(text);
-    let (radix, digits) = if let Some(rest) = body
-        .strip_prefix("0x")
-        .or_else(|| body.strip_prefix("0X"))
-    {
-        (16u128, rest)
-    } else if let Some(rest) = body
-        .strip_prefix("0b")
-        .or_else(|| body.strip_prefix("0B"))
-    {
-        (2u128, rest)
-    } else if let Some(rest) = body
-        .strip_prefix("0o")
-        .or_else(|| body.strip_prefix("0O"))
-    {
-        (8u128, rest)
-    } else {
-        (10u128, body)
-    };
+    let (radix, digits) =
+        if let Some(rest) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
+            (16u128, rest)
+        } else if let Some(rest) = body.strip_prefix("0b").or_else(|| body.strip_prefix("0B")) {
+            (2u128, rest)
+        } else if let Some(rest) = body.strip_prefix("0o").or_else(|| body.strip_prefix("0O")) {
+            (8u128, rest)
+        } else {
+            (10u128, body)
+        };
     let mut acc = 0u128;
     let mut has_digit = false;
     for b in digits.bytes() {

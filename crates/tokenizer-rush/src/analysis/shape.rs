@@ -181,7 +181,10 @@ impl<'s> Checker<'s> {
             .ok()
     }
 
-    pub(super) fn user_constructor(&self, expression: &Expr<'s>) -> Option<(String, Option<String>)> {
+    pub(super) fn user_constructor(
+        &self,
+        expression: &Expr<'s>,
+    ) -> Option<(String, Option<String>)> {
         if let Shape::Constructor(name, variant) = self.shape(expression) {
             Some((name, variant))
         } else {
@@ -320,7 +323,10 @@ impl<'s> Checker<'s> {
         }
     }
 
-    pub(super) fn known_user_parameters(&self, expression: &Expr<'s>) -> Option<Vec<Option<ValueType>>> {
+    pub(super) fn known_user_parameters(
+        &self,
+        expression: &Expr<'s>,
+    ) -> Option<Vec<Option<ValueType>>> {
         if let Shape::Typed(ValueType::Function(parameters, _)) = self.shape(expression) {
             return Some(parameters.into_iter().map(Some).collect());
         }
@@ -596,10 +602,7 @@ impl<'s> Checker<'s> {
                 operator: "not" | "!",
                 ..
             } => Shape::Typed(ValueType::Bool),
-            ExprKind::Unary {
-                operator: "~",
-                ..
-            } => Shape::Typed(ValueType::Int),
+            ExprKind::Unary { operator: "~", .. } => Shape::Typed(ValueType::Int),
             ExprKind::Unary {
                 operator: "+" | "-",
                 value,
