@@ -31,7 +31,7 @@ before publishing.
    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
    cargo test --locked --workspace --all-targets --all-features
    RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --all-features
-   cargo +beta publish --locked --workspace --exclude tokenizer-wasm --dry-run
+   cargo +beta publish --locked --workspace --exclude tokenizer-wasm --registry crates-io --dry-run
    ```
 
 5. Commit the version, changelog, and any regenerated `Cargo.lock`, push to
@@ -46,7 +46,7 @@ New plugin crates are included automatically; optional dependencies are included
 Use the beta toolchain configured by CI for workspace publishing.
 
 ```console
-cargo +beta publish --locked --workspace --exclude tokenizer-wasm --dry-run
+cargo +beta publish --locked --workspace --exclude tokenizer-wasm --registry crates-io --dry-run
 ```
 
 This dry run packages and verifies the workspace together without uploading it,
