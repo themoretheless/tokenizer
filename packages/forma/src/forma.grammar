@@ -15,7 +15,8 @@ LetDeclaration { let PropertyName "=" Value+ ";" }
 UseDeclaration { use String ";"? }
 EventDeclaration { event PropertyName "(" (Parameter ("," Parameter)* ","?)? ")" ";" }
 Parameter { PropertyName ":" TypeReference }
-TypeReference { TypeName ("<" TypeReference ">")? "?"? }
+TypeReference { SingleType ("|" SingleType)* }
+SingleType { TypeName ("<" TypeReference ("," TypeReference)* ">")? "?"? }
 EnumDeclaration { enum TypeName "{" (TypeName ("," TypeName)* ","?)? "}" ";"? }
 StructDeclaration { struct TypeName "{" (StructField (("," | ";") StructField)* ("," | ";")?)? "}" ";"? }
 StructField { Attribute* PropertyName ":" TypeReference }
@@ -54,7 +55,7 @@ ConditionalExpression { Value !conditional "?" Value ":" Value }
 MemberExpression { Value !member (("." | "?.") PropertyName | "[" Value "]" | "?." "[" Value "]") }
 TypedValue { TypeName !typed Block }
 Array { "[" (Value ("," Value)* ","?)? "]" }
-Object { "{" (PropertyName ":" Value+ ";")* "}" }
+Object { "{" ((PropertyName | String) ":" Value+ ((";" | ",") (PropertyName | String) ":" Value+)* (";" | ",")?)? "}" }
 Call { Path !call Arguments }
 Arguments { "(" (Value ("," Value)* ","?)? ")" }
 Match { match Subject "{" Branch* "}" }
@@ -107,7 +108,7 @@ Wildcard { @specialize<Identifier, "_"> }
   space { $[ \t\n\r]+ }
   LineComment { "//" ![\n]* }
   BlockComment { "/*" (![*] | "*" ![/])* "*/" }
-  Number { $[0-9]+ ("." $[0-9]+)? ("px" | "ms" | "s" | "deg" | "%" | "fr" | "*")? }
+  Number { $[0-9]+ ("." $[0-9]+)? ("px" | "rem" | "em" | "vw" | "vh" | "vmin" | "vmax" | "ch" | "ms" | "s" | "deg" | "rad" | "turn" | "%" | "fr" | "*")? }
   Color { "#" $[0-9a-fA-F]+ }
   TypeName { $[A-Z] $[a-zA-Z0-9_.]* }
   Identifier { $[a-z_] $[a-zA-Z0-9_.]* }

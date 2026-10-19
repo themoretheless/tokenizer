@@ -510,13 +510,15 @@ where
                     Err("Нельзя прочитать свойство пустого значения; используйте ?.".into())
                 };
             }
-            let p = if e["property"].is_string() {
-                e["property"].clone()
+            let computed;
+            let key: &str = if let Some(s) = e["property"].as_str() {
+                s
             } else {
-                run(&e["property"], false, next, resolver)?
+                let p = run(&e["property"], false, next, resolver)?;
+                computed = text(&p)?;
+                &computed
             };
-            let key = text(&p)?;
-            if ["__proto__", "prototype", "constructor"].contains(&key.as_str()) {
+            if matches!(key, "__proto__" | "prototype" | "constructor") {
                 return Err(format!("Недоступное свойство {key}"));
             }
             if key == "length" {
@@ -530,7 +532,7 @@ where
             let value = if let Some(a) = object.as_array() {
                 key.parse::<usize>().ok().and_then(|i| a.get(i))
             } else {
-                object.as_object().and_then(|o| o.get(&key))
+                object.as_object().and_then(|o| o.get(key))
             };
             match value {
                 Some(v) => Ok(v.clone()),
@@ -540,20 +542,37 @@ where
         }
         "call" => {
             let name = e["name"].as_str().ok_or("Некорректный вызов")?;
-            let args = e["args"]
-                .as_array()
-                .ok_or("Некорректные аргументы")?
-                .iter()
-                .map(|v| run(v, false, next, resolver))
-                .collect::<R<Vec<_>>>()?;
+            let raw_args = e["args"].as_array().ok_or("Некорректные аргументы")?;
+            if name == "coalesce" {
+                if raw_args.is_empty() {
+                    return Err("coalesce: неверное число аргументов".into());
+                }
+                for raw in raw_args {
+                    let val = run(raw, true, next, resolver)?;
+                    if !val.is_null() {
+                        return Ok(val);
+                    }
+                }
+                return Ok(V::Null);
+            }
+            let mut args = Vec::with_capacity(raw_args.len());
+            for v in raw_args {
+                args.push(run(v, false, next, resolver)?);
+            }
             let count = args.len();
             let valid = match name {
                 "min" | "max" => count >= 1,
-                "clamp" | "replace" | "find" => count == 3,
+                "merge" => count >= 2,
+                "remap" => count == 5,
+                "clamp" | "replace" | "find" | "lerp" => count == 3,
                 "plural" => count == 3 || count == 4,
-                "contains" | "startsWith" | "endsWith" | "split" | "take" | "skip" | "range"
-                | "pluck" | "alpha" | "lighten" | "darken" | "groupBy" => count == 2,
-                "slice" | "mix" | "isValid" => count == 2 || count == 3,
+                "contains" | "includes" | "indexOf" | "startsWith" | "endsWith" | "split"
+                | "take" | "skip" | "range" | "pluck" | "alpha" | "lighten" | "darken"
+                | "saturate" | "desaturate" | "contrast" | "groupBy" | "pow" | "repeat"
+                | "chunk" | "zip" | "pick" | "omit" => count == 2,
+                "slice" | "mix" | "isValid" | "padStart" | "padEnd" | "truncate" => {
+                    count == 2 || count == 3
+                }
                 "join" | "formatNumber" | "sortBy" | "unique" => count == 1 || count == 2,
                 _ => count == 1,
             };
@@ -583,9 +602,23 @@ where
                         Ok(json!(s.encode_utf16().count()))
                     } else if let Some(a) = args[0].as_array() {
                         Ok(json!(a.len()))
+                    } else if let Some(o) = args[0].as_object()
+                        && !o.contains_key("expr")
+                    {
+                        Ok(json!(o.len()))
                     } else {
-                        Err("len ожидает строку или массив".into())
+                        Err("len ожидает строку, массив или объект".into())
                     }
+                }
+                "isEmpty" => {
+                    let empty = match &args[0] {
+                        V::Null => true,
+                        V::String(s) => s.trim().is_empty(),
+                        V::Array(a) => a.is_empty(),
+                        V::Object(o) => !o.contains_key("expr") && o.is_empty(),
+                        _ => false,
+                    };
+                    Ok(json!(empty))
                 }
                 "count" => {
                     let a = args[0].as_array().ok_or("count ожидает массив")?;
@@ -660,6 +693,68 @@ where
                         args[0].get("expr").is_some(),
                     ))
                 }
+                "saturate" | "desaturate" => {
+                    let (r, g, b, a) = parse_hex_color(&args[0])?;
+                    let amt = number(&args[1])?.clamp(0.0, 1.0);
+                    let (rf, gf, bf) = (r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0);
+                    let max = rf.max(gf).max(bf);
+                    let min = rf.min(gf).min(bf);
+                    let l = (max + min) * 0.5;
+                    if (max - min).abs() < f64::EPSILON {
+                        Ok(format_hex_color(r, g, b, a, args[0].get("expr").is_some()))
+                    } else {
+                        let d = max - min;
+                        let s = if l > 0.5 {
+                            d / (2.0 - max - min)
+                        } else {
+                            d / (max + min)
+                        };
+                        let new_s = if name == "saturate" {
+                            (s + (1.0 - s) * amt).clamp(0.0, 1.0)
+                        } else {
+                            (s * (1.0 - amt)).clamp(0.0, 1.0)
+                        };
+                        let factor = if s > 0.0 { new_s / s } else { 0.0 };
+                        let adj =
+                            |c: f64| ((l + (c - l) * factor).clamp(0.0, 1.0) * 255.0).round() as u8;
+                        Ok(format_hex_color(
+                            adj(rf),
+                            adj(gf),
+                            adj(bf),
+                            a,
+                            args[0].get("expr").is_some(),
+                        ))
+                    }
+                }
+                "invert" => {
+                    let (r, g, b, a) = parse_hex_color(&args[0])?;
+                    Ok(format_hex_color(
+                        255 - r,
+                        255 - g,
+                        255 - b,
+                        a,
+                        args[0].get("expr").is_some(),
+                    ))
+                }
+                "contrast" => {
+                    let (r1, g1, b1, _) = parse_hex_color(&args[0])?;
+                    let (r2, g2, b2, _) = parse_hex_color(&args[1])?;
+                    let lum = |r: u8, g: u8, b: u8| -> f64 {
+                        let ch = |c: u8| -> f64 {
+                            let s = c as f64 / 255.0;
+                            if s <= 0.03928 {
+                                s / 12.92
+                            } else {
+                                ((s + 0.055) / 1.055).powf(2.4)
+                            }
+                        };
+                        0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+                    };
+                    let l1 = lum(r1, g1, b1);
+                    let l2 = lum(r2, g2, b2);
+                    let ratio = (l1.max(l2) + 0.05) / (l1.min(l2) + 0.05);
+                    numeric((ratio * 100.0).round() / 100.0)
+                }
                 "mix" => {
                     let (r1, g1, b1, a1) = parse_hex_color(&args[0])?;
                     let (r2, g2, b2, a2) = parse_hex_color(&args[1])?;
@@ -697,6 +792,46 @@ where
                     }
                     numeric(a.max(lo).min(hi))
                 }
+                "pow" => numeric(number(&args[0])?.powf(number(&args[1])?)),
+                "sqrt" => {
+                    let n = number(&args[0])?;
+                    if n < 0.0 {
+                        return Err("sqrt ожидает неотрицательное число".into());
+                    }
+                    numeric(n.sqrt())
+                }
+                "sign" => {
+                    let n = number(&args[0])?;
+                    numeric(if n == 0.0 { 0.0 } else { n.signum() })
+                }
+                "lerp" => {
+                    let a = number(&args[0])?;
+                    let b = number(&args[1])?;
+                    let t = number(&args[2])?;
+                    numeric(a + (b - a) * t)
+                }
+                "remap" => {
+                    let v = number(&args[0])?;
+                    let i0 = number(&args[1])?;
+                    let i1 = number(&args[2])?;
+                    let o0 = number(&args[3])?;
+                    let o1 = number(&args[4])?;
+                    if (i1 - i0).abs() < f64::EPSILON {
+                        return Err("remap: пустой входной диапазон".into());
+                    }
+                    numeric(o0 + ((v - i0) / (i1 - i0)) * (o1 - o0))
+                }
+                "avg" => {
+                    let a = args[0].as_array().ok_or("avg ожидает массив чисел")?;
+                    if a.is_empty() {
+                        return Ok(json!(0.0));
+                    }
+                    let mut total = 0.0;
+                    for item in a {
+                        total += number(item)?;
+                    }
+                    numeric(total / a.len() as f64)
+                }
                 "abs" | "round" | "floor" | "ceil" => {
                     let n = number(&args[0])?;
                     numeric(match name {
@@ -718,7 +853,70 @@ where
                     let s = args[0].as_str().ok_or("lower ожидает строку")?;
                     Ok(json!(s.to_lowercase()))
                 }
-                "contains" => {
+                "capitalize" => {
+                    let s = args[0].as_str().ok_or("capitalize ожидает строку")?;
+                    let mut chars = s.chars();
+                    let out = match chars.next() {
+                        Some(first) => {
+                            first.to_uppercase().collect::<String>()
+                                + &chars.as_str().to_lowercase()
+                        }
+                        None => String::new(),
+                    };
+                    Ok(json!(out))
+                }
+                "padStart" | "padEnd" => {
+                    let s = args[0].as_str().ok_or("pad ожидает строку")?;
+                    let target = (number(&args[1])?.max(0.) as usize).min(4096);
+                    let pad = if count == 3 {
+                        args[2].as_str().ok_or("pad ожидает строку заполнения")?
+                    } else {
+                        " "
+                    };
+                    let cur = s.chars().count();
+                    if cur >= target || pad.is_empty() {
+                        return Ok(json!(s));
+                    }
+                    let needed = target - cur;
+                    let pad_chars: Vec<char> = pad.chars().collect();
+                    let fill: String = (0..needed)
+                        .map(|i| pad_chars[i % pad_chars.len()])
+                        .collect();
+                    Ok(json!(if name == "padStart" {
+                        format!("{fill}{s}")
+                    } else {
+                        format!("{s}{fill}")
+                    }))
+                }
+                "truncate" => {
+                    let s = args[0].as_str().ok_or("truncate ожидает строку")?;
+                    let max_len = number(&args[1])?.max(0.) as usize;
+                    let suffix = if count == 3 {
+                        args[2]
+                            .as_str()
+                            .ok_or("truncate ожидает строковый суффикс")?
+                    } else {
+                        "…"
+                    };
+                    let chars: Vec<char> = s.chars().collect();
+                    if chars.len() <= max_len {
+                        Ok(json!(s))
+                    } else {
+                        let sfx_len = suffix.chars().count();
+                        let keep = max_len.saturating_sub(sfx_len);
+                        let prefix: String = chars[..keep].iter().collect();
+                        Ok(json!(format!("{prefix}{suffix}")))
+                    }
+                }
+                "repeat" => {
+                    let s = args[0].as_str().ok_or("repeat ожидает строку")?;
+                    let n = number(&args[1])?.max(0.) as usize;
+                    if s.len().saturating_mul(n) > 65536 {
+                        return Err("repeat: превышен предел длины строки".into());
+                    }
+                    Ok(json!(s.repeat(n)))
+                }
+                "contains" | "includes" => {
                     if let Some(s) = args[0].as_str() {
                         let sub = args[1].as_str().ok_or("contains ожидает подстроку")?;
                         Ok(json!(s.contains(sub)))
@@ -726,6 +924,25 @@ where
                         Ok(json!(a.iter().any(|x| equal(x, &args[1]))))
                     } else {
                         Err("contains ожидает строку или массив".into())
+                    }
+                }
+                "indexOf" => {
+                    if let Some(s) = args[0].as_str() {
+                        let sub = args[1].as_str().ok_or("indexOf ожидает подстроку")?;
+                        let idx = s
+                            .find(sub)
+                            .map(|byte_idx| s[..byte_idx].chars().count() as i64)
+                            .unwrap_or(-1);
+                        Ok(json!(idx))
+                    } else if let Some(a) = args[0].as_array() {
+                        let idx = a
+                            .iter()
+                            .position(|x| equal(x, &args[1]))
+                            .map(|i| i as i64)
+                            .unwrap_or(-1);
+                        Ok(json!(idx))
+                    } else {
+                        Err("indexOf ожидает строку или массив".into())
                     }
                 }
                 "startsWith" => {
@@ -884,6 +1101,35 @@ where
                         .collect();
                     Ok(V::Array(out))
                 }
+                "flatten" => {
+                    let a = args[0].as_array().ok_or("flatten ожидает массив")?;
+                    let mut out = Vec::with_capacity(a.len());
+                    for item in a {
+                        if let Some(sub) = item.as_array() {
+                            out.extend(sub.iter().cloned());
+                        } else {
+                            out.push(item.clone());
+                        }
+                    }
+                    Ok(V::Array(out))
+                }
+                "chunk" => {
+                    let a = args[0].as_array().ok_or("chunk ожидает массив")?;
+                    let sz = number(&args[1])? as usize;
+                    if sz == 0 {
+                        return Err("chunk: размер должен быть положительным".into());
+                    }
+                    Ok(V::Array(
+                        a.chunks(sz).map(|c| V::Array(c.to_vec())).collect(),
+                    ))
+                }
+                "zip" => {
+                    let a = args[0].as_array().ok_or("zip ожидает два массива")?;
+                    let b = args[1].as_array().ok_or("zip ожидает два массива")?;
+                    Ok(V::Array(
+                        a.iter().zip(b.iter()).map(|(x, y)| json!([x, y])).collect(),
+                    ))
+                }
                 "first" => {
                     let a = args[0].as_array().ok_or("first ожидает массив")?;
                     Ok(a.first().cloned().unwrap_or(V::Null))
@@ -910,6 +1156,64 @@ where
                             .map(|(k, items)| json!({"key": k, "items": items}))
                             .collect(),
                     ))
+                }
+                "keys" => {
+                    let o = args[0].as_object().ok_or("keys ожидает объект")?;
+                    Ok(V::Array(o.keys().map(|k| json!(k)).collect()))
+                }
+                "values" => {
+                    let o = args[0].as_object().ok_or("values ожидает объект")?;
+                    Ok(V::Array(o.values().cloned().collect()))
+                }
+                "entries" => {
+                    let o = args[0].as_object().ok_or("entries ожидает объект")?;
+                    Ok(V::Array(o.iter().map(|(k, v)| json!([k, v])).collect()))
+                }
+                "fromEntries" => {
+                    let a = args[0].as_array().ok_or("fromEntries ожидает массив пар")?;
+                    let mut out = serde_json::Map::with_capacity(a.len());
+                    for item in a {
+                        if let Some(pair) = item.as_array()
+                            && pair.len() == 2
+                        {
+                            out.insert(text(&pair[0])?, pair[1].clone());
+                        } else if let Some(obj) = item.as_object()
+                            && let (Some(k), Some(v)) = (obj.get("key"), obj.get("value"))
+                        {
+                            out.insert(text(k)?, v.clone());
+                        } else {
+                            return Err(
+                                "fromEntries ожидает пары [key, value] или {key, value}".into()
+                            );
+                        }
+                    }
+                    Ok(V::Object(out))
+                }
+                "merge" => {
+                    let mut out = serde_json::Map::new();
+                    for arg in &args {
+                        let o = arg.as_object().ok_or("merge ожидает объекты")?;
+                        for (k, v) in o {
+                            out.insert(k.clone(), v.clone());
+                        }
+                    }
+                    Ok(V::Object(out))
+                }
+                "pick" | "omit" => {
+                    let o = args[0].as_object().ok_or("ожидается объект")?;
+                    let ks = args[1].as_array().ok_or("ожидается массив ключей")?;
+                    let mut key_set = std::collections::HashSet::with_capacity(ks.len());
+                    for k in ks {
+                        key_set.insert(k.as_str().ok_or("ключ должен быть строкой")?);
+                    }
+                    let mut out = serde_json::Map::new();
+                    for (k, v) in o {
+                        let hit = key_set.contains(k.as_str());
+                        if (name == "pick" && hit) || (name == "omit" && !hit) {
+                            out.insert(k.clone(), v.clone());
+                        }
+                    }
+                    Ok(V::Object(out))
                 }
                 "plural" => {
                     let n = number(&args[0])?;
@@ -1019,11 +1323,13 @@ where
                     };
                     Ok(V::Array(items))
                 }
-                "+" if a.is_string() && b.is_string() => Ok(json!(format!(
-                    "{}{}",
-                    a.as_str().unwrap(),
-                    b.as_str().unwrap()
-                ))),
+                "+" if a.is_string()
+                    || b.is_string()
+                    || a["expr"].is_string()
+                    || b["expr"].is_string() =>
+                {
+                    Ok(json!(format!("{}{}", text(&a)?, text(&b)?)))
+                }
                 _ => {
                     let a = number(&a)?;
                     let b = number(&b)?;
@@ -1042,7 +1348,7 @@ where
     }
 }
 pub fn references(v: &V) -> Vec<String> {
-    fn walk(v: &V, out: &mut Vec<String>) {
+    fn walk<'a>(v: &'a V, seen: &mut std::collections::HashSet<&'a str>, out: &mut Vec<String>) {
         if let Some(s) = v["expr"].as_str() {
             let s = s.strip_prefix('!').unwrap_or(s);
             if s.contains('.')
@@ -1052,7 +1358,7 @@ pub fn references(v: &V) -> Vec<String> {
                         .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
                         && cs.all(|c| c.is_ascii_alphanumeric() || c == '_')
                 })
-                && !out.iter().any(|x| x == s)
+                && seen.insert(s)
             {
                 out.push(s.into())
             }
@@ -1060,17 +1366,18 @@ pub fn references(v: &V) -> Vec<String> {
         if let Some(o) = v.as_object() {
             for (k, v) in o {
                 if k != "expr" {
-                    walk(v, out)
+                    walk(v, seen, out)
                 }
             }
         }
         if let Some(a) = v.as_array() {
             for v in a {
-                walk(v, out)
+                walk(v, seen, out)
             }
         }
     }
     let mut out = Vec::new();
-    walk(v, &mut out);
+    let mut seen = std::collections::HashSet::new();
+    walk(v, &mut seen, &mut out);
     out
 }
