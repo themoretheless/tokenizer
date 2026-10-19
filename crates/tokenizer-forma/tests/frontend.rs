@@ -135,3 +135,134 @@ fn contracts_cycles_and_keyed_expansion_are_checked() {
         .contains("Повторный ключ")
     );
 }
+#[test]
+fn extended_pure_functions_evaluate_correctly() {
+    let eval = |src: &str| {
+        evaluate::evaluate(&parse_expression(src).unwrap(), &mut |_, _| Ok(Value::Null)).unwrap()
+    };
+    let check = |src: &str, expected: Value| {
+        let got = eval(src);
+        assert!(
+            evaluate::equal(&got, &expected),
+            "{src}: got {got}, expected {expected}"
+        );
+    };
+    // Math & interpolation
+    check("pow(2, 10)", json!(1024.0));
+    check("sqrt(81)", json!(9.0));
+    check("sign(-42)", json!(-1));
+    check("sign(0)", json!(0));
+    check("sign(42)", json!(1));
+    check("lerp(10, 20, 0.25)", json!(12.5));
+    check("remap(5, 0, 10, 100, 200)", json!(150.0));
+    check("avg([10, 20, 30])", json!(20.0));
+    check("avg([])", json!(0));
+
+    // Strings
+    check("capitalize('fORMA')", json!("Forma"));
+    check("'7'.padStart(3, '0')", json!("007"));
+    check("'ab'.padEnd(4, '-')", json!("ab--"));
+    check("truncate('Hello World', 6)", json!("Hello…"));
+    check("truncate('Hello', 10)", json!("Hello"));
+    check("repeat('ha', 3)", json!("hahaha"));
+
+    // Collections & records
+    check("includes([1, 2, 3], 2)", json!(true));
+    check("indexOf(['a', 'b', 'c'], 'b')", json!(1));
+    check("indexOf('hello world', 'world')", json!(6));
+    check("flatten([[1, 2], [3, [4]], 5])", json!([1, 2, 3, [4], 5]));
+    check("chunk([1, 2, 3, 4, 5], 2)", json!([[1, 2], [3, 4], [5]]));
+    check("zip(['a', 'b'], [1, 2, 3])", json!([["a", 1], ["b", 2]]));
+    check("keys({b: 2, a: 1})", json!(["b", "a"]));
+    check("values({a: 10})", json!([10]));
+    check(
+        "fromEntries(entries({a: 1, b: 2}))",
+        json!({"a": 1, "b": 2}),
+    );
+    check(
+        "merge({a: 1, b: 2}, {b: 3, c: 4})",
+        json!({"a": 1, "b": 3, "c": 4}),
+    );
+    check(
+        "pick({a: 1, b: 2, c: 3}, ['a', 'c'])",
+        json!({"a": 1, "c": 3}),
+    );
+    check("omit({a: 1, b: 2, c: 3}, ['b'])", json!({"a": 1, "c": 3}));
+    check("len({a: 1, b: 2, c: 3})", json!(3));
+
+    // Predicates & null-handling
+    check("isEmpty(null)", json!(true));
+    check("isEmpty('   ')", json!(true));
+    check("isEmpty([])", json!(true));
+    check("isEmpty({})", json!(true));
+    check("isEmpty([1])", json!(false));
+    check("coalesce(null, null, 'fallback', 1 / 0)", json!("fallback"));
+
+    // Color & WCAG accessibility
+    let ratio = eval("contrast('#000000', '#ffffff')").as_f64().unwrap();
+    assert!((ratio - 21.0).abs() < 1e-6);
+    check("invert('#00ff80')", json!("#ff007f"));
+    check("desaturate('#ff0000', 1)", json!("#808080"));
+    check("saturate('#804040', 0.5)", json!("#a02020"));
+}
+#[test]
+fn extended_types_units_lint_and_formatter_work() {
+    use themoretheless_tokenizer_forma::frontend::{format_source, lint_document};
+
+    let src = "component Card {\n  prop spacing: Length = 1.5rem;\n  prop angle: Angle = 45deg;\n  prop metrics: Map<Number> = {a: 1, b: 2};\n  prop id: String | Int = 42;\n  prop forwarded: String = 'ok';\n  prop unusedProp: String = 'unused';\n  let unusedLet = 10;\n  style unusedStyle { color: #fff; }\n  shortcut 'Ctrl+S' -> actions.save();\n  shortcut 'Ctrl+S' -> actions.saveAgain();\n  Row {\n    forward props { forwarded }\n    width: 50vw;\n    height: 100vh;\n    text: '${props.spacing} ${props.angle} ${props.id}';\n  }\n}";
+    let doc = parse(src).unwrap();
+    assert_eq!(doc["defaults"]["spacing"]["expr"], "1.5rem");
+    assert_eq!(doc["defaults"]["angle"]["expr"], "45deg");
+    assert!(
+        semantics::validate_contract(
+            &doc["propDefinitions"],
+            &doc["defaults"],
+            &doc["enums"],
+            "Card"
+        )
+        .is_ok()
+    );
+    assert!(semantics::matches_type(
+        &json!("hello"),
+        "String | Int",
+        &json!({})
+    ));
+    assert!(semantics::matches_type(
+        &json!(42),
+        "String | Int",
+        &json!({})
+    ));
+    assert!(!semantics::matches_type(
+        &json!(true),
+        "String | Int",
+        &json!({})
+    ));
+    assert!(semantics::matches_type(
+        &json!({"x": "a", "y": "b"}),
+        "Record<String, String>",
+        &json!({})
+    ));
+
+    let warnings = lint_document(src).unwrap();
+    let codes: Vec<&str> = warnings
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["code"].as_str().unwrap())
+        .collect();
+    assert!(codes.contains(&"unused-prop"));
+    assert!(codes.contains(&"unused-let"));
+    assert!(codes.contains(&"unused-style"));
+    assert!(codes.contains(&"duplicate-shortcut"));
+    // `forwarded` was used via `forward props { forwarded }`, so only `unusedProp`, `metrics` are unused props
+    assert!(
+        !warnings
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["message"].as_str().unwrap().contains("forwarded"))
+    );
+
+    let formatted = format_source("component A { Row { width: 10px; } }").unwrap();
+    assert!(formatted.contains("component A {\n  Row {\n    width: 10px;\n  }\n}\n"));
+}

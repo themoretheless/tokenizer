@@ -47,39 +47,33 @@ pub struct ModalSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Specified(u32);
 
-/// The properties a `Button` may declare, in bit order.
-const SPECIFIED_NAMES: [&str; 20] = [
-    "key",
-    "x",
-    "y",
-    "width",
-    "height",
-    "radius",
-    "background",
-    "color",
-    "font.size",
-    "fontSize",
-    "hoverBackground",
-    "pressedBackground",
-    "disabledBackground",
-    "borderColor",
-    "focusBorderColor",
-    "borderWidth",
-    "transitionDuration",
-    "text",
-    "disabled",
-    "clicked",
-];
-
 impl Specified {
-    const FONT_SIZE: &'static str = "fontSize";
-    const FONT_SIZE_ALIAS: &'static str = "font.size";
-
+    #[inline]
     fn bit(name: &str) -> Option<u32> {
-        SPECIFIED_NAMES
-            .iter()
-            .position(|known| *known == name)
-            .map(|index| 1u32 << index)
+        let index = match name {
+            "key" => 0,
+            "x" => 1,
+            "y" => 2,
+            "width" => 3,
+            "height" => 4,
+            "radius" => 5,
+            "background" => 6,
+            "color" => 7,
+            "font.size" => 8,
+            "fontSize" => 9,
+            "hoverBackground" => 10,
+            "pressedBackground" => 11,
+            "disabledBackground" => 12,
+            "borderColor" => 13,
+            "focusBorderColor" => 14,
+            "borderWidth" => 15,
+            "transitionDuration" => 16,
+            "text" => 17,
+            "disabled" => 18,
+            "clicked" => 19,
+            _ => return None,
+        };
+        Some(1u32 << index)
     }
 
     pub fn contains(&self, name: &str) -> bool {
@@ -90,10 +84,10 @@ impl Specified {
     /// recorded once however the document wrote it. Run after parsing, once both spellings
     /// have had their own bit for the duplicate and alias checks.
     fn canonicalize(&mut self) {
-        let alias = Self::bit(Self::FONT_SIZE_ALIAS).unwrap_or(0);
+        let alias = 1u32 << 8;
         if self.0 & alias != 0 {
             self.0 &= !alias;
-            self.0 |= Self::bit(Self::FONT_SIZE).unwrap_or(0);
+            self.0 |= 1u32 << 9;
         }
     }
 
@@ -363,32 +357,47 @@ impl<'a> Lexer<'a> {
                 Kind::Arrow
             }
             '\'' | '"' => {
-                let mut value = String::new();
-                loop {
-                    match self.bump() {
-                        Some(c) if c == ch => break,
-                        Some('\\') => {
-                            let escaped = match self.bump() {
-                                Some('n') => '\n',
-                                Some('r') => '\r',
-                                Some('t') => '\t',
-                                Some('\\') => '\\',
-                                Some('\'') => '\'',
-                                Some('"') => '"',
-                                Some(c) => {
-                                    return Err(
-                                        self.error(&format!("Unsupported string escape \\{c}"))
-                                    );
-                                }
-                                None => return Err(format!("Unclosed string (byte {offset})")),
-                            };
-                            value.push(escaped);
-                        }
-                        Some(c) => value.push(c),
-                        None => return Err(format!("Unclosed string (byte {offset})")),
-                    }
+                let q = ch as u8;
+                let start = self.offset;
+                let bytes = self.source.as_bytes();
+                while self.offset < bytes.len()
+                    && bytes[self.offset] != q
+                    && bytes[self.offset] != b'\\'
+                {
+                    self.offset += 1;
                 }
-                Kind::String(value)
+                if self.offset < bytes.len() && bytes[self.offset] == q {
+                    let s = self.source[start..self.offset].to_owned();
+                    self.offset += 1;
+                    Kind::String(s)
+                } else {
+                    let mut value = String::from(&self.source[start..self.offset]);
+                    loop {
+                        match self.bump() {
+                            Some(c) if c == ch => break,
+                            Some('\\') => {
+                                let escaped = match self.bump() {
+                                    Some('n') => '\n',
+                                    Some('r') => '\r',
+                                    Some('t') => '\t',
+                                    Some('\\') => '\\',
+                                    Some('\'') => '\'',
+                                    Some('"') => '"',
+                                    Some(c) => {
+                                        return Err(
+                                            self.error(&format!("Unsupported string escape \\{c}"))
+                                        );
+                                    }
+                                    None => return Err(format!("Unclosed string (byte {offset})")),
+                                };
+                                value.push(escaped);
+                            }
+                            Some(c) => value.push(c),
+                            None => return Err(format!("Unclosed string (byte {offset})")),
+                        }
+                    }
+                    Kind::String(value)
+                }
             }
             '#' => {
                 let start = self.offset;

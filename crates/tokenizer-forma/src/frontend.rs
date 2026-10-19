@@ -89,101 +89,148 @@ fn tokenize_borrowed(source: &str) -> R<(Vec<BorrowedToken<'_>>, usize)> {
             message: "Превышен предел размера исходника".into(),
         });
     }
+    let bytes = source.as_bytes();
     let mut out = Vec::with_capacity(source.len() / 5);
     let mut i = 0;
     let mut utf16 = 0;
-    while i < source.len() {
+    while i < bytes.len() {
+        let ws_start = i;
+        while i < bytes.len() && (bytes[i].is_ascii_whitespace() || bytes[i] == b'\x0b') {
+            i += 1;
+        }
+        if i > ws_start {
+            utf16 += i - ws_start;
+            if i >= bytes.len() {
+                break;
+            }
+        }
         let from = i;
-        let c = source[i..].chars().next().unwrap();
+        let b0 = bytes[i];
         let mut skip = false;
-        if c.is_whitespace() {
-            i += c.len_utf8();
-            skip = true
-        } else if source[i..].starts_with("//") {
+        if b0.is_ascii_alphabetic() || b0 == b'_' {
+            i += 1;
+            loop {
+                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                if i + 1 < bytes.len()
+                    && bytes[i] == b'.'
+                    && (bytes[i + 1].is_ascii_alphabetic() || bytes[i + 1] == b'_')
+                {
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+        } else if b0.is_ascii_digit() {
+            i += 1;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            if i + 1 < bytes.len()
+                && bytes[i] == b'.'
+                && bytes[i + 1] != b'.'
+                && bytes[i + 1].is_ascii_digit()
+            {
+                i += 1;
+                while i < bytes.len() && bytes[i].is_ascii_digit() {
+                    i += 1;
+                }
+            }
+            for unit in [
+                "turn", "rem", "deg", "rad", "ms", "px", "em", "vw", "vh", "ch", "fr", "s", "%",
+                "*",
+            ] {
+                if source[i..].starts_with(unit) {
+                    let next = source[i + unit.len()..].chars().next();
+                    if !next.is_some_and(|c| ident(c) || c == '.' || c == '(') {
+                        i += unit.len();
+                        break;
+                    }
+                }
+            }
+        } else if b0 == b'\'' || b0 == b'"' {
+            i = string_end(source, i, 0)?;
+        } else if b0 == b'/' && bytes.get(i + 1) == Some(&b'/') {
             i = source[i..].find('\n').map_or(source.len(), |n| i + n);
-            skip = true
-        } else if source[i..].starts_with("/*") {
+            skip = true;
+        } else if b0 == b'/' && bytes.get(i + 1) == Some(&b'*') {
             if let Some(end_offset) = source[i + 2..].find("*/") {
                 i += end_offset + 4;
                 skip = true;
             } else {
                 i += 1;
             }
-        } else if c == '\'' || c == '"' {
-            i = string_end(source, i, 0)?
-        } else if let Some(op) = [
-            "<->", "===", "!==", "..=", "|>", "->", "=>", "==", "!=", "<=", ">=", "&&", "||", "??",
-            "?.", "..",
-        ]
-        .iter()
-        .find(|op| source[i..].starts_with(**op))
-        {
-            i += op.len()
-        } else if c == '#' {
+        } else if b0 == b'#' {
             let end = source[i + 1..]
                 .bytes()
                 .take_while(|b| b.is_ascii_hexdigit())
                 .count();
             if (3..=8).contains(&end) && !source[i + 1 + end..].chars().next().is_some_and(ident) {
-                i += 1 + end
+                i += 1 + end;
             } else {
-                i += 1
-            }
-        } else if c.is_ascii_digit() {
-            i += 1;
-            while i < source.len() && source.as_bytes()[i].is_ascii_digit() {
-                i += 1
-            }
-            if i + 1 < source.len()
-                && source.as_bytes()[i] == b'.'
-                && source.as_bytes()[i + 1] != b'.'
-                && source.as_bytes()[i + 1].is_ascii_digit()
-            {
                 i += 1;
-                while i < source.len() && source.as_bytes()[i].is_ascii_digit() {
-                    i += 1
-                }
             }
-            for unit in ["ms", "px", "deg", "fr", "%", "*"] {
-                if source[i..].starts_with(unit) {
-                    let next = source[i + unit.len()..].chars().next();
-                    if !["%", "*"].contains(&unit)
-                        || !next.is_some_and(|c| ident(c) || c == '.' || c == '(')
-                    {
-                        i += unit.len();
-                        break;
-                    }
-                }
-            }
-        } else if c.is_ascii_alphabetic() || c == '_' {
-            i += 1;
-            loop {
-                while i < source.len()
-                    && (source.as_bytes()[i].is_ascii_alphanumeric()
-                        || source.as_bytes()[i] == b'_')
-                {
-                    i += 1
-                }
-                if i + 1 < source.len()
-                    && source.as_bytes()[i] == b'.'
-                    && (source.as_bytes()[i + 1].is_ascii_alphabetic()
-                        || source.as_bytes()[i + 1] == b'_')
-                {
-                    i += 1
-                } else {
-                    break;
-                }
-            }
-        } else if "{}[]():;,!@#*+-/%<>=?.|".contains(c) {
-            i += c.len_utf8()
         } else {
-            return Err(Error {
-                offset: utf16,
-                message: format!(
-                    "Строка {}: неожиданный символ «{c}»",
-                    source[..i].bytes().filter(|b| *b == b'\n').count() + 1
-                ),
-            });
+            let op_len = match b0 {
+                b'<' if source[i..].starts_with("<->") => 3,
+                b'<' if source[i..].starts_with("<=") => 2,
+                b'=' if source[i..].starts_with("===") => 3,
+                b'=' if source[i..].starts_with("==") || source[i..].starts_with("=>") => 2,
+                b'!' if source[i..].starts_with("!==") => 3,
+                b'!' if source[i..].starts_with("!=") => 2,
+                b'.' if source[i..].starts_with("..=") => 3,
+                b'.' if source[i..].starts_with("..") => 2,
+                b'|' if source[i..].starts_with("|>") || source[i..].starts_with("||") => 2,
+                b'-' if source[i..].starts_with("->") => 2,
+                b'>' if source[i..].starts_with(">=") => 2,
+                b'&' if source[i..].starts_with("&&") => 2,
+                b'?' if source[i..].starts_with("??") || source[i..].starts_with("?.") => 2,
+                _ => 0,
+            };
+            if op_len > 0 {
+                i += op_len;
+            } else if matches!(
+                b0,
+                b'{' | b'}'
+                    | b'['
+                    | b']'
+                    | b'('
+                    | b')'
+                    | b':'
+                    | b';'
+                    | b','
+                    | b'!'
+                    | b'@'
+                    | b'#'
+                    | b'*'
+                    | b'+'
+                    | b'-'
+                    | b'/'
+                    | b'%'
+                    | b'<'
+                    | b'>'
+                    | b'='
+                    | b'?'
+                    | b'.'
+                    | b'|'
+            ) {
+                i += 1;
+            } else {
+                let c = source[i..].chars().next().unwrap();
+                if c.is_whitespace() {
+                    i += c.len_utf8();
+                    skip = true;
+                } else {
+                    return Err(Error {
+                        offset: utf16,
+                        message: format!(
+                            "Строка {}: неожиданный символ «{c}»",
+                            source[..i].bytes().filter(|b| *b == b'\n').count() + 1
+                        ),
+                    });
+                }
+            }
         }
         let slice = &source[from..i];
         let utf16_len = if slice.is_ascii() {
@@ -255,6 +302,12 @@ const PURE_FUNCTIONS: &[&str] = &[
     "round",
     "floor",
     "ceil",
+    "pow",
+    "sqrt",
+    "sign",
+    "lerp",
+    "remap",
+    "avg",
     "len",
     "String",
     "Number",
@@ -262,7 +315,14 @@ const PURE_FUNCTIONS: &[&str] = &[
     "trim",
     "upper",
     "lower",
+    "capitalize",
+    "padStart",
+    "padEnd",
+    "truncate",
+    "repeat",
     "contains",
+    "includes",
+    "indexOf",
     "startsWith",
     "endsWith",
     "replace",
@@ -284,12 +344,28 @@ const PURE_FUNCTIONS: &[&str] = &[
     "mix",
     "lighten",
     "darken",
+    "contrast",
+    "invert",
+    "saturate",
+    "desaturate",
     "unique",
     "find",
     "compact",
+    "flatten",
+    "chunk",
+    "zip",
     "first",
     "last",
     "groupBy",
+    "keys",
+    "values",
+    "entries",
+    "fromEntries",
+    "merge",
+    "pick",
+    "omit",
+    "isEmpty",
+    "coalesce",
     "plural",
     "isValid",
 ];
@@ -383,20 +459,36 @@ impl<'a> Parser<'a> {
         }
         Ok(s)
     }
-    fn ty(&mut self) -> R<String> {
+    fn ty_single(&mut self) -> R<String> {
         let mut s = self.take("")?.to_owned();
         if !path(&s) {
             return self.err("Ожидалось имя типа");
         }
         if self.peek() == "<" {
             self.i += 1;
-            let inner = self.ty()?;
+            let mut inner = self.ty()?;
+            while self.peek() == "," {
+                self.i += 1;
+                let next_ty = self.ty()?;
+                inner.push_str(", ");
+                inner.push_str(&next_ty);
+            }
             self.take(">")?;
             s = format!("{s}<{inner}>");
         }
         if self.peek() == "?" {
             self.i += 1;
             s.push('?')
+        }
+        Ok(s)
+    }
+    fn ty(&mut self) -> R<String> {
+        let mut s = self.ty_single()?;
+        while self.peek() == "|" {
+            self.i += 1;
+            let rhs = self.ty_single()?;
+            s.push_str(" | ");
+            s.push_str(&rhs);
         }
         Ok(s)
     }
@@ -434,8 +526,25 @@ impl<'a> Parser<'a> {
                 if computed {
                     left = json!({"expression":{"kind":"member","object":left,"property":prop,"optional":optional,"computed":true}})
                 } else {
-                    for (index, part) in prop.as_str().unwrap().split('.').enumerate() {
-                        left = json!({"expression":{"kind":"member","object":left,"property":part,"optional":index==0&&optional,"computed":false}})
+                    let prop_str = prop.as_str().unwrap();
+                    if !optional && !prop_str.contains('.') && self.peek() == "(" {
+                        if !PURE_FUNCTIONS.contains(&prop_str) {
+                            return self.err(format!("Неизвестная чистая функция {prop_str}"));
+                        }
+                        self.take("(")?;
+                        let mut args = vec![left];
+                        while self.peek() != ")" {
+                            args.push(self.expression(0)?);
+                            if self.peek() != ")" {
+                                self.take(",")?;
+                            }
+                        }
+                        self.take(")")?;
+                        left = json!({"expression":{"kind":"call","name":prop_str,"args":args}});
+                    } else {
+                        for (index, part) in prop_str.split('.').enumerate() {
+                            left = json!({"expression":{"kind":"member","object":left,"property":part,"optional":index==0&&optional,"computed":false}})
+                        }
                     }
                 }
                 continue;
@@ -512,7 +621,9 @@ impl<'a> Parser<'a> {
                 let mut a = Vec::new();
                 while self.peek() != "]" {
                     a.push(self.expression(0)?);
-                    if self.peek() != "]" {
+                    if self.peek() == "," {
+                        self.i += 1;
+                    } else if self.peek() != "]" {
                         self.take(",")?;
                     }
                 }
@@ -528,7 +639,11 @@ impl<'a> Parser<'a> {
                     }
                     self.take(":")?;
                     v[k] = self.expression(0)?;
-                    self.take(";")?;
+                    if self.peek() == "," || self.peek() == ";" {
+                        self.i += 1;
+                    } else if self.peek() != "}" {
+                        self.take(";")?;
+                    }
                 }
                 self.take("}")?;
                 return Ok(v);
@@ -1171,19 +1286,19 @@ impl<'a> Parser<'a> {
         if kind == "let" {
             self.take("=")?;
             let from = self.pos();
-            let val = self.sequence()?;
+            let mut val = self.sequence()?;
             let to = self.end();
             let end = self.pos() + 1;
             self.take(";")?;
             n["lets"][name] = val.clone();
             // Also expose as `props.<name>` for expressions that refer to `props.name` or bare `name`:
-            let prop_expr = rewrite_bare_props(
-                &val,
+            rewrite_bare_props_in_place(
+                &mut val,
                 &n["lets"],
                 &n["propDefinitions"],
                 &n["stateDefinitions"],
             );
-            n["props"][name] = prop_expr;
+            n["props"][name] = val;
             n["propertyRanges"][name] = json!({"from":from,"to":to});
             n["statementRanges"][name] = json!({"from":start,"to":end});
             return Ok(());
@@ -1390,7 +1505,7 @@ impl<'a> Parser<'a> {
                         }
                     }
                     self.take("}")?;
-                    self.take(";")?;
+                    self.semi();
                     continue;
                 }
                 "if" | "for" => {
@@ -1497,15 +1612,15 @@ impl<'a> Parser<'a> {
                 || nonempty(&n["propDefinitions"])
                 || nonempty(&n["stateDefinitions"]))
         {
-            let lets = n["lets"].clone();
-            let prop_defs = n["propDefinitions"].clone();
-            let state_defs = n["stateDefinitions"].clone();
-            n["children"] = rewrite_bare_props(&n["children"], &lets, &prop_defs, &state_defs);
-            n["matches"] = rewrite_bare_props(&n["matches"], &lets, &prop_defs, &state_defs);
-            n["slots"] = rewrite_bare_props(&n["slots"], &lets, &prop_defs, &state_defs);
-            n["styles"] = rewrite_bare_props(&n["styles"], &lets, &prop_defs, &state_defs);
-            n["i18n"] = rewrite_bare_props(&n["i18n"], &lets, &prop_defs, &state_defs);
-            n["props"] = rewrite_bare_props(&n["props"], &lets, &prop_defs, &state_defs);
+            let lets = std::mem::take(&mut n["lets"]);
+            let prop_defs = std::mem::take(&mut n["propDefinitions"]);
+            let state_defs = std::mem::take(&mut n["stateDefinitions"]);
+            for key in ["children", "matches", "slots", "styles", "i18n", "props"] {
+                rewrite_bare_props_in_place(&mut n[key], &lets, &prop_defs, &state_defs);
+            }
+            n["lets"] = lets;
+            n["propDefinitions"] = prop_defs;
+            n["stateDefinitions"] = state_defs;
         }
         Ok(n)
     }
@@ -1678,36 +1793,33 @@ impl<'a> Parser<'a> {
         Ok(d)
     }
 }
-fn rewrite_bare_props(v: &V, lets: &V, props: &V, states: &V) -> V {
-    if let Some(s) = v["expr"].as_str() {
-        let neg = s.starts_with('!');
-        let raw = if neg { &s[1..] } else { s };
-        let head = raw.split('.').next().unwrap_or("");
-        if has(states, head) {
-            let prefix = if neg { "!state." } else { "state." };
-            return json!({"expr": format!("{prefix}{raw}")});
+fn rewrite_bare_props_in_place(v: &mut V, lets: &V, props: &V, states: &V) {
+    match v {
+        V::Object(o) => {
+            if let Some(V::String(s)) = o.get_mut("expr") {
+                let neg = s.starts_with('!');
+                let raw = if neg { &s[1..] } else { s.as_str() };
+                let head = raw.split('.').next().unwrap_or("");
+                if has(states, head) {
+                    let prefix = if neg { "!state." } else { "state." };
+                    *s = format!("{prefix}{raw}");
+                } else if has(lets, head) || has(props, head) {
+                    let prefix = if neg { "!props." } else { "props." };
+                    *s = format!("{prefix}{raw}");
+                }
+                return;
+            }
+            for val in o.values_mut() {
+                rewrite_bare_props_in_place(val, lets, props, states);
+            }
         }
-        if has(lets, head) || has(props, head) {
-            let prefix = if neg { "!props." } else { "props." };
-            return json!({"expr": format!("{prefix}{raw}")});
+        V::Array(a) => {
+            for x in a {
+                rewrite_bare_props_in_place(x, lets, props, states);
+            }
         }
-        return v.clone();
+        _ => {}
     }
-    if let Some(a) = v.as_array() {
-        return V::Array(
-            a.iter()
-                .map(|x| rewrite_bare_props(x, lets, props, states))
-                .collect(),
-        );
-    }
-    if let Some(o) = v.as_object() {
-        let mut out = serde_json::Map::new();
-        for (k, val) in o {
-            out.insert(k.clone(), rewrite_bare_props(val, lets, props, states));
-        }
-        return V::Object(out);
-    }
-    v.clone()
 }
 fn check_keys(nodes: &V, keys: &mut HashSet<String>, in_for: bool) -> R<()> {
     if let Some(nodes) = nodes.as_array() {
@@ -1769,7 +1881,10 @@ pub fn parse_expression(source: &str) -> R<V> {
     Ok(v)
 }
 fn decode(s: &str) -> String {
-    let mut out = String::new();
+    if !s.contains('\\') {
+        return s.to_owned();
+    }
+    let mut out = String::with_capacity(s.len());
     let mut chars = s.chars();
     while let Some(c) = chars.next() {
         if c == '\\' {
@@ -1795,6 +1910,9 @@ fn decode(s: &str) -> String {
 }
 fn parse_string(s: &str) -> R<V> {
     let body = &s[1..s.len() - 1];
+    if !body.contains(['\\', '$']) {
+        return Ok(json!(body));
+    }
     let (mut i, mut start) = (0, 0);
     let mut parts = Vec::new();
     while i < body.len() {
@@ -1850,7 +1968,11 @@ fn parse_string(s: &str) -> R<V> {
     Ok(json!({"interpolation":parts}))
 }
 fn unit_literal(s: &str) -> bool {
-    ["px", "ms", "deg", "fr", "%"].iter().any(|unit| {
+    [
+        "turn", "rem", "deg", "rad", "px", "ms", "em", "vw", "vh", "ch", "fr", "s", "%",
+    ]
+    .iter()
+    .any(|unit| {
         s.strip_suffix(unit)
             .is_some_and(|v| v.parse::<f64>().is_ok())
     })
@@ -1975,13 +2097,13 @@ pub fn serialize_value(v: &V) -> String {
 
 pub fn format_source(source: &str) -> R<String> {
     let _ = parse(source)?;
-    let tokens = tokenize(source)?;
-    let mut out = String::new();
+    let (tokens, _) = tokenize_borrowed(source)?;
+    let mut out = String::with_capacity(source.len() + 64);
     let mut indent = 0usize;
     let mut at_line_start = true;
     for (idx, tok) in tokens.iter().enumerate() {
-        let t = tok.text.as_str();
-        let next = tokens.get(idx + 1).map(|x| x.text.as_str()).unwrap_or("");
+        let t = tok.text;
+        let next = tokens.get(idx + 1).map(|x| x.text).unwrap_or("");
         if t == "}" {
             indent = indent.saturating_sub(1);
             if !at_line_start {
@@ -2053,39 +2175,102 @@ pub fn format_source(source: &str) -> R<String> {
 pub fn lint_document(source: &str) -> R<V> {
     let doc = parse(source)?;
     let mut warnings = Vec::new();
-    let mut used_props = HashSet::new();
+    let mut used_props: HashSet<&str> = HashSet::new();
+    let mut used_states: HashSet<&str> = HashSet::new();
+    let mut used_styles: HashSet<&str> = HashSet::new();
 
-    fn collect_refs(v: &V, used: &mut HashSet<String>) {
+    fn collect_all<'a>(
+        v: &'a V,
+        used_props: &mut HashSet<&'a str>,
+        used_states: &mut HashSet<&'a str>,
+        used_styles: &mut HashSet<&'a str>,
+        collect_style_decls: bool,
+    ) {
         if let Some(s) = v["expr"].as_str() {
             let s = s.strip_prefix('!').unwrap_or(s);
             if let Some(rest) = s.strip_prefix("props.") {
                 if let Some(head) = rest.split('.').next() {
-                    used.insert(head.to_string());
+                    used_props.insert(head);
+                }
+            } else if let Some(rest) = s.strip_prefix("state.") {
+                if let Some(head) = rest.split('.').next() {
+                    used_states.insert(head);
                 }
             } else if !s.contains('.') {
-                used.insert(s.to_string());
+                used_props.insert(s);
             }
         }
-        if let Some(branches) = v["branches"].as_array() {
-            let mut wildcard_seen = false;
-            for b in branches {
-                if wildcard_seen {
-                    // Unreachable branch handled in walk_matches
-                }
-                if b["pattern"]["expr"] == "_" && b.get("guard").is_none() {
-                    wildcard_seen = true;
+        if let Some(forwards) = v["forward"].as_array() {
+            for f in forwards {
+                if let Some(name) = f.as_str() {
+                    used_props.insert(name);
                 }
             }
+        }
+        if let Some(applies) = v["apply"].as_array() {
+            for a in applies {
+                if let Some(sn) = a.as_str() {
+                    used_styles.insert(sn);
+                }
+            }
+        }
+        if let Some(bindings) = v["bindings"].as_object() {
+            for bval in bindings.values() {
+                if let Some(s) = bval.as_str() {
+                    if let Some(rest) = s.strip_prefix("state.") {
+                        if let Some(head) = rest.split('.').next() {
+                            used_states.insert(head);
+                        }
+                    } else if let Some(rest) = s.strip_prefix("props.")
+                        && let Some(head) = rest.split('.').next()
+                    {
+                        used_props.insert(head);
+                    }
+                }
+            }
+        }
+        if let Some(events) = v["events"].as_object() {
+            for eval in events.values() {
+                if let Some(s) = eval.as_str()
+                    && let Some(rest) = s.strip_prefix("state.")
+                    && let Some(head) = rest.split('.').next()
+                {
+                    used_states.insert(head);
+                }
+            }
+        }
+        if let Some(action) = v["action"].as_str()
+            && let Some(rest) = action.strip_prefix("state.")
+            && let Some(head) = rest.split('.').next()
+        {
+            used_states.insert(head);
         }
         if let Some(a) = v.as_array() {
             for item in a {
-                collect_refs(item, used);
+                collect_all(
+                    item,
+                    used_props,
+                    used_states,
+                    used_styles,
+                    collect_style_decls,
+                );
             }
         } else if let Some(o) = v.as_object() {
             for (k, val) in o {
-                if k != "propDefinitions" && k != "defaultRanges" && k != "statementRanges" {
-                    collect_refs(val, used);
+                if matches!(
+                    k.as_str(),
+                    "propDefinitions" | "stateDefinitions" | "defaultRanges" | "statementRanges"
+                ) || (!collect_style_decls && k == "styles")
+                {
+                    continue;
                 }
+                collect_all(
+                    val,
+                    used_props,
+                    used_states,
+                    used_styles,
+                    collect_style_decls,
+                );
             }
         }
     }
@@ -2110,148 +2295,113 @@ pub fn lint_document(source: &str) -> R<V> {
                 check_matches(item, warnings);
             }
         } else if let Some(o) = v.as_object() {
-            for (_, val) in o {
+            for val in o.values() {
                 check_matches(val, warnings);
             }
         }
     }
 
-    let mut used_states = HashSet::new();
-    let mut used_styles = HashSet::new();
-
-    fn collect_state_and_style_refs(
-        v: &V,
-        used_states: &mut HashSet<String>,
-        used_styles: &mut HashSet<String>,
-    ) {
-        if let Some(s) = v["expr"].as_str() {
-            let s = s.strip_prefix('!').unwrap_or(s);
-            if let Some(rest) = s.strip_prefix("state.")
-                && let Some(head) = rest.split('.').next()
-            {
-                used_states.insert(head.to_string());
-            }
-        }
-        if let Some(applies) = v["apply"].as_array() {
-            for a in applies {
-                if let Some(sn) = a.as_str() {
-                    used_styles.insert(sn.to_string());
-                }
-            }
-        }
-        if let Some(bindings) = v["bindings"].as_object() {
-            for (_, bval) in bindings {
-                if let Some(s) = bval.as_str()
-                    && let Some(rest) = s.strip_prefix("state.")
-                    && let Some(head) = rest.split('.').next()
-                {
-                    used_states.insert(head.to_string());
-                }
-            }
-        }
-        if let Some(a) = v.as_array() {
-            for item in a {
-                collect_state_and_style_refs(item, used_states, used_styles);
-            }
-        } else if let Some(o) = v.as_object() {
-            for (k, val) in o {
-                if !matches!(
-                    k.as_str(),
-                    "propDefinitions"
-                        | "stateDefinitions"
-                        | "styles"
-                        | "defaultRanges"
-                        | "statementRanges"
-                ) {
-                    collect_state_and_style_refs(val, used_states, used_styles);
-                }
+    for section in ["nodes", "matches", "shortcuts", "styles", "i18n"] {
+        collect_all(
+            &doc[section],
+            &mut used_props,
+            &mut used_states,
+            &mut used_styles,
+            section == "styles",
+        );
+    }
+    if let Some(defaults) = doc["defaults"].as_object() {
+        for (k, v) in defaults {
+            let is_let = doc["lets"].get(k).is_some();
+            if is_let {
+                collect_all(
+                    v,
+                    &mut used_props,
+                    &mut used_states,
+                    &mut used_styles,
+                    false,
+                );
+            } else {
+                let mut ignore_props = HashSet::new();
+                collect_all(
+                    v,
+                    &mut ignore_props,
+                    &mut used_states,
+                    &mut used_styles,
+                    false,
+                );
             }
         }
     }
 
-    collect_refs(&doc["nodes"], &mut used_props);
-    collect_refs(&doc["matches"], &mut used_props);
-    collect_refs(&doc["shortcuts"], &mut used_props);
-    collect_refs(&doc["styles"], &mut used_props);
-    collect_refs(&doc["i18n"], &mut used_props);
-    for (k, v) in doc["defaults"].as_object().cloned().unwrap_or_default() {
-        if doc["lets"].get(&k).is_some() {
-            collect_refs(&v, &mut used_props);
-        }
-    }
-    collect_state_and_style_refs(&doc["nodes"], &mut used_states, &mut used_styles);
-    collect_state_and_style_refs(&doc["matches"], &mut used_states, &mut used_styles);
-    collect_state_and_style_refs(&doc["shortcuts"], &mut used_states, &mut used_styles);
-    collect_state_and_style_refs(&doc["styles"], &mut used_states, &mut used_styles);
-    collect_state_and_style_refs(&doc["i18n"], &mut used_states, &mut used_styles);
-    collect_state_and_style_refs(&doc["defaults"], &mut used_states, &mut used_styles);
-
-    for (name, _) in doc["lets"].as_object().cloned().unwrap_or_default() {
-        if !used_props.contains(&name) {
-            let range = &doc["defaultRanges"][&name];
-            warnings.push(json!({
-                "code": "unused-let",
-                "name": name,
-                "from": range["from"],
-                "to": range["to"],
-                "message": format!("Неиспользуемое вычисляемое свойство let {name}")
-            }));
-        }
-    }
-    for (name, _) in doc["propDefinitions"]
-        .as_object()
-        .cloned()
-        .unwrap_or_default()
-    {
-        if !used_props.contains(&name) {
-            let range = &doc["defaultRanges"][&name];
-            warnings.push(json!({
-                "code": "unused-prop",
-                "name": name,
-                "from": range["from"],
-                "to": range["to"],
-                "message": format!("Неиспользуемое свойство prop {name}")
-            }));
-        }
-    }
-    for (name, _) in doc["stateDefinitions"]
-        .as_object()
-        .cloned()
-        .unwrap_or_default()
-    {
-        if !used_states.contains(&name) {
-            let range = &doc["defaultRanges"][&name];
-            warnings.push(json!({
-                "code": "unused-state",
-                "name": name,
-                "from": range["from"],
-                "to": range["to"],
-                "message": format!("Неиспользуемое состояние state {name}")
-            }));
-        }
-    }
-    for (name, _) in doc["styles"].as_object().cloned().unwrap_or_default() {
-        if !used_styles.contains(&name) {
-            warnings.push(json!({
-                "code": "unused-style",
-                "name": name,
-                "message": format!("Неиспользуемый стиль style {name}")
-            }));
-        }
-    }
-
-    let mut seen_shortcuts = HashSet::new();
-    for s in doc["shortcuts"].as_array().cloned().unwrap_or_default() {
-        if let Some(key) = s["key"].as_str() {
-            let norm = key.to_lowercase();
-            if !seen_shortcuts.insert(norm) {
+    if let Some(lets) = doc["lets"].as_object() {
+        for name in lets.keys() {
+            if !used_props.contains(name.as_str()) {
+                let range = &doc["defaultRanges"][name];
                 warnings.push(json!({
-                    "code": "duplicate-shortcut",
-                    "key": key,
-                    "from": s["from"],
-                    "to": s["to"],
-                    "message": format!("Повторная комбинация клавиш shortcut '{key}'")
+                    "code": "unused-let",
+                    "name": name,
+                    "from": range["from"],
+                    "to": range["to"],
+                    "message": format!("Неиспользуемое вычисляемое свойство let {name}")
                 }));
+            }
+        }
+    }
+    if let Some(prop_defs) = doc["propDefinitions"].as_object() {
+        for name in prop_defs.keys() {
+            if !used_props.contains(name.as_str()) {
+                let range = &doc["defaultRanges"][name];
+                warnings.push(json!({
+                    "code": "unused-prop",
+                    "name": name,
+                    "from": range["from"],
+                    "to": range["to"],
+                    "message": format!("Неиспользуемое свойство prop {name}")
+                }));
+            }
+        }
+    }
+    if let Some(state_defs) = doc["stateDefinitions"].as_object() {
+        for name in state_defs.keys() {
+            if !used_states.contains(name.as_str()) {
+                let range = &doc["defaultRanges"][name];
+                warnings.push(json!({
+                    "code": "unused-state",
+                    "name": name,
+                    "from": range["from"],
+                    "to": range["to"],
+                    "message": format!("Неиспользуемое состояние state {name}")
+                }));
+            }
+        }
+    }
+    if let Some(styles) = doc["styles"].as_object() {
+        for name in styles.keys() {
+            if !used_styles.contains(name.as_str()) {
+                warnings.push(json!({
+                    "code": "unused-style",
+                    "name": name,
+                    "message": format!("Неиспользуемый стиль style {name}")
+                }));
+            }
+        }
+    }
+
+    if let Some(shortcuts) = doc["shortcuts"].as_array() {
+        let mut seen_shortcuts = HashSet::with_capacity(shortcuts.len());
+        for s in shortcuts {
+            if let Some(key) = s["key"].as_str() {
+                let norm = key.to_lowercase();
+                if !seen_shortcuts.insert(norm) {
+                    warnings.push(json!({
+                        "code": "duplicate-shortcut",
+                        "key": key,
+                        "from": s["from"],
+                        "to": s["to"],
+                        "message": format!("Повторная комбинация клавиш shortcut '{key}'")
+                    }));
+                }
             }
         }
     }

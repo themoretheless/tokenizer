@@ -95,14 +95,16 @@ pub fn evaluate_value(
     evaluate::evaluate(value, &mut |raw, optional| {
         if let Some(tail) = raw.strip_prefix("viewport.") {
             let vp = &env["viewport"];
-            let default_vp;
-            let vp = if vp.is_object() {
-                vp
-            } else {
-                default_vp = json!({"width": 360, "height": 220, "compact": true});
-                &default_vp
+            if vp.is_object() {
+                return read_path(vp, tail.split('.'), raw, optional);
+            }
+            return match tail {
+                "width" => Ok(json!(360)),
+                "height" => Ok(json!(220)),
+                "compact" => Ok(V::Bool(true)),
+                _ if optional => Ok(V::Null),
+                _ => Err(format!("Нет значения {raw}")),
             };
-            return read_path(vp, tail.split('.'), raw, optional);
         }
         let (head_local, rest_local) = raw.split_once('.').unwrap_or((raw, ""));
         if !matches!(head_local, "props" | "state" | "tokens" | "i18n" | "base")
@@ -321,14 +323,60 @@ pub fn evaluate_properties(node: &V, props: &V, state: &V, env: &V) -> R<V> {
     }
     Ok(V::Object(out))
 }
+fn split_top_level(s: &str, sep: u8) -> Option<Vec<&str>> {
+    let bytes = s.as_bytes();
+    let mut depth = 0i32;
+    let mut last = 0;
+    let mut parts = Vec::new();
+    for (idx, &b) in bytes.iter().enumerate() {
+        match b {
+            b'<' => depth += 1,
+            b'>' => depth -= 1,
+            _ if b == sep && depth == 0 => {
+                parts.push(s[last..idx].trim());
+                last = idx + 1;
+            }
+            _ => {}
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        parts.push(s[last..].trim());
+        Some(parts)
+    }
+}
 pub fn validate_type_name(ty: &str, enums: &V) -> R<()> {
-    let name = ty.strip_suffix('?').unwrap_or(ty);
+    let ty = ty.trim();
+    if let Some(parts) = split_top_level(ty, b'|') {
+        for p in parts {
+            validate_type_name(p, enums)?;
+        }
+        return Ok(());
+    }
+    let name = ty.strip_suffix('?').unwrap_or(ty).trim();
     if let Some(inner) = name.strip_prefix("List<").and_then(|s| s.strip_suffix('>')) {
         return validate_type_name(inner, enums);
     }
+    if let Some(inner) = name.strip_prefix("Map<").and_then(|s| s.strip_suffix('>')) {
+        return validate_type_name(inner, enums);
+    }
+    if let Some(inner) = name
+        .strip_prefix("Record<")
+        .and_then(|s| s.strip_suffix('>'))
+    {
+        let Some(parts) = split_top_level(inner, b',') else {
+            return Err(format!("Неизвестный тип {ty}"));
+        };
+        if parts.len() != 2 {
+            return Err(format!("Неизвестный тип {ty}"));
+        }
+        validate_type_name(parts[0], enums)?;
+        return validate_type_name(parts[1], enums);
+    }
     if ![
         "String", "Bool", "Boolean", "Number", "Int", "Float", "Color", "Length", "Duration",
-        "Asset", "List", "Object",
+        "Angle", "Asset", "List", "Object", "Map", "Any",
     ]
     .contains(&name)
         && !own(enums, name)
@@ -345,19 +393,48 @@ fn unit(s: &str, suffix: &str) -> bool {
                 .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
     })
 }
+fn unit_signed(s: &str, suffix: &str) -> bool {
+    let s = s
+        .strip_prefix('-')
+        .or_else(|| s.strip_prefix('+'))
+        .unwrap_or(s);
+    unit(s, suffix)
+}
 pub fn matches_type(value: &V, ty: &str, enums: &V) -> bool {
+    let ty = ty.trim();
+    if let Some(parts) = split_top_level(ty, b'|') {
+        return parts.into_iter().any(|p| matches_type(value, p, enums));
+    }
     if let Some(ty) = ty.strip_suffix('?') {
-        return value.is_null() || matches_type(value, ty, enums);
+        return value.is_null() || matches_type(value, ty.trim(), enums);
     }
     if let Some(inner) = ty.strip_prefix("List<").and_then(|s| s.strip_suffix('>')) {
         return value
             .as_array()
             .is_some_and(|a| a.iter().all(|v| matches_type(v, inner, enums)));
     }
+    if let Some(inner) = ty.strip_prefix("Map<").and_then(|s| s.strip_suffix('>')) {
+        return value
+            .as_object()
+            .is_some_and(|o| o.values().all(|v| matches_type(v, inner, enums)));
+    }
+    if let Some(inner) = ty.strip_prefix("Record<").and_then(|s| s.strip_suffix('>')) {
+        let Some(parts) = split_top_level(inner, b',') else {
+            return false;
+        };
+        if parts.len() != 2 {
+            return false;
+        }
+        let val_ty = parts[1];
+        return value
+            .as_object()
+            .is_some_and(|o| o.values().all(|v| matches_type(v, val_ty, enums)));
+    }
     if let Some(a) = enums[ty].as_array() {
         return value.as_str().is_some_and(|s| {
-            a.iter()
-                .any(|v| v.as_str().is_some_and(|v| s == format!("{ty}.{v}")))
+            s.strip_prefix(ty)
+                .and_then(|rest| rest.strip_prefix('.'))
+                .is_some_and(|variant| a.iter().any(|v| v.as_str() == Some(variant)))
         });
     }
     if let Some(fields) = enums[ty].as_object() {
@@ -375,6 +452,7 @@ pub fn matches_type(value: &V, ty: &str, enums: &V) -> bool {
     }
     let raw = value.get("expr").unwrap_or(value);
     match ty {
+        "Any" => true,
         "String" | "Asset" => value.is_string(),
         "Bool" | "Boolean" => value.is_boolean(),
         "Number" | "Float" => value.as_f64().is_some_and(f64::is_finite),
@@ -388,11 +466,21 @@ pub fn matches_type(value: &V, ty: &str, enums: &V) -> bool {
         }),
         "Length" => {
             raw.as_f64().is_some_and(|n| n.is_finite() && n >= 0.)
-                || raw.as_str().is_some_and(|s| unit(s, "px") || unit(s, "%"))
+                || raw.as_str().is_some_and(|s| {
+                    ["px", "%", "rem", "em", "vw", "vh", "ch", "fr"]
+                        .iter()
+                        .any(|u| unit(s, u))
+                })
         }
         "Duration" => raw.as_str().is_some_and(|s| unit(s, "ms") || unit(s, "s")),
+        "Angle" => {
+            raw.as_f64().is_some_and(f64::is_finite)
+                || raw
+                    .as_str()
+                    .is_some_and(|s| ["deg", "rad", "turn"].iter().any(|u| unit_signed(s, u)))
+        }
         "List" => value.is_array(),
-        "Object" => value.is_object(),
+        "Object" | "Map" => value.is_object(),
         _ => false,
     }
 }
@@ -497,14 +585,13 @@ where
             if depth > 64 {
                 return Err("Превышен предел глубины разметки".into());
             }
+            let empty_nodes = V::Array(Vec::new());
             let mut out = Vec::new();
-            let empty_nodes = json!([]);
-            let mut current_env = env.clone();
+            let mut current_env = std::borrow::Cow::Borrowed(env);
             if !current_env.is_object() {
-                current_env = json!({});
-            }
-            if !current_env["locals"].is_object() {
-                current_env["locals"] = json!({});
+                current_env = std::borrow::Cow::Owned(json!({"locals": {}}));
+            } else if !current_env["locals"].is_object() {
+                current_env.to_mut()["locals"] = json!({});
             }
             for (index, node) in nodes
                 .as_array()
@@ -526,7 +613,7 @@ where
                         false,
                         &current_env,
                     )?;
-                    current_env["locals"][name] = val;
+                    current_env.to_mut()["locals"][name] = val;
                     continue;
                 }
                 if node["type"] == "If" {
@@ -617,7 +704,7 @@ where
                     )?;
                     let collection = collection.as_array().ok_or("for ожидает коллекцию")?;
                     let mut keys = std::collections::HashSet::with_capacity(collection.len());
-                    let mut local = current_env.clone();
+                    let mut local = current_env.as_ref().clone();
                     if !local["_formaBindings"].is_object() {
                         local["_formaBindings"] = json!({});
                     }
@@ -710,7 +797,7 @@ where
                 result["props"] = values.clone();
                 result["eventArgs"] = args;
                 result["eventArgExpressions"] = node.get("eventArgs").cloned().unwrap_or(json!({}));
-                result["environment"] = current_env.clone();
+                result["environment"] = current_env.as_ref().clone();
                 let annotation = (self.hook)(node, &current_env)?;
                 if let Some(v) = annotation.get("propertyOrigins") {
                     result["propertyOrigins"] = v.clone()
