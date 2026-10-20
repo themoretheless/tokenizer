@@ -136,6 +136,10 @@ impl Var {
             value_len: 0,
         }
     }
+    #[inline]
+    fn name_eq(&self, name: &str) -> bool {
+        self.name.get(..usize::from(self.name_len)) == Some(name.as_bytes())
+    }
     fn name(&self) -> &str {
         str::from_utf8(self.name.get(..usize::from(self.name_len)).unwrap_or(&[])).unwrap_or("")
     }
@@ -196,8 +200,9 @@ impl FnDef {
             body_len: 0,
         }
     }
-    fn name(&self) -> &str {
-        str::from_utf8(self.name.get(..usize::from(self.name_len)).unwrap_or(&[])).unwrap_or("")
+    #[inline]
+    fn name_eq(&self, name: &str) -> bool {
+        self.name.get(..usize::from(self.name_len)) == Some(name.as_bytes())
     }
 }
 
@@ -213,7 +218,7 @@ struct PendingFrame {
     var_len: u8,
     words: [u8; MAX_LOOP_WORDS],
     words_len: u16,
-    word_index: u16,
+    word_offset: u16,
 }
 
 impl PendingFrame {
@@ -227,7 +232,7 @@ impl PendingFrame {
             var_len: 0,
             words: [0; MAX_LOOP_WORDS],
             words_len: 0,
-            word_index: 0,
+            word_offset: 0,
         }
     }
     fn text(&self) -> &str {
@@ -344,7 +349,7 @@ impl Interpreter {
     pub fn get(&self, name: &str) -> Option<&str> {
         self.vars[..self.var_count]
             .iter()
-            .find(|var| var.name() == name)
+            .find(|var| var.name_eq(name))
             .map(Var::value)
     }
 
@@ -401,10 +406,12 @@ impl Interpreter {
     /// run the source, then call `provide_source_words` (or `fail_source`).
     pub fn source_request(&self) -> Option<(&str, &str)> {
         let each = self.foreach.as_ref()?;
-        let var = str::from_utf8(each.var.get(..usize::from(each.var_len)).unwrap_or(&[]))
-            .unwrap_or("");
+        let var =
+            str::from_utf8(each.var.get(..usize::from(each.var_len)).unwrap_or(&[])).unwrap_or("");
         let source = str::from_utf8(
-            each.source.get(..usize::from(each.source_len)).unwrap_or(&[]),
+            each.source
+                .get(..usize::from(each.source_len))
+                .unwrap_or(&[]),
         )
         .unwrap_or("");
         Some((var, source))
@@ -426,9 +433,12 @@ impl Interpreter {
             return Err(RushError::CallTooDeep);
         }
         let frame = &mut self.pending[self.pending_len];
-        *frame = PendingFrame::new();
-        frame.buf = each.body;
+        let body_len = usize::from(each.body_len);
+        if let (Some(dst), Some(src)) = (frame.buf.get_mut(..body_len), each.body.get(..body_len)) {
+            dst.copy_from_slice(src);
+        }
         frame.len = each.body_len;
+        frame.pc = 0;
         frame.is_loop = true;
         frame.var = each.var;
         frame.var_len = each.var_len;
@@ -436,8 +446,9 @@ impl Interpreter {
             slot.copy_from_slice(words.as_bytes());
         }
         frame.words_len = words.len() as u16;
+        frame.word_offset = 0;
         self.pending_len += 1;
-        self.bind_loop_word()
+        self.advance_loop_word()
     }
 
     /// Host could not run the source: drop the pending `foreach`.
@@ -604,12 +615,15 @@ impl Interpreter {
         let Some(top) = self.depth.checked_sub(1) else {
             return Err(RushError::ElseWithoutIf);
         };
-        let frame = self.frames[top];
-        if frame.kind != FrameKind::If || usize::from(frame.indent) != indent {
+        let (kind, frame_indent, parent_active, taken) = {
+            let f = &self.frames[top];
+            (f.kind, f.indent, f.parent_active, f.taken)
+        };
+        if kind != FrameKind::If || usize::from(frame_indent) != indent {
             return Err(RushError::ElseWithoutIf);
         }
         self.frames[top].kind = FrameKind::Else;
-        self.frames[top].active = frame.parent_active && !frame.taken;
+        self.frames[top].active = parent_active && !taken;
         self.frames[top].taken = true;
         Ok(Step::Skip)
     }
@@ -651,7 +665,6 @@ impl Interpreter {
 
     /// One `patterns => command` line inside a `match` body.
     fn step_match_arm(&mut self, trimmed: &str) -> Result<Step<'_>, RushError> {
-        let frame = self.frames[self.depth - 1];
         let Some((patterns, command)) = trimmed.split_once("=>") else {
             return Err(RushError::BadMatchArm);
         };
@@ -659,17 +672,21 @@ impl Interpreter {
         if patterns.trim().is_empty() || command.is_empty() {
             return Err(RushError::BadMatchArm);
         }
-        if !frame.active || frame.taken {
-            return Ok(Step::Skip);
-        }
-        let subject = str::from_utf8(
-            frame
-                .subject
-                .get(..usize::from(frame.subject_len))
-                .unwrap_or(&[]),
-        )
-        .unwrap_or("");
-        if !match_patterns(patterns, subject) {
+        let matched = {
+            let frame = &self.frames[self.depth - 1];
+            if !frame.active || frame.taken {
+                return Ok(Step::Skip);
+            }
+            let subject = str::from_utf8(
+                frame
+                    .subject
+                    .get(..usize::from(frame.subject_len))
+                    .unwrap_or(&[]),
+            )
+            .unwrap_or("");
+            match_patterns(patterns, subject)
+        };
+        if !matched {
             return Ok(Step::Skip);
         }
         self.frames[self.depth - 1].taken = true;
@@ -692,7 +709,7 @@ impl Interpreter {
         }
         let index = match self.vars[..self.var_count]
             .iter()
-            .position(|var| var.name() == name)
+            .position(|var| var.name_eq(name))
         {
             Some(index) => index,
             None => {
@@ -869,7 +886,13 @@ impl Interpreter {
 
     /// `foreach name in <source>:` — like `for`, but the word list comes
     /// from the host running `<source>` after the body is captured.
-    fn start_foreach_capture(&mut self, trimmed: &str, indent: usize, active: bool, nested: bool) -> Result<Step<'static>, RushError> {
+    fn start_foreach_capture(
+        &mut self,
+        trimmed: &str,
+        indent: usize,
+        active: bool,
+        nested: bool,
+    ) -> Result<Step<'static>, RushError> {
         if nested {
             return Err(RushError::NestedControl);
         }
@@ -945,13 +968,16 @@ impl Interpreter {
                 return Err(RushError::TooManyFns);
             }
             let def = &mut self.fns[self.fn_count];
-            *def = FnDef::new();
             def.name = cap.name;
             def.name_len = cap.name_len;
             def.params = cap.params;
             def.param_lens = cap.param_lens;
             def.param_count = cap.param_count;
-            def.body = cap.buf;
+            let body_len = usize::from(cap.len);
+            if let (Some(dst), Some(src)) = (def.body.get_mut(..body_len), cap.buf.get(..body_len))
+            {
+                dst.copy_from_slice(src);
+            }
             def.body_len = cap.len;
             self.fn_count += 1;
             return Ok(());
@@ -962,9 +988,18 @@ impl Interpreter {
             let mut each = ForEach::new();
             each.var = cap.name;
             each.var_len = cap.name_len;
-            each.source = cap.words;
+            let src_len = usize::from(cap.words_len);
+            if let (Some(dst), Some(src)) =
+                (each.source.get_mut(..src_len), cap.words.get(..src_len))
+            {
+                dst.copy_from_slice(src);
+            }
             each.source_len = cap.words_len;
-            each.body = cap.buf;
+            let body_len = usize::from(cap.len);
+            if let (Some(dst), Some(src)) = (each.body.get_mut(..body_len), cap.buf.get(..body_len))
+            {
+                dst.copy_from_slice(src);
+            }
             each.body_len = cap.len;
             self.foreach = Some(each);
             return Ok(());
@@ -977,31 +1012,63 @@ impl Interpreter {
             return Err(RushError::CallTooDeep);
         }
         let frame = &mut self.pending[self.pending_len];
-        *frame = PendingFrame::new();
-        frame.buf = cap.buf;
+        let body_len = usize::from(cap.len);
+        if let (Some(dst), Some(src)) = (frame.buf.get_mut(..body_len), cap.buf.get(..body_len)) {
+            dst.copy_from_slice(src);
+        }
         frame.len = cap.len;
+        frame.pc = 0;
         frame.is_loop = true;
         frame.var = cap.name;
         frame.var_len = cap.name_len;
-        frame.words = cap.words;
+        let words_len = usize::from(cap.words_len);
+        if let (Some(dst), Some(src)) =
+            (frame.words.get_mut(..words_len), cap.words.get(..words_len))
+        {
+            dst.copy_from_slice(src);
+        }
         frame.words_len = cap.words_len;
+        frame.word_offset = 0;
         self.pending_len += 1;
-        // Bind the first word immediately.
-        self.bind_loop_word()
+        // Bind the first word immediately, or pop if word list is whitespace-only.
+        self.advance_loop_word()
     }
 
-    /// Bind the current word of the top loop frame to its variable.
-    fn bind_loop_word(&mut self) -> Result<(), RushError> {
+    /// Advance the top loop frame to its next whitespace-delimited word and bind
+    /// it to its loop variable, or pop the frame if no words remain.
+    fn advance_loop_word(&mut self) -> Result<(), RushError> {
         if self.pending_len == 0 {
             return Ok(());
         }
-        let frame = self.pending[self.pending_len - 1];
-        let var = str::from_utf8(frame.var.get(..usize::from(frame.var_len)).unwrap_or(&[]))
-            .unwrap_or("");
-        let word = match nth_word(frame.words_text(), usize::from(frame.word_index)) {
-            Some(word) => word,
-            None => return Ok(()),
-        };
+        let mut var_buf = [0u8; MAX_NAME];
+        let var_len: usize;
+        let mut word_buf = [0u8; MAX_VALUE];
+        let word_len: usize;
+        {
+            let frame = &mut self.pending[self.pending_len - 1];
+            let words = frame.words_text();
+            let rest = words.get(usize::from(frame.word_offset)..).unwrap_or("");
+            let trimmed = rest.trim_start();
+            if trimmed.is_empty() {
+                self.pending_len -= 1;
+                return Ok(());
+            }
+            let skip_ws = rest.len() - trimmed.len();
+            let wlen = trimmed
+                .bytes()
+                .take_while(|b| !b.is_ascii_whitespace())
+                .count();
+            if wlen > MAX_VALUE {
+                return Err(RushError::ValueTooLong);
+            }
+            word_len = wlen;
+            word_buf[..wlen].copy_from_slice(&trimmed.as_bytes()[..wlen]);
+            frame.word_offset += (skip_ws + wlen) as u16;
+            var_len = usize::from(frame.var_len);
+            var_buf[..var_len].copy_from_slice(&frame.var[..var_len]);
+        }
+        let var = str::from_utf8(&var_buf[..var_len]).unwrap_or("");
+        let word = str::from_utf8(&word_buf[..word_len]).unwrap_or("");
         self.set_var(var, word)
     }
 
@@ -1035,14 +1102,9 @@ impl Interpreter {
                 return Ok(Some(line_len));
             }
             if frame.is_loop {
-                frame.word_index += 1;
-                let has_more =
-                    nth_word(frame.words_text(), usize::from(frame.word_index)).is_some();
-                if has_more {
-                    frame.pc = 0;
-                    self.bind_loop_word()?;
-                    continue;
-                }
+                frame.pc = 0;
+                self.advance_loop_word()?;
+                continue;
             }
             self.pending_len -= 1;
         }
@@ -1061,7 +1123,7 @@ impl Interpreter {
         }
         self.fns[..self.fn_count]
             .iter()
-            .position(|def| def.name() == name)
+            .position(|def| def.name_eq(name))
     }
 
     fn start_call(&mut self, fn_index: usize, trimmed: &str) -> Result<(), RushError> {
@@ -1083,17 +1145,34 @@ impl Interpreter {
             arg_lens[argc] = len as u8;
             argc += 1;
         }
-        let def = self.fns[fn_index];
-        let frame = &mut self.pending[self.pending_len];
-        *frame = PendingFrame::new();
-        frame.buf = def.body;
-        frame.len = def.body_len;
+        let param_count: usize;
+        let params: [[u8; MAX_NAME]; MAX_PARAMS];
+        let param_lens: [u8; MAX_PARAMS];
+        {
+            let def = &self.fns[fn_index];
+            param_count = usize::from(def.param_count);
+            params = def.params;
+            param_lens = def.param_lens;
+            let body_len = usize::from(def.body_len);
+            let frame = &mut self.pending[self.pending_len];
+            if let (Some(dst), Some(src)) =
+                (frame.buf.get_mut(..body_len), def.body.get(..body_len))
+            {
+                dst.copy_from_slice(src);
+            }
+            frame.len = def.body_len;
+            frame.pc = 0;
+            frame.is_loop = false;
+            frame.var_len = 0;
+            frame.words_len = 0;
+            frame.word_offset = 0;
+        }
         self.pending_len += 1;
         // Bind parameters.
-        for param in 0..usize::from(def.param_count) {
+        for param in 0..param_count {
             let name = str::from_utf8(
-                def.params[param]
-                    .get(..usize::from(def.param_lens[param]))
+                params[param]
+                    .get(..usize::from(param_lens[param]))
                     .unwrap_or(&[]),
             )
             .unwrap_or("");
@@ -1180,10 +1259,6 @@ fn is_ident(text: &str) -> bool {
         _ => return false,
     }
     chars.all(|b| b.is_ascii_alphanumeric() || b == b'_')
-}
-
-fn nth_word(text: &str, index: usize) -> Option<&str> {
-    text.split_whitespace().nth(index)
 }
 
 /// Does any `|`-separated alternative match the subject? `_` is the

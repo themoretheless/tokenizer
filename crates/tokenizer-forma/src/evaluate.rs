@@ -54,7 +54,13 @@ fn compare(a: &V, b: &V) -> Option<std::cmp::Ordering> {
     }
 }
 fn parse_hex_color(v: &V) -> R<(u8, u8, u8, u8)> {
-    let raw = text(v)?;
+    let owned;
+    let raw = if let Some(s) = v.as_str().or_else(|| v["expr"].as_str()) {
+        s
+    } else {
+        owned = text(v)?;
+        &owned
+    };
     let s = raw
         .trim()
         .strip_prefix('#')
@@ -161,13 +167,11 @@ struct TokenPat {
 }
 
 fn parse_regex_tokens(pat: &str) -> (bool, bool, Vec<TokenPat>) {
-    let mut chars: Vec<char> = pat.chars().collect();
-    let anchored_start = if chars.first() == Some(&'^') {
-        chars.remove(0);
-        true
-    } else {
-        false
+    let (anchored_start, pat) = match pat.strip_prefix('^') {
+        Some(rest) => (true, rest),
+        None => (false, pat),
     };
+    let mut chars: Vec<char> = pat.chars().collect();
     let anchored_end =
         if chars.last() == Some(&'$') && (chars.len() < 2 || chars[chars.len() - 2] != '\\') {
             chars.pop();
@@ -1323,13 +1327,11 @@ where
                     };
                     Ok(V::Array(items))
                 }
-                "+" if a.is_string()
-                    || b.is_string()
-                    || a["expr"].is_string()
-                    || b["expr"].is_string() =>
-                {
-                    Ok(json!(format!("{}{}", text(&a)?, text(&b)?)))
-                }
+                "+" if a.is_string() && b.is_string() => Ok(json!(format!(
+                    "{}{}",
+                    a.as_str().unwrap(),
+                    b.as_str().unwrap()
+                ))),
                 _ => {
                     let a = number(&a)?;
                     let b = number(&b)?;

@@ -80,11 +80,11 @@ export function propertyOrigins(value,source,props={},sources={},traces={},seen)
   }else result.push(referenceOrigin(ref));
  }
  if(result.length<2)return result;
- const unique=[],keys=[];
+ const unique=[],keys=new Set();
  for(const origin of result){
   const key=originKey(origin);
-  if(keys.includes(key))continue;
-  keys.push(key);unique.push(origin);
+  if(keys.has(key))continue;
+  keys.add(key);unique.push(origin);
  }
  return unique;
 }
