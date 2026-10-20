@@ -12,7 +12,8 @@ export const matchesType=(value,type,enums={})=>operation('matchesType',{value,t
 
 // Source annotations and component traversal remain host responsibilities.
 export function expandStructure(nodes,props,state,environment={},options={}){
- const result=operation('expandStructure',{nodes,props,state,environment,options},(node,env)=>{
+ const needHook=Boolean(options.trackOrigins)||typeof options.recursive==='function';
+ const result=operation('expandStructure',{nodes,props,state,environment,options},needHook?(node,env)=>{
   const annotation={recursive:typeof options.recursive==='function'?options.recursive(node):options.recursive!==false};
   if(options.trackOrigins){
    const sources={...selectedPropertySources(node.matches,props,state,env),...node.propertySources};
@@ -20,7 +21,7 @@ export function expandStructure(nodes,props,state,environment={},options={}){
    annotation.propertyOrigins=Object.fromEntries(Object.entries(raw).map(([key,value])=>[key,propertyOrigins(value,sources[key]?{...sources[key],label:`${node.type} · экземпляр`}:node.source,props,options.propertySources)]));
   }
   return annotation;
- });
+ }:undefined);
  function restore(list){for(const node of list){const env=node.environment;if(env?._formaBindings){const locals={...environment.locals};for(const [name,binding]of Object.entries(env._formaBindings)){
   const raw=binding.collection?.expr;let collection;
   if(typeof raw==='string'){

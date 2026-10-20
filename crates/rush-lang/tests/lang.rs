@@ -197,8 +197,7 @@ fn if_inside_for_body() {
 #[test]
 fn foreach_replays_per_source_word() {
     let script = "foreach f in ls:\n    yield file $f\necho after\n";
-    let (executed, outcome) =
-        run_with_sources(script, &[], &[("ls", "hello.txt docs demo.r")]);
+    let (executed, outcome) = run_with_sources(script, &[], &[("ls", "hello.txt docs demo.r")]);
     assert_eq!(outcome.map(|_| ()), Ok(()));
     assert_eq!(
         executed,
@@ -219,7 +218,8 @@ fn foreach_replays_per_source_word() {
     assert_eq!(interp.get("f"), Some("a"));
     assert!(interp.busy());
     // An empty source runs nothing.
-    let (executed, outcome) = run_with_sources("foreach f in ls:\n    echo $f\n", &[], &[("ls", "")]);
+    let (executed, outcome) =
+        run_with_sources("foreach f in ls:\n    echo $f\n", &[], &[("ls", "")]);
     assert_eq!(outcome.map(|_| ()), Ok(()));
     assert_eq!(executed, Vec::<String>::new());
     // An unknown source fails soft: loop skipped, script continues.

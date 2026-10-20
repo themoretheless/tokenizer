@@ -285,90 +285,114 @@ fn has(v: &V, key: &str) -> bool {
 fn nonempty(v: &V) -> bool {
     v.as_array().is_some_and(|a| !a.is_empty()) || v.as_object().is_some_and(|o| !o.is_empty())
 }
+#[inline]
 fn name(s: &str) -> bool {
-    let mut cs = s.chars();
-    cs.next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && cs.all(ident)
+    let [first, rest @ ..] = s.as_bytes() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || *first == b'_')
+        && rest.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'_')
 }
+#[inline]
 fn path(s: &str) -> bool {
-    s.split('.').all(name)
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+    let mut expect_start = true;
+    for &b in bytes {
+        if expect_start {
+            if !(b.is_ascii_alphabetic() || b == b'_') {
+                return false;
+            }
+            expect_start = false;
+        } else if b == b'.' {
+            expect_start = true;
+        } else if !(b.is_ascii_alphanumeric() || b == b'_') {
+            return false;
+        }
+    }
+    !expect_start
 }
-const PURE_FUNCTIONS: &[&str] = &[
-    "min",
-    "max",
-    "clamp",
-    "abs",
-    "round",
-    "floor",
-    "ceil",
-    "pow",
-    "sqrt",
-    "sign",
-    "lerp",
-    "remap",
-    "avg",
-    "len",
-    "String",
-    "Number",
-    "Bool",
-    "trim",
-    "upper",
-    "lower",
-    "capitalize",
-    "padStart",
-    "padEnd",
-    "truncate",
-    "repeat",
-    "contains",
-    "includes",
-    "indexOf",
-    "startsWith",
-    "endsWith",
-    "replace",
-    "slice",
-    "split",
-    "join",
-    "reverse",
-    "take",
-    "skip",
-    "sum",
-    "range",
-    "formatNumber",
-    "sortBy",
-    "pluck",
-    "count",
-    "any",
-    "all",
-    "alpha",
-    "mix",
-    "lighten",
-    "darken",
-    "contrast",
-    "invert",
-    "saturate",
-    "desaturate",
-    "unique",
-    "find",
-    "compact",
-    "flatten",
-    "chunk",
-    "zip",
-    "first",
-    "last",
-    "groupBy",
-    "keys",
-    "values",
-    "entries",
-    "fromEntries",
-    "merge",
-    "pick",
-    "omit",
-    "isEmpty",
-    "coalesce",
-    "plural",
-    "isValid",
-];
+#[inline]
+fn is_pure_function(s: &str) -> bool {
+    matches!(
+        s,
+        "min"
+            | "max"
+            | "clamp"
+            | "abs"
+            | "round"
+            | "floor"
+            | "ceil"
+            | "pow"
+            | "sqrt"
+            | "sign"
+            | "lerp"
+            | "remap"
+            | "avg"
+            | "len"
+            | "String"
+            | "Number"
+            | "Bool"
+            | "trim"
+            | "upper"
+            | "lower"
+            | "capitalize"
+            | "padStart"
+            | "padEnd"
+            | "truncate"
+            | "repeat"
+            | "contains"
+            | "includes"
+            | "indexOf"
+            | "startsWith"
+            | "endsWith"
+            | "replace"
+            | "slice"
+            | "split"
+            | "join"
+            | "reverse"
+            | "take"
+            | "skip"
+            | "sum"
+            | "range"
+            | "formatNumber"
+            | "sortBy"
+            | "pluck"
+            | "count"
+            | "any"
+            | "all"
+            | "alpha"
+            | "mix"
+            | "lighten"
+            | "darken"
+            | "contrast"
+            | "invert"
+            | "saturate"
+            | "desaturate"
+            | "unique"
+            | "find"
+            | "compact"
+            | "flatten"
+            | "chunk"
+            | "zip"
+            | "first"
+            | "last"
+            | "groupBy"
+            | "keys"
+            | "values"
+            | "entries"
+            | "fromEntries"
+            | "merge"
+            | "pick"
+            | "omit"
+            | "isEmpty"
+            | "coalesce"
+            | "plural"
+            | "isValid"
+    )
+}
 struct Parser<'a> {
     source: &'a str,
     tokens: Vec<BorrowedToken<'a>>,
@@ -528,7 +552,7 @@ impl<'a> Parser<'a> {
                 } else {
                     let prop_str = prop.as_str().unwrap();
                     if !optional && !prop_str.contains('.') && self.peek() == "(" {
-                        if !PURE_FUNCTIONS.contains(&prop_str) {
+                        if !is_pure_function(prop_str) {
                             return self.err(format!("Неизвестная чистая функция {prop_str}"));
                         }
                         self.take("(")?;
@@ -552,7 +576,7 @@ impl<'a> Parser<'a> {
             if op == "|>" && min <= 1 {
                 self.i += 1;
                 let fn_name = self.take("")?;
-                if !PURE_FUNCTIONS.contains(&fn_name) {
+                if !is_pure_function(fn_name) {
                     return self.err(format!("Неизвестная чистая функция {fn_name}"));
                 }
                 let mut args = vec![left];
@@ -701,7 +725,7 @@ impl<'a> Parser<'a> {
                         .join(", ")
                 )));
             }
-            if !PURE_FUNCTIONS.contains(&token) {
+            if !is_pure_function(token) {
                 return self.err(format!("Неизвестная чистая функция {token}"));
             }
             return Ok(json!({"expression":{"kind":"call","name":token,"args":args}}));
@@ -1692,11 +1716,18 @@ impl<'a> Parser<'a> {
             // Shared module file (tokens/i18n/styles/enums/structs only)
         } else if self.peek() == "component" {
             self.i += 1;
-            let c = self.node(None, true)?;
-            d["name"] = c["type"].clone();
-            d["base"] = c["base"].clone();
-            for u in c["uses"].as_array().cloned().unwrap_or_default() {
-                push(&mut d, "uses", u);
+            let mut c = self.node(None, true)?;
+            if nonempty(&c["bindings"]) || nonempty(&c["events"]) {
+                return self.err(
+                    "На уровне component разрешены только значения свойств и объявления event",
+                );
+            }
+            d["name"] = std::mem::take(&mut c["type"]);
+            d["base"] = std::mem::take(&mut c["base"]);
+            if let Some(uses) = c["uses"].as_array_mut() {
+                for u in std::mem::take(uses) {
+                    push(&mut d, "uses", u);
+                }
             }
             for (k, v) in [
                 ("slots", "slots"),
@@ -1712,7 +1743,7 @@ impl<'a> Parser<'a> {
                 ("matches", "matches"),
                 ("forward", "forward"),
             ] {
-                d[k] = c[v].clone()
+                d[k] = std::mem::take(&mut c[v]);
             }
             for k in [
                 "enums",
@@ -1722,16 +1753,12 @@ impl<'a> Parser<'a> {
                 "i18n",
                 "styles",
             ] {
-                if let Some(o) = c[k].as_object() {
-                    for (key, val) in o {
-                        d[k][key] = val.clone();
+                if let Some(o) = c[k].as_object_mut() {
+                    let target = d[k].as_object_mut().unwrap();
+                    for (key, val) in std::mem::take(o) {
+                        target.insert(key, val);
                     }
                 }
-            }
-            if nonempty(&c["bindings"]) || nonempty(&c["events"]) {
-                return self.err(
-                    "На уровне component разрешены только значения свойств и объявления event",
-                );
             }
         } else if self.peek() == "design" {
             self.i += 1;

@@ -24,8 +24,20 @@ fn callback(f: &js_sys::Function, path: &str, optional: bool) -> Result<V, Strin
                 .unwrap_or_else(|| "Reference resolution failed".into())
         })
     })?;
-    if value.is_undefined() {
+    if value.is_undefined() || value.is_null() {
         return Ok(V::Null);
+    }
+    if let Some(b) = value.as_bool() {
+        return Ok(V::Bool(b));
+    }
+    if let Some(n) = value.as_f64() {
+        if let Some(num) = serde_json::Number::from_f64(n) {
+            return Ok(V::Number(num));
+        }
+        return Err("Resolver returned non-serializable data".into());
+    }
+    if let Some(s) = value.as_string() {
+        return Ok(V::String(s));
     }
     let s = js_sys::JSON::stringify(&value)
         .map_err(|_| "Resolver returned non-serializable data".to_string())?
@@ -60,9 +72,9 @@ pub fn operation_json(
  "matchesPattern"=>Ok(json!(e::matches_pattern(arg("pattern"),arg("value"),&mut |p|if let Some(r)=resolver.as_ref(){let input=js_sys::JSON::parse(&p.to_string()).map_err(|_|"Pattern conversion".to_string())?;let result=r.call1(&JsValue::NULL,&input).map_err(|e|e.as_string().unwrap_or_else(||"Pattern resolver failed".into()))?;let text=js_sys::JSON::stringify(&result).map_err(|_|"Pattern conversion".to_string())?.as_string().unwrap_or_else(||"null".into());serde_json::from_str(&text).map_err(|e|e.to_string())}else{Ok(p.clone())})?)),
  "evaluate"=>s::evaluate_value(arg("value"),props,state,&v["stack"].as_array().map(|a|a.iter().filter_map(|v|v.as_str().map(String::from)).collect::<Vec<_>>()).unwrap_or_default(),v["expandElements"]!=false,env),
  "evaluateProperties"=>s::evaluate_properties(arg("node"),props,state,env),"selectedProperties"=>s::selected_properties(arg("groups"),props,state,env),"selectedPropertySources"=>s::selected_sources(arg("groups"),props,state,env),
- "expandStructure"=>s::expand_structure(arg("nodes"),props,state,env,arg("options"),&mut |node,environment|{
- let Some(r)=resolver.as_ref()else{return Ok(json!({}))};let n=js_sys::JSON::parse(&node.to_string()).map_err(|_|"Node conversion".to_string())?;let env=js_sys::JSON::parse(&environment.to_string()).map_err(|_|"Environment conversion".to_string())?;let value=r.call2(&JsValue::NULL,&n,&env).map_err(|e|js_sys::Reflect::get(&e,&"message".into()).ok().and_then(|v|v.as_string()).unwrap_or_else(||"Markup host hook failed".into()))?;let text=js_sys::JSON::stringify(&value).map_err(|_|"Annotation conversion".to_string())?.as_string().unwrap_or_else(||"{}".into());serde_json::from_str(&text).map_err(|e|e.to_string())
- }),
+ "expandStructure"=>{let track_origins=arg("options")["trackOrigins"]==true;s::expand_structure(arg("nodes"),props,state,env,arg("options"),&mut |node,environment|{
+ let Some(r)=resolver.as_ref()else{return Ok(V::Null)};let n=js_sys::JSON::parse(&node.to_string()).map_err(|_|"Node conversion".to_string())?;let env_js=if track_origins{js_sys::JSON::parse(&environment.to_string()).map_err(|_|"Environment conversion".to_string())?}else{JsValue::NULL};let value=r.call2(&JsValue::NULL,&n,&env_js).map_err(|e|js_sys::Reflect::get(&e,&"message".into()).ok().and_then(|v|v.as_string()).unwrap_or_else(||"Markup host hook failed".into()))?;let text=js_sys::JSON::stringify(&value).map_err(|_|"Annotation conversion".to_string())?.as_string().unwrap_or_else(||"{}".into());serde_json::from_str(&text).map_err(|e|e.to_string())
+ })},
  "validateDesign"=>{s::validate_design(arg("component"),arg("design"))?;Ok(V::Null)},
  "designStatePatch"=>s::design_state_patch(arg("design"),v["stateName"].as_str()),
  "matchesType"=>Ok(json!(s::matches_type(arg("value"),v["type"].as_str().unwrap_or(""),arg("enums")))),"validateTypeName"=>{s::validate_type_name(v["type"].as_str().unwrap_or(""),arg("enums"))?;Ok(V::Null)},"validateContract"=>{s::validate_contract(arg("definitions"),arg("values"),arg("enums"),v["label"].as_str().unwrap_or("component"))?;Ok(V::Null)},

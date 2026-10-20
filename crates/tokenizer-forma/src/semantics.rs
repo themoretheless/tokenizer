@@ -793,16 +793,27 @@ where
                         )
                     }
                 }
-                let mut result = node.clone();
-                result["props"] = values.clone();
+                let annotation = (self.hook)(node, &current_env)?;
+                let is_slider_num = node["type"] == "Slider" && values["value"].is_number();
+                let mut result = if let Some(node_obj) = node.as_object() {
+                    let mut map = serde_json::Map::with_capacity(node_obj.len() + 4);
+                    for (k, v) in node_obj {
+                        if k != "props" && k != "children" && k != "eventArgs" {
+                            map.insert(k.clone(), v.clone());
+                        }
+                    }
+                    V::Object(map)
+                } else {
+                    node.clone()
+                };
+                result["props"] = values;
                 result["eventArgs"] = args;
                 result["eventArgExpressions"] = node.get("eventArgs").cloned().unwrap_or(json!({}));
                 result["environment"] = current_env.as_ref().clone();
-                let annotation = (self.hook)(node, &current_env)?;
                 if let Some(v) = annotation.get("propertyOrigins") {
                     result["propertyOrigins"] = v.clone()
                 }
-                if node["type"] == "Slider" && values["value"].is_number() {
+                if is_slider_num {
                     let path = node["props"]["value"]["expr"].as_str();
                     result["normalizedRange"] = json!(
                         node["bindings"]["value"]
@@ -813,12 +824,15 @@ where
                     )
                 }
                 if !prefix.is_empty() {
-                    let key = values
-                        .get("key")
-                        .filter(|v| !v.is_null())
-                        .cloned()
-                        .unwrap_or_else(|| node.get("start").cloned().unwrap_or(json!(index)));
-                    result["props"]["key"] = json!(format!("{prefix}{}", evaluate::text(&key)?))
+                    let key_str =
+                        if let Some(k) = result["props"].get("key").filter(|v| !v.is_null()) {
+                            evaluate::text(k)?
+                        } else if let Some(start_v) = node.get("start") {
+                            evaluate::text(start_v)?
+                        } else {
+                            index.to_string()
+                        };
+                    result["props"]["key"] = json!(format!("{prefix}{key_str}"))
                 }
                 result["children"] =
                     if self.options["recursive"] == false || annotation["recursive"] == false {
