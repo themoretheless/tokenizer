@@ -451,6 +451,13 @@ impl ScriptInstance<'_, '_> {
     pub fn memory_usage(&self) -> usize {
         self.runtime.retained_usage().bytes
     }
+    /// Peak requested heap bytes charged to this run's reservation ledger so
+    /// far. Use it to calibrate `ExecutionLimits::max_heap_bytes`: it counts
+    /// ledger-covered storage (cells, environments, sequence buffers), not
+    /// transient values, host allocations or allocator overhead.
+    pub fn peak_heap_bytes(&self) -> usize {
+        self.runtime.memory.peak_bytes()
+    }
     /// Aggregated allocation metrics per region name, including regions
     /// executed inside coroutines. Use `peak_live` to size region budgets.
     pub fn region_stats(&self) -> &[RegionStats] {

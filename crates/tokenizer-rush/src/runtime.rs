@@ -581,7 +581,7 @@ impl<'s> Program<'s> {
             });
         }
         let root_contracts = prepared.root_contracts;
-        let memory = memory::Budget::new(usize::MAX);
+        let memory = memory::Budget::new(limits.max_heap_bytes);
         let mut runtime = Runtime {
             module: None,
             early_return: None,

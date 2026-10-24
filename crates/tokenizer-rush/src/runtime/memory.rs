@@ -84,7 +84,6 @@ impl Budget {
     pub(super) fn live_bytes(&self) -> usize {
         self.0.live.get()
     }
-    #[cfg(test)]
     pub(super) fn peak_bytes(&self) -> usize {
         self.0.peak.get()
     }
@@ -126,6 +125,40 @@ impl Reservation {
     }
 }
 
+/// Tracks requested bytes of plain `Vec` storage built outside Slots/Buffer
+/// (eager operation results) so a finite budget sees transient peaks. The
+/// cover tops its reservation up when the Vec capacity grows and releases it
+/// when the operation scope ends; the retained result is then accounted by
+/// the instance retained-data budget, not by this ledger.
+pub(super) struct Cover {
+    reservation: Reservation,
+    covered: usize,
+}
+
+impl Cover {
+    pub(super) fn new(budget: &Budget) -> Self {
+        Self {
+            reservation: Reservation {
+                ledger: budget.0.clone(),
+                bytes: 0,
+            },
+            covered: 0,
+        }
+    }
+    /// One comparison per element appended; the reservation moves only on
+    /// capacity growth. Covers capacity, matching allocator-visible bytes.
+    pub(super) fn cover_vec<T>(&mut self, vec: &Vec<T>) -> Result<(), AllocationError> {
+        let bytes = vec.capacity().saturating_mul(std::mem::size_of::<T>());
+        if bytes > self.covered {
+            self.reservation
+                .resize(bytes)
+                .map_err(|_| AllocationError::Limit)?;
+            self.covered = bytes;
+        }
+        Ok(())
+    }
+}
+
 impl Drop for Reservation {
     fn drop(&mut self) {
         self.ledger.live.set(self.ledger.live.get() - self.bytes);
@@ -145,6 +178,17 @@ pub(super) enum AllocationError {
     Steps,
     #[cfg(test)]
     Cancelled,
+}
+
+impl AllocationError {
+    /// Limit exhaustion is a user-facing limit error; other variants keep the
+    /// caller's context message for diagnostics of internal failures.
+    pub(super) fn message(&self, context: &str) -> String {
+        match self {
+            Self::Limit => "Heap limit exceeded".into(),
+            other => format!("{context}: {other:?}"),
+        }
+    }
 }
 
 #[cfg(test)]

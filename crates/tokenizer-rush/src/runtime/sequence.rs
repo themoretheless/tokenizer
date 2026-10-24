@@ -180,9 +180,7 @@ impl<'s> Runtime<'_, 's> {
                                 location: None,
                                 module: self.module.map(str::to_owned),
                                 span,
-                                message: format!(
-                                    "Runtime sequence source allocation failed: {e:?}"
-                                ),
+                                message: e.message("Runtime sequence source allocation failed"),
                             },
                         )?,
                     ),
@@ -212,7 +210,7 @@ impl<'s> Runtime<'_, 's> {
                             location: None,
                             module: self.module.map(str::to_owned),
                             span,
-                            message: format!("Runtime sequence stage allocation failed: {e:?}"),
+                            message: e.message("Runtime sequence stage allocation failed"),
                         })?;
                 }
                 Rc::new(Sequence { source, stages })
@@ -228,7 +226,7 @@ impl<'s> Runtime<'_, 's> {
                         location: None,
                         module: self.module.map(str::to_owned),
                         span,
-                        message: format!("Runtime sequence source allocation failed: {e:?}"),
+                        message: e.message("Runtime sequence source allocation failed"),
                     })?,
                 ),
                 stages: SequenceStages::default(),

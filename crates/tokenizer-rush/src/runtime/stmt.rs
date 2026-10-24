@@ -304,7 +304,7 @@ impl<'s> Runtime<'_, 's> {
         if let Err(error) = self.loading.reserve(1) {
             return self.error(
                 name.span,
-                &format!("Runtime module stack allocation failed: {error:?}"),
+                &error.message("Runtime module stack allocation failed"),
             );
         }
         // Reserve an export slot for this module and every active
@@ -313,7 +313,7 @@ impl<'s> Runtime<'_, 's> {
         if let Err(error) = self.module_cache.reserve(self.loading.len() + 1) {
             return self.error(
                 name.span,
-                &format!("Runtime module cache allocation failed: {error:?}"),
+                &error.message("Runtime module cache allocation failed"),
             );
         }
         let module_environment = self
