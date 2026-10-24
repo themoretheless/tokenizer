@@ -454,3 +454,83 @@ fn cancellation_after_host_callback_precedes_result_validation() {
     assert_eq!(error.message, "Execution cancelled");
     assert!(token.is_cancelled());
 }
+
+use themoretheless_tokenizer_core::InputLimits;
+use themoretheless_tokenizer_rush::parse_with;
+
+/// Dense expression source: many AST nodes per source byte.
+fn dense_source(statements: usize, nesting: usize) -> String {
+    let mut source = String::new();
+    for index in 0..statements {
+        source.push_str(&format!("let v{index} = "));
+        for _ in 0..nesting {
+            source.push('-');
+        }
+        source.push_str("1\n");
+    }
+    source
+}
+
+#[test]
+fn ast_byte_limit_rejects_inflated_parse_output() {
+    // One `let v0 = ---1` line is ~12 source bytes but several boxed Expr nodes.
+    let source = dense_source(50, 16);
+    let generous = parse_with(&source, InputLimits::conservative().max_ast_bytes(1_000_000));
+    assert!(generous.is_valid());
+    let tight = parse_with(&source, InputLimits::conservative().max_ast_bytes(1024));
+    assert!(!tight.is_valid());
+    assert!(
+        tight
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "ast-limit" && d.message == "Parse output byte limit exceeded"),
+        "{:?}",
+        tight.diagnostics
+    );
+    // The limit stops the parse early instead of building the whole tree.
+    assert!(tight.module.items.len() < 50);
+    // usize::MAX opts out, matching the "zero is never unlimited" convention.
+    let disabled = parse_with(&source, InputLimits::conservative().max_ast_bytes(usize::MAX));
+    assert!(disabled.is_valid());
+}
+
+#[test]
+fn ast_byte_limit_scales_with_input_bytes_and_holds_at_one_megabyte() {
+    // Default derivation: 64 parse-output bytes per input byte.
+    let limits = InputLimits::conservative().max_input_bytes(4096);
+    assert_eq!(limits.max_ast_bytes, 64 * 4096);
+    // Measured parse-output density is 33-58 bytes per source byte
+    // (docs/benchmarks/rush-memory-inventory-2026-10-24.txt, section 4), so a
+    // ~1 MiB legal source must fit the conservative default with margin.
+    let mut source = String::from("fn f(x) { return x * 2 + 1 }\n");
+    for index in 0..40_000_usize {
+        source.push_str(&format!(
+            "let v{index} = f({index}) + f(v{}) / 2\n",
+            index.saturating_sub(1)
+        ));
+    }
+    assert!(source.len() > 1024 * 1024, "{}", source.len());
+    let parsed = parse_with(&source, InputLimits::conservative());
+    assert!(parsed.is_valid(), "{:?}", parsed.diagnostics);
+    // An explicit budget below the output size rejects the same source;
+    // an explicit budget above it accepts.
+    let tight = parse_with(&source, InputLimits::conservative().max_ast_bytes(source.len()));
+    assert!(!tight.is_valid());
+    assert!(tight.diagnostics.iter().any(|d| d.code == "ast-limit"));
+    let exact_style = parse_with(
+        &source,
+        InputLimits::conservative().max_ast_bytes(usize::MAX),
+    );
+    assert!(exact_style.is_valid());
+}
+
+#[test]
+fn ast_byte_limit_respects_the_diagnostic_budget() {
+    let source = dense_source(50, 16);
+    let silent = parse_with(
+        &source,
+        InputLimits::conservative().max_ast_bytes(1024).max_diagnostics(0),
+    );
+    assert!(!silent.is_valid());
+    assert!(silent.diagnostics.is_empty());
+}
