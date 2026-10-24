@@ -458,6 +458,12 @@ impl ScriptInstance<'_, '_> {
     pub fn peak_heap_bytes(&self) -> usize {
         self.runtime.memory.peak_bytes()
     }
+    /// Cumulative requested bytes charged over the run so far, including work
+    /// whose results are already released. Use it to calibrate
+    /// `ExecutionLimits::max_allocated_bytes`.
+    pub fn allocated_bytes(&self) -> usize {
+        self.runtime.memory.allocated_bytes()
+    }
     /// Aggregated allocation metrics per region name, including regions
     /// executed inside coroutines. Use `peak_live` to size region budgets.
     pub fn region_stats(&self) -> &[RegionStats] {

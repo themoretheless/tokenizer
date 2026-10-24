@@ -339,7 +339,21 @@ operations. Exhaustion fails the operation with `Heap limit exceeded`; a
 failed coroutine task is terminated while other tasks in the instance
 continue, and a failed lazy-sequence materialization leaves the instance
 consistent for further calls. `ScriptInstance::peak_heap_bytes()` reports the
-observed peak for calibration. The default is off (`usize::MAX`). AST storage
+observed peak for calibration. The default is off (`usize::MAX`).
+
+`ExecutionLimits::max_allocated_bytes` bounds cumulative requested bytes per
+run — a work budget, not a state budget. It is charged at string/collection
+growth points and eager-operation buffers, including intermediate results
+already released, so it is the only limit that sees quadratic patterns like
+repeated concatenation (`s = s + 'x'` in a loop). Strings are charged the full
+result buffer size; collections the marginal items at one Value slot each.
+Exhaustion fails with `Allocation limit exceeded`; the default is off.
+`ScriptInstance::allocated_bytes()` reports the observed total for calibration.
+Both budgets follow the current call's `ExecutionLimits`: `call` and
+`resume_coroutine` apply their own values, like steps. Cancellation is
+independent and reports `Execution cancelled` regardless of memory budgets.
+
+AST storage
 (bounded separately by `InputLimits::max_ast_bytes`), host allocations,
 allocator overhead and the experimental bytecode VM are outside this budget.
 

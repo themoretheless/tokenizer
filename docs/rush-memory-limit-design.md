@@ -122,6 +122,22 @@ exceeded» (runtime.rs:818), «String byte limit exceeded» (runtime.rs:809).
 
 ### 2c. Кумулятивный бюджет аллокаций за run (`max_allocated_bytes`)
 
+> **Статус: реализовано 2026-10-24 (этот коммит).** Поле `max_allocated_bytes`
+> в `ExecutionLimits` (дефолт off), счётчик `allocated` в `Ledger`
+> (runtime/memory.rs), зарядка в `string_growth` (размер нового буфера
+> результата), `collection_growth` (маргинальные элементы × `size_of::<Value>()`)
+> и `memory::Cover` (рост capacity eager-буферов). Ошибка «Allocation limit
+> exceeded». Уточнения к драфту по коду: (1) `collection_growth` заряжает
+> маргинальные `added`, а не `current + added`, иначе амортизированный рост
+> Vec давал бы ложное квадратичное списание и ломал легальные циклы;
+> (2) резервации Slots/Shared кумулятивно не заряжаются — они под пиковым
+> лимитом, а смешение давало бы неверное сообщение об ошибке; (3) оба бюджета
+> следуют per-call `ExecutionLimits` (`ScriptInstance::call`,
+> `coroutine_limits`), как steps; (4) калибровка —
+> `ScriptInstance::allocated_bytes()`. Тесты — tests/limits.rs (граница
+> «allocated / allocated−1», контроль «2b молчит, 2c ловит», независимость от
+> retained и отмены). Bytecode VM по-прежнему не покрыт.
+
 **Что считается.** Сумма `added` по существующим точкам `string_growth` /
 `collection_growth` (~50 вызовов в expr.rs, calls.rs, stmt.rs, sequence.rs) —
 то есть байты, *запрошенные* операциями за весь run, включая давно освобождённые.

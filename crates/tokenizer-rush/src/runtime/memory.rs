@@ -55,6 +55,10 @@ struct Ledger {
     limit: Cell<usize>,
     live: Cell<usize>,
     peak: Cell<usize>,
+    /// Cumulative requested bytes over the run (grows only). A work budget,
+    /// not a state budget: it also counts storage already released.
+    allocated: Cell<usize>,
+    allocated_limit: Cell<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -72,12 +76,46 @@ pub(super) struct Reservation {
 }
 
 impl Budget {
+    #[cfg(test)]
     pub(super) fn new(limit: usize) -> Self {
+        Self::with_allocated_limit(limit, usize::MAX)
+    }
+
+    pub(super) fn with_allocated_limit(limit: usize, allocated_limit: usize) -> Self {
         Self(Rc::new(Ledger {
             limit: Cell::new(limit),
             live: Cell::new(0),
             peak: Cell::new(0),
+            allocated: Cell::new(0),
+            allocated_limit: Cell::new(allocated_limit),
         }))
+    }
+
+    pub(super) fn allocated_bytes(&self) -> usize {
+        self.0.allocated.get()
+    }
+
+    /// Per-call budget refresh: heap and work limits follow the ExecutionLimits
+    /// of the current call/resume, matching how steps and size limits behave.
+    pub(super) fn set_limits(&self, heap: usize, allocated: usize) {
+        self.0.limit.set(heap);
+        self.0.allocated_limit.set(allocated);
+    }
+
+    /// Charges requested bytes against the cumulative work budget. One
+    /// addition and one comparison; the counter never decreases.
+    pub(super) fn charge_allocated(&self, bytes: usize) -> Result<(), AllocationError> {
+        let next = self
+            .0
+            .allocated
+            .get()
+            .checked_add(bytes)
+            .ok_or(AllocationError::Limit)?;
+        if next > self.0.allocated_limit.get() {
+            return Err(AllocationError::Limit);
+        }
+        self.0.allocated.set(next);
+        Ok(())
     }
 
     #[cfg(test)]
@@ -125,6 +163,14 @@ impl Reservation {
     }
 }
 
+/// Which budget rejected a Cover growth: the peak heap reservation or the
+/// cumulative work budget. The distinction selects the error message.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum CoverError {
+    Heap,
+    Allocated,
+}
+
 /// Tracks requested bytes of plain `Vec` storage built outside Slots/Buffer
 /// (eager operation results) so a finite budget sees transient peaks. The
 /// cover tops its reservation up when the Vec capacity grows and releases it
@@ -147,12 +193,15 @@ impl Cover {
     }
     /// One comparison per element appended; the reservation moves only on
     /// capacity growth. Covers capacity, matching allocator-visible bytes.
-    pub(super) fn cover_vec<T>(&mut self, vec: &Vec<T>) -> Result<(), AllocationError> {
+    /// Growth also charges the cumulative work budget; a run can exceed it
+    /// even when its peak fits.
+    pub(super) fn cover_vec<T>(&mut self, vec: &Vec<T>) -> Result<(), CoverError> {
         let bytes = vec.capacity().saturating_mul(std::mem::size_of::<T>());
         if bytes > self.covered {
-            self.reservation
-                .resize(bytes)
-                .map_err(|_| AllocationError::Limit)?;
+            Budget(self.reservation.ledger.clone())
+                .charge_allocated(bytes - self.covered)
+                .map_err(|_| CoverError::Allocated)?;
+            self.reservation.resize(bytes).map_err(|_| CoverError::Heap)?;
             self.covered = bytes;
         }
         Ok(())

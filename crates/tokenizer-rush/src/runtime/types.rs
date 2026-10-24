@@ -859,6 +859,12 @@ pub struct ExecutionLimits {
     /// default; host allocations, ASTs and values outside the ledger are not
     /// bounded. Exhaustion fails the run with `Heap limit exceeded`.
     pub max_heap_bytes: usize,
+    /// Cumulative requested bytes over the run: a work budget, not a state
+    /// budget. Charged at string/collection growth points and eager-operation
+    /// buffers, including work whose results are already released; the only
+    /// limit that sees quadratic patterns such as repeated concatenation.
+    /// Off by default. Exhaustion fails the run with `Allocation limit exceeded`.
+    pub max_allocated_bytes: usize,
 }
 
 impl ExecutionLimits {
@@ -869,6 +875,7 @@ impl ExecutionLimits {
             max_collection_items: usize::MAX,
             max_string_bytes: usize::MAX,
             max_heap_bytes: usize::MAX,
+            max_allocated_bytes: usize::MAX,
         }
     }
 }
