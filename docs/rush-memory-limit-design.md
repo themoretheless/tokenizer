@@ -36,6 +36,13 @@ runtime/types.rs:843), глубиной, пооперационными разм
 
 ### 2a. Parse-time байтовый лимит (`max_ast_bytes`)
 
+> **Статус: реализовано 2026-10-24 (этот коммит).** Поле `max_ast_bytes`
+> добавлено в `InputLimits` (crates/tokenizer-core/src/limits.rs), дефолт и
+> деривация от `max_input_bytes` — как ниже; учёт — в
+> crates/tokenizer-rush/src/parser.rs (оценка запрошенных байт по узлам,
+> см. `stmt_bytes`/`expr_bytes`); ошибка — диагностика `ast-limit`
+> «Parse output byte limit exceeded»; тесты — crates/tokenizer-rush/tests/limits.rs.
+
 **Что считается.** Байты, удерживаемые результатом `parse_with`: вектор токенов
 `Lexed` и дерево `Module` (ast.rs:39-207). Измеренная плотность — 33–58 Б/байт
 источника (инвентаризация §4), поэтому оценку можно делать либо точно (считающий

@@ -264,8 +264,14 @@ that matched the former shared `Item` / `Stmt` / `Expr` to the exported Rush
 retain bindings/iterables; pipes and matches have their own nodes. Spans use
 UTF-8 byte offsets and borrowed names preserve the original spelling.
 
-`parse_with(source, InputLimits)` enforces input, token, diagnostic and nesting
-budgets. Nesting is capped at 128 even if a larger user budget is supplied.
+`parse_with(source, InputLimits)` enforces input, token, diagnostic, parse-output
+and nesting budgets. The parse-output budget `max_ast_bytes` bounds the retained
+token vector and syntax tree in requested bytes; the default derives from
+`max_input_bytes` at 64 bytes per source byte (measured density is 33-58, see
+docs/benchmarks/rush-memory-inventory-2026-10-24.txt). Exceeding it emits one
+`ast-limit` diagnostic, stops the parse and keeps the result invalid;
+`usize::MAX` opts out. Nesting is capped at 128 even if a larger user budget
+is supplied.
 Token exhaustion emits one terminal error span for the remaining source to
 preserve coverage. Zero diagnostic storage does not turn invalid input valid;
 use `Parse::is_valid()` or the host's `valid` field. `lex` alone checks lexical
