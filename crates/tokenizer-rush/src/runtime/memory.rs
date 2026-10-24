@@ -1622,7 +1622,7 @@ fn sequence_stage_copy_failure_preserves_shared_original() {
     let budget = Budget::new(100_000);
     let stage = super::SequenceStage {
         callback: super::Value::Builtin(super::Builtin::Some),
-        filter: false,
+        kind: super::sequence::StageKind::Map,
         span: themoretheless_tokenizer_core::Span { start: 0, end: 0 },
         module: None,
     };

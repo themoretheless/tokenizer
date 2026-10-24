@@ -15,6 +15,7 @@ use crate::{CancellationToken, ExecutionLimits, RuntimeError, Value};
 
 pub use iterator::{
     BytecodeIterator, BytecodeSequence, BytecodeSequenceSource, BytecodeSequenceStage,
+    BytecodeStageKind,
 };
 pub use opcode::{BytecodeClosure, BytecodeFunction, Chunk, Opcode, Upvalue, UpvalueDescriptor};
 pub use vm::Vm;

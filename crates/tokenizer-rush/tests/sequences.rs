@@ -73,6 +73,125 @@ fn transformations_are_deferred_ordered_and_stop_at_limit() {
 }
 
 #[test]
+fn flat_map_is_lazy_ordered_and_repeatable() {
+    // The callback is deferred until consumption, exactly like map/filter.
+    let source = "mut calls = 0\nfn expand(x) { calls += 1; return [x, x * 10] }\nlet sequence = range_iter(0, 1000000000000) | flat_map(expand)\nassert(calls == 0)\nlet result = sequence | collect(5)\n(result, calls)";
+    assert_eq!(
+        evaluate(source, 500).unwrap(),
+        Value::Tuple(vec![
+            Value::List(vec![
+                Value::Number(0.),
+                Value::Number(0.),
+                Value::Number(1.),
+                Value::Number(10.),
+                Value::Number(2.),
+            ]),
+            Value::Number(3.),
+        ])
+    );
+    // Expansions of one source item are emitted before the next source item,
+    // across map/filter stages on both sides.
+    assert_eq!(
+        evaluate(
+            "iter([1, 2, 3]) | flat_map(x => [x, 0 - x]) | filter(x => x > 0) | map(x => x * 2) | collect(10)",
+            300
+        )
+        .unwrap(),
+        Value::List(vec![
+            Value::Number(2.),
+            Value::Number(4.),
+            Value::Number(6.)
+        ])
+    );
+    // Chained flat_map stages interleave depth-first.
+    assert_eq!(
+        evaluate(
+            "iter([1, 2]) | flat_map(x => [x, x + 10]) | flat_map(x => [x, x * 100]) | collect(10)",
+            300
+        )
+        .unwrap(),
+        Value::List(vec![
+            Value::Number(1.),
+            Value::Number(100.),
+            Value::Number(11.),
+            Value::Number(1100.),
+            Value::Number(2.),
+            Value::Number(200.),
+            Value::Number(12.),
+            Value::Number(1200.),
+        ])
+    );
+    // Empty expansions are skipped without ending consumption.
+    assert_eq!(
+        evaluate(
+            "range_iter(0, 4) | flat_map(x => if x % 2 == 0 { [] } else { [x] }) | collect(4)",
+            300
+        )
+        .unwrap(),
+        Value::List(vec![Value::Number(1.), Value::Number(3.)])
+    );
+    // Repeated consumption restarts the sequence and replays callbacks.
+    let source = "mut calls = 0\nfn expand(x) { calls += 1; return [x] }\nlet seq = iter([1, 2]) | flat_map(expand)\nlet first = collect(seq, 2)\nlet second = collect(seq, 2)\n(first == second, calls)";
+    assert_eq!(
+        evaluate(source, 500).unwrap(),
+        Value::Tuple(vec![Value::Bool(true), Value::Number(4.)])
+    );
+}
+
+#[test]
+fn flat_map_consumption_obeys_budget_and_validates_results() {
+    // An unbounded expansion cannot escape the step budget.
+    assert!(
+        evaluate(
+            "range_iter(0, 1000000000000) | flat_map(x => [x, x]) | fold(0, (a, b) => a + b)",
+            200
+        )
+        .unwrap_err()
+        .message
+        .contains("limit")
+    );
+    // A non-list callback result fails at consumption, not at construction.
+    let error = evaluate("iter([1]) | flat_map(x => x) | collect(1)", 100).unwrap_err();
+    assert!(error.message.contains("must return a list"));
+    // Lists keep the eager one-shot behaviour.
+    assert_eq!(
+        evaluate("[1, 2] | flat_map(x => [x, x])", 100).unwrap(),
+        Value::List(vec![
+            Value::Number(1.),
+            Value::Number(1.),
+            Value::Number(2.),
+            Value::Number(2.)
+        ])
+    );
+}
+
+#[test]
+fn cancellation_from_a_flat_map_callback_stops_consumption() {
+    use std::rc::Rc;
+    use themoretheless_tokenizer_rush::{CancellationToken, HostFunction, Program, ValueType};
+    fn cancel<'s>(args: &[Value<'s>], token: &CancellationToken) -> Result<Value<'s>, String> {
+        token.cancel();
+        Ok(Value::List(vec![args[0].clone()]))
+    }
+    let program =
+        Program::compile("range_iter(0, 1000000000000) | flat_map(stop) | collect(1)").unwrap();
+    let error = program
+        .run_with_host(
+            500,
+            &CancellationToken::default(),
+            &[],
+            &[Rc::new(HostFunction {
+                name: "stop",
+                parameters: vec![ValueType::Number],
+                result: ValueType::List(Box::new(ValueType::Number)),
+                callback: cancel,
+            })],
+        )
+        .unwrap_err();
+    assert!(error.message.to_lowercase().contains("cancel"));
+}
+
+#[test]
 fn loops_and_repeated_consumers_restart_the_sequence() {
     let source = "mut calls = 0\nfn visit(x) { calls += 1; return x }\nlet seq = iter([1,2,3]) | map(visit)\nfor x in seq { break }\nassert(calls == 1)\nlet first = collect(seq, 2)\nlet second = collect(seq, 2)\n(first == second, calls)";
     assert_eq!(
