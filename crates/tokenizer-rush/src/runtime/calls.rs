@@ -182,12 +182,20 @@ impl<'s> Runtime<'_, 's> {
                 }
                 let mut cursor = self.sequence_cursor(source.clone(), span)?;
                 let mut output = Vec::new();
+                let mut cover = memory::Cover::new(&self.memory);
                 for _ in 0..limit {
                     let Some(item) = self.sequence_next(&mut cursor, span)? else {
                         break;
                     };
                     self.charge(1, span)?;
                     output.push(item);
+                    cover.cover_vec(&output).map_err(|e| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
+                        module: self.module.map(str::to_owned),
+                        span,
+                        message: e.message("Runtime collect allocation failed"),
+                    })?;
                 }
                 return Ok(Value::List(output));
             }
@@ -232,7 +240,7 @@ impl<'s> Runtime<'_, 's> {
                         location: None,
                         module: self.module.map(str::to_owned),
                         span,
-                        message: format!("Runtime sequence allocation failed: {e:?}"),
+                        message: e.message("Runtime sequence allocation failed"),
                     })?;
                 return Ok(Value::Sequence(Rc::new(sequence)));
             }
@@ -809,6 +817,7 @@ impl<'s> Runtime<'_, 's> {
                     return Ok(Value::Range { start, end, step });
                 }
                 let mut values = Vec::new();
+                let mut cover = memory::Cover::new(&self.memory);
                 let mut current = start;
                 while if step > 0.0 {
                     current < end
@@ -824,6 +833,13 @@ impl<'s> Runtime<'_, 's> {
                         return self.error(span, "Collection item limit exceeded");
                     }
                     values.push(Value::Number(current));
+                    cover.cover_vec(&values).map_err(|e| RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
+                        module: self.module.map(str::to_owned),
+                        span,
+                        message: e.message("Runtime range allocation failed"),
+                    })?;
                     let next = (values.len() as f64).mul_add(step, start);
                     if !next.is_finite() || next == current {
                         return self.error(span, "Range cannot advance finitely");
@@ -863,6 +879,7 @@ impl<'s> Runtime<'_, 's> {
                 let mut cursor = self.sequence_cursor(source, span)?;
                 let mut positions = BTreeMap::<String, usize>::new();
                 let mut groups = Vec::<(String, Value<'s>)>::new();
+                let mut covers = Vec::<memory::Cover>::new();
                 while let Some(item) = self.sequence_next(&mut cursor, span)? {
                     let key = self.call(
                         callback.clone(),
@@ -881,6 +898,7 @@ impl<'s> Runtime<'_, 's> {
                         self.string_growth(0, field.len(), span)?;
                         let position = groups.len();
                         positions.insert(key.clone(), position);
+                        covers.push(memory::Cover::new(&self.memory));
                         groups.push((
                             key,
                             if reducer.is_some() {
@@ -898,6 +916,13 @@ impl<'s> Runtime<'_, 's> {
                     } else if let Value::List(values) = &mut groups[position].1 {
                         self.collection_growth(values.len(), 1, span)?;
                         values.push(item);
+                        covers[position].cover_vec(values).map_err(|e| RuntimeError {
+                            stack: Vec::new(),
+                            location: None,
+                            module: self.module.map(str::to_owned),
+                            span,
+                            message: e.message("Runtime grouping allocation failed"),
+                        })?;
                     }
                 }
                 let group_shape: RecordShape = Rc::from([String::from("key"), String::from(field)]);
@@ -940,6 +965,7 @@ impl<'s> Runtime<'_, 's> {
                 return self.error(span, "Callback must be callable");
             }
             let mut output = Vec::new();
+            let mut cover = memory::Cover::new(&self.memory);
             while let Some(item) = self.sequence_next(&mut cursor, span)? {
                 let result = if builtin == Builtin::Fold {
                     self.call(
@@ -959,12 +985,26 @@ impl<'s> Runtime<'_, 's> {
                     Builtin::Map => {
                         self.collection_growth(output.len(), 1, span)?;
                         output.push(result);
+                        cover.cover_vec(&output).map_err(|e| RuntimeError {
+                            stack: Vec::new(),
+                            location: None,
+                            module: self.module.map(str::to_owned),
+                            span,
+                            message: e.message("Runtime transform allocation failed"),
+                        })?;
                     }
                     Builtin::FlatMap => match result {
                         Value::List(values) => {
                             self.charge(values.len(), span)?;
                             self.collection_growth(output.len(), values.len(), span)?;
                             output.extend(values);
+                            cover.cover_vec(&output).map_err(|e| RuntimeError {
+                                stack: Vec::new(),
+                                location: None,
+                                module: self.module.map(str::to_owned),
+                                span,
+                                message: e.message("Runtime transform allocation failed"),
+                            })?;
                         }
                         _ => return self.error(span, "Flat map callback must return a list"),
                     },
@@ -972,6 +1012,13 @@ impl<'s> Runtime<'_, 's> {
                         Value::Bool(true) => {
                             self.collection_growth(output.len(), 1, span)?;
                             output.push(item);
+                            cover.cover_vec(&output).map_err(|e| RuntimeError {
+                                stack: Vec::new(),
+                                location: None,
+                                module: self.module.map(str::to_owned),
+                                span,
+                                message: e.message("Runtime transform allocation failed"),
+                            })?;
                         }
                         Value::Bool(false) => {}
                         _ => return self.error(span, "Filter callback must return a boolean"),

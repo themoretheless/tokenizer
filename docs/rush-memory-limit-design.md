@@ -68,6 +68,20 @@ runtime/types.rs:843), глубиной, пооперационными разм
 
 ### 2b. Пиковый heap-бюджет на run (`max_heap_bytes`)
 
+> **Статус: реализовано 2026-10-24 (этот коммит).** Поле `max_heap_bytes`
+> добавлено в `ExecutionLimits` (runtime/types.rs, дефолт `usize::MAX` — off);
+> `Budget` создаётся с конечным лимитом (runtime.rs). Дополнительно к
+> драфту: eager-материализации `range`/`map`/`filter`/`flat_map`/`group_by`/
+> `collect` строятся в обычных `Vec` вне журнала, поэтому добавлен
+> `memory::Cover` (runtime/memory.rs) — резервация, догоняющая capacity
+> вектора и освобождающаяся при выходе из операции; без него пик 98 МБ лимит
+> не увидел бы. Ошибка — «Heap limit exceeded» через
+> `AllocationError::message`; калибровка — `ScriptInstance::peak_heap_bytes()`.
+> Тесты — crates/tokenizer-rush/tests/limits.rs (граница «peak / peak−1»,
+> терминальность корутины, lazy-отказ без протухших резерваций, независимость
+> от retained-data budget). Bytecode VM лимит не применяет (vm.rs:53-63
+> читает только steps/max_depth) — задокументировано в спеке и README.
+
 **Что считается.** Задействовать существующий `Budget`/`Reservation`
 (runtime/memory.rs:53-133), который уже считает байты для `Slots` (ячейки,
 module_cache, буферы последовательностей) и `Shared` (окружения, захваты), но

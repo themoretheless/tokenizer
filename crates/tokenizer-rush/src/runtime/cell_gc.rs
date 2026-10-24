@@ -309,7 +309,7 @@ impl Runtime<'_, '_> {
             location: None,
             module: self.module.map(str::to_owned),
             span,
-            message: format!("Runtime collection allocation failed: {error:?}"),
+            message: error.message("Runtime collection allocation failed"),
         }
     }
 

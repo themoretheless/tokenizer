@@ -840,7 +840,8 @@ impl CancellationToken {
     }
 }
 
-/// Per-execution limits. These do not bound heap memory or blocking host calls.
+/// Per-execution limits. Host allocations and blocking host calls stay unbounded;
+/// `max_heap_bytes` bounds only heap charged through the runtime's ledger.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExecutionLimits {
     pub steps: usize,
@@ -853,6 +854,11 @@ pub struct ExecutionLimits {
     /// UTF-8 bytes in decoded string literals, concatenation results and record keys.
     /// Includes strings in host results/items; allocations inside host calls are not bounded.
     pub max_string_bytes: usize,
+    /// Peak requested heap bytes charged through the runtime's reservation
+    /// ledger (cells, environments, sequence buffers, module cache). Off by
+    /// default; host allocations, ASTs and values outside the ledger are not
+    /// bounded. Exhaustion fails the run with `Heap limit exceeded`.
+    pub max_heap_bytes: usize,
 }
 
 impl ExecutionLimits {
@@ -862,6 +868,7 @@ impl ExecutionLimits {
             max_depth: 64,
             max_collection_items: usize::MAX,
             max_string_bytes: usize::MAX,
+            max_heap_bytes: usize::MAX,
         }
     }
 }

@@ -330,6 +330,19 @@ The evaluator rejects unsupported statements and expressions, unknown names,
 incorrect argument counts, non-finite arithmetic and exhausted execution budgets.
 Expression nesting during evaluation is limited to 64. These limits are not a
 memory sandbox: captured environments and returned collections allocate memory.
+
+`ExecutionLimits::max_heap_bytes` adds an opt-in peak-heap budget for a run or
+instance. It bounds requested bytes charged through the runtime's reservation
+ledger: cells, captured environments, sequence buffers and the transient
+storage of eager `range`/`map`/`filter`/`flat_map`/`group_by`/`collect`
+operations. Exhaustion fails the operation with `Heap limit exceeded`; a
+failed coroutine task is terminated while other tasks in the instance
+continue, and a failed lazy-sequence materialization leaves the instance
+consistent for further calls. `ScriptInstance::peak_heap_bytes()` reports the
+observed peak for calibration. The default is off (`usize::MAX`). AST storage
+(bounded separately by `InputLimits::max_ast_bytes`), host allocations,
+allocator overhead and the experimental bytecode VM are outside this budget.
+
 Variable mutation, host callbacks and 2D polygon execution are supported. Parsing a construct does not yet imply that it can be evaluated.
 
 Collection functions are first-class values: `map(list, callback)`,

@@ -311,7 +311,7 @@ impl<'s> Runtime<'_, 's> {
                     location: None,
                     module: self.module.map(str::to_owned),
                     span,
-                    message: format!("Runtime cell allocation failed: {error:?}"),
+                    message: error.message("Runtime cell allocation failed"),
                 })?;
             // Reserve every table, including reclamation queues, before
             // publishing a cell. Dropping a cell ID must never allocate.
@@ -373,7 +373,7 @@ impl<'s> Runtime<'_, 's> {
             location: None,
             module: self.module.map(str::to_owned),
             span,
-            message: format!("Runtime environment allocation failed: {error:?}"),
+            message: error.message("Runtime environment allocation failed"),
         }
     }
 }

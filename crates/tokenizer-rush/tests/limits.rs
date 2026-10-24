@@ -19,6 +19,7 @@ fn depth_limit_is_per_run_and_shared_with_modules() {
                 max_depth: 4,
                 max_collection_items: usize::MAX,
                 max_string_bytes: usize::MAX,
+                max_heap_bytes: usize::MAX,
             },
             &cancellation,
             &[],
@@ -53,6 +54,7 @@ fn depth_limit_is_per_run_and_shared_with_modules() {
                     max_depth: 65,
                     max_collection_items: usize::MAX,
                     max_string_bytes: usize::MAX,
+                    max_heap_bytes: usize::MAX,
                 },
                 &cancellation,
                 &[],
@@ -85,6 +87,7 @@ fn zero_limits_stop_before_host_callbacks_and_cancellation_stays_sticky() {
             max_depth: 0,
             max_collection_items: usize::MAX,
             max_string_bytes: usize::MAX,
+            max_heap_bytes: usize::MAX,
         },
     ] {
         assert!(
@@ -533,4 +536,157 @@ fn ast_byte_limit_respects_the_diagnostic_budget() {
     );
     assert!(!silent.is_valid());
     assert!(silent.diagnostics.is_empty());
+}
+
+#[test]
+fn heap_limit_bounds_eager_peaks_at_a_reproducible_boundary() {
+    let program = Program::compile(
+        "range(0,100000) | map(x => x * 2) | filter(x => x % 3 == 0) | fold(0, (sum,x) => sum + x)",
+    )
+    .unwrap();
+    let token = CancellationToken::default();
+    let steps = 100_000 * 100 + 100_000;
+    // Off by default: the run succeeds and reports its ledger peak.
+    let script = program
+        .instantiate(ExecutionLimits::new(steps), &token, &[], &[], &[], &[])
+        .unwrap();
+    let peak = script.peak_heap_bytes();
+    assert!(peak > 1_000_000, "eager peak should be ledger-visible: {peak}");
+    drop(script);
+    // The boundary is reproducible: exactly peak succeeds, peak - 1 fails.
+    let script = program
+        .instantiate(
+            ExecutionLimits {
+                max_heap_bytes: peak,
+                ..ExecutionLimits::new(steps)
+            },
+            &token,
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+    assert_eq!(script.peak_heap_bytes(), peak);
+    drop(script);
+    let error = program
+        .instantiate(
+            ExecutionLimits {
+                max_heap_bytes: peak - 1,
+                ..ExecutionLimits::new(steps)
+            },
+            &token,
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .err()
+        .expect("peak - 1 must fail");
+    assert_eq!(error.message, "Heap limit exceeded");
+}
+
+#[test]
+fn heap_limit_terminates_only_the_failing_coroutine() {
+    let program = Program::compile(
+        "fn big() { let items = range(0, 100000); yield len(items); return 1 }; fn small() { yield 1; return 2 }",
+    )
+    .unwrap();
+    let token = CancellationToken::default();
+    let limits = ExecutionLimits {
+        max_heap_bytes: 100_000,
+        ..ExecutionLimits::new(10_000_000)
+    };
+    let mut script = program
+        .instantiate(limits, &token, &[], &[], &[], &[])
+        .unwrap();
+    let steps = ExecutionLimits::new(10_000_000);
+    let big = script.spawn_coroutine("big", &[], steps).unwrap();
+    let small = script.spawn_coroutine("small", &[], steps).unwrap();
+    // The failing task is terminated by the limit; the instance ledger
+    // releases the task's reservations when its frames drop.
+    let error = script.resume_coroutine(big, steps).unwrap_err();
+    assert_eq!(error.message, "Heap limit exceeded");
+    assert!(script.resume_coroutine(big, steps).is_err());
+    // Other tasks in the same instance continue.
+    assert_eq!(
+        script.resume_coroutine(small, steps).unwrap(),
+        themoretheless_tokenizer_rush::CoroutineState::Yielded(Value::Number(1.))
+    );
+    assert_eq!(
+        script.resume_coroutine(small, steps).unwrap(),
+        themoretheless_tokenizer_rush::CoroutineState::Complete(Value::Number(2.))
+    );
+}
+
+#[test]
+fn heap_limit_stops_lazy_materialization_mid_iteration_without_side_effects() {
+    let program = Program::compile(
+        "mut runs = 0; fn collect_many() { runs += 1; return range_iter(0, 100000) | collect(100000) | len }; fn collect_few() { return range_iter(0, 1000) | collect(1000) | len }; fn tick() { return runs }; {collect_many:collect_many, collect_few:collect_few, tick:tick}",
+    )
+    .unwrap();
+    let token = CancellationToken::default();
+    let limits = ExecutionLimits {
+        max_heap_bytes: 200_000,
+        ..ExecutionLimits::new(10_000_000)
+    };
+    let mut script = program
+        .instantiate(limits, &token, &[], &[], &[], &[])
+        .unwrap();
+    let error = script.call("collect_many", &[], limits).unwrap_err();
+    assert_eq!(error.message, "Heap limit exceeded");
+    // No stale reservations: the same instance still runs within the budget.
+    assert_eq!(
+        script.call("tick", &[], limits).unwrap(),
+        Value::Number(1.)
+    );
+    assert_eq!(
+        script.call("collect_few", &[], limits).unwrap(),
+        Value::Number(1000.)
+    );
+}
+
+#[test]
+fn heap_limit_and_retained_data_limit_are_independent() {
+    let program = Program::compile(
+        "mut kept = []; fn grow() { kept = range(0, 1000); return len(kept) }; {grow:grow}",
+    )
+    .unwrap();
+    let token = CancellationToken::default();
+    let steps = ExecutionLimits::new(1_000_000);
+    // Retained budget tight, heap budget off: only the state limit fires.
+    let mut script = program
+        .instantiate(steps, &token, &[], &[], &[], &[])
+        .unwrap();
+    let base = script.memory_usage();
+    script.set_memory_limit(base + 1000).unwrap();
+    let error = script.call("grow", &[], steps).unwrap_err();
+    assert_eq!(error.message, "Instance retained-data limit exceeded");
+    drop(script);
+    // Heap budget tight, retained budget off: only the execution limit fires.
+    // The instantiate-time peak (builtins environment) must fit; grow() adds
+    // a 1000-element range cover well above the headroom.
+    let probe = program
+        .instantiate(steps, &token, &[], &[], &[], &[])
+        .unwrap();
+    let baseline_peak = probe.peak_heap_bytes();
+    drop(probe);
+    let heap = ExecutionLimits {
+        max_heap_bytes: baseline_peak + 1000,
+        ..ExecutionLimits::new(1_000_000)
+    };
+    let mut script = program
+        .instantiate(heap, &token, &[], &[], &[], &[])
+        .unwrap();
+    let error = script.call("grow", &[], heap).unwrap_err();
+    assert_eq!(error.message, "Heap limit exceeded");
+    drop(script);
+    // Both off: the same call succeeds.
+    let mut script = program
+        .instantiate(steps, &token, &[], &[], &[], &[])
+        .unwrap();
+    assert_eq!(
+        script.call("grow", &[], steps).unwrap(),
+        Value::Number(1000.)
+    );
 }
