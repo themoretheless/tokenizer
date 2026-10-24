@@ -950,8 +950,8 @@ binding or alias; mutable source bindings do not retain their initial shape. Sha
 bindings use their own metadata. Static diagnostics reject member access on
 known unsupported values (such as numbers, booleans, strings, lists and null);
 unknown parameter types remain checked at runtime. A trailing dot supports limited completion
-recovery; arbitrary incomplete syntax, dynamic fields and call results are not
-inferred by this completion path.
+recovery; arbitrary incomplete syntax, dynamic index keys and calls with an
+unknown result type are not inferred by this completion path.
 
 
 ### Cancellation latency benchmark
@@ -1227,7 +1227,10 @@ filters them by the typed prefix and inserts a plain field access. Computed or
 string keys and mutable records are not inferred yet. Analysis follows known
 nested record fields and preserves their value types. Completion follows known
 dotted paths such as `config.camera.position.` and offers vector components.
-Calls and indexing within the completion path are not supported yet.
+Literal indexing (`config["camera"].`, `[vec3(1,2,3)][0].`) and calls with a
+known result type (builtins, host functions, annotated user functions, `vecN`
+constructors) continue the completion path; dynamic keys and calls with an
+unknown result type yield no candidates.
 
 ### Record processing with JSON owned by the host
 
