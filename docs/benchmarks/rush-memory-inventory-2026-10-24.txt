@@ -1,0 +1,167 @@
+Rush memory accounting inventory, 2026-10-24, branch language-improvements
+Machine: Apple Silicon macOS, release/bench profile, no parallel builds during series
+Commands:
+  cargo bench --locked -p themoretheless-tokenizer-rush --bench memory
+  RUSH_MEMORY_ITEMS=1000 cargo bench --locked -p themoretheless-tokenizer-rush --bench memory
+  RUSH_MEMORY_CASE=grouping cargo bench --locked -p themoretheless-tokenizer-rush --bench memory
+  RUSH_MEMORY_CASE=cells cargo bench --locked -p themoretheless-tokenizer-rush --bench memory
+  cargo bench --locked -p themoretheless-tokenizer-rush --bench inventory   # new probe bench
+
+=====================================================================
+1. What is accounted today (code references)
+=====================================================================
+Steps / evaluation budget:
+  runtime/types.rs:843-866    ExecutionLimits { steps, max_depth, max_collection_items, max_string_bytes }
+  runtime.rs:730-734          Runtime fields remaining, depth, max_depth, max_collection_items, max_string_bytes
+  runtime.rs:829-845          charge(): per-operation step decrement, "Execution limit exceeded"
+Input limits (count/size of source, not heap):
+  crates/tokenizer-core/src/limits.rs:7-24  InputLimits { max_input_bytes 16MiB, max_tokens 1M, max_diagnostics 256, max_depth 128 }
+  lexer.rs:29               token count check
+Per-value (not cumulative) size checks:
+  runtime.rs:804-821        string_growth / collection_growth: current+added vs limit, per operation
+  expr.rs:51,61,68          string decode / interpolation growth
+  expr.rs:583               string concatenation a+b (checks result size only)
+  expr.rs:227,253-265,666-680  list literals, mesh/polygon construction
+  calls.rs:375-407,462-502  builtins producing strings (repeat/join etc.)
+  calls.rs:769-771,875-960  zip/group_by/fold_by collection growth
+  runtime.rs:760-803        host_value_size: validates host-returned values AFTER allocation
+Retained-data budget (instance-level, checked at boundaries):
+  runtime.rs:736-737        memory_limit, initial_data_bytes
+  runtime/instance.rs:260-383  Usage::value/environment: logical retained bytes (size_of-based, capacities)
+  runtime/instance.rs:420-437  enforce_retained_limit
+  runtime/instance.rs:442-466  set_memory_limit / enforce_memory_limit ("Instance retained-data limit exceeded")
+  runtime/instance.rs:550-565  enforce_cell_limit (cell writes)
+  runtime/coroutine.rs:398,479, runtime/instance.rs:118, runtime/model.rs:366  enforcement points
+Byte-counting allocator with reservations (exists but limit is usize::MAX at runtime.rs:584):
+  runtime/memory.rs:53-133  Budget/Reservation ledger (live + peak bytes)
+  runtime/memory.rs:551-644 Shared<T> ref-counted nodes (environments)
+  runtime/memory.rs:664-810 Slots<T> storage (cells, module_cache, loading, free_cells, cell_ids)
+  runtime.rs:717-727        cells/module_cache/loading/free_cells/cell_ids use memory::Slots
+  env.rs:194-213, calls.rs:1028, stmt.rs:571  Environment via memory::Shared
+  sequence.rs:177-226       memory::Buffer for sequence materialization
+  NOTE: Budget::new(usize::MAX) at runtime.rs:584 — bytes are counted but never limited.
+
+=====================================================================
+2. Allocation paths NOT covered by any limit or counter
+=====================================================================
+- AST nodes after parse (Box<Expr>, Vec<Stmt>, Vec<Parameter>, MatchArm, InterpolationPart):
+  ast.rs:39-207; parser allocates freely, bounded only by max_tokens count (lexer.rs:29), not bytes.
+  Parse output (AST + tokens) is retained for the whole Program lifetime and never enters
+  retained_usage() (instance.rs:260-383 covers only runtime Values and environments).
+- Lexer token vector itself (LexToken = kind+span, ~16 B/token): fullkit.rs:62-71.
+- Transient evaluation buffers: eager sequence materialization peaks (see §3),
+  temporary Vec in arithmetic/concat (expr.rs:583 builds a new String per `+`).
+- Closure captures / environments: counted by Budget (usize::MAX) but not by any enforced limit.
+- Host callbacks: native allocations inside host calls are explicitly unbounded
+  (types.rs:843 "do not bound heap memory or blocking host calls",
+   instance.rs:259 "host-owned allocations are opaque");
+  host results are checked only after allocation (runtime.rs:760-803).
+- Process RSS / allocator retention: not tracked (MallocLargeCache policy, docs/rush-performance.md:280-340).
+
+=====================================================================
+3. Measurements: transient peak vs retained (benches/memory.rs)
+=====================================================================
+Requested heap bytes; realloc counts as one call; result dropped before retained reading.
+workload	items	run	peak_extra_bytes	live_after_drop_bytes	allocation_calls
+eager	1000	1	113120	0	2423
+eager	1000	2	113120	0	2423
+eager	1000	3	113120	0	2423
+lazy	1000	1	20800	0	2395
+lazy	1000	2	20800	0	2395
+lazy	1000	3	20800	0	2395
+eager	100000	1	11107424	0	233444
+eager	100000	2	11107424	0	233444
+eager	100000	3	11107424	0	233444
+lazy	100000	1	20800	0	233395
+lazy	100000	2	20800	0	233395
+lazy	100000	3	20800	0	233395
+eager	1000000	1	98347616	0	2333453
+eager	1000000	2	98347616	0	2333453
+eager	1000000	3	98347616	0	2333453
+lazy	1000000	1	20800	0	2333395
+lazy	1000000	2	20800	0	2333395
+lazy	1000000	3	20800	0	2333395
+
+RUSH_MEMORY_ITEMS=1000 (identical to the 1000 rows of the full run):
+eager	1000	1	113120	0	2423
+eager	1000	2	113120	0	2423
+eager	1000	3	113120	0	2423
+lazy	1000	1	20800	0	2395
+lazy	1000	2	20800	0	2395
+lazy	1000	3	20800	0	2395
+
+RUSH_MEMORY_CASE=grouping:
+workload	items	run	peak_extra_bytes	live_after_drop_bytes	allocation_calls
+group_by	1000	1	164566	0	3154
+group_by	1000	2	164566	0	3154
+group_by	1000	3	164566	0	3154
+fold_by	1000	1	21136	0	3056
+fold_by	1000	2	21136	0	3056
+fold_by	1000	3	21136	0	3056
+group_by	100000	1	15910870	0	300168
+group_by	100000	2	15910870	0	300168
+group_by	100000	3	15910870	0	300168
+fold_by	100000	1	21136	0	300056
+fold_by	100000	2	21136	0	300056
+fold_by	100000	3	21136	0	300056
+fold_by	1000000	1	21136	0	3000056
+fold_by	1000000	2	21136	0	3000056
+fold_by	1000000	3	21136	0	3000056
+
+RUSH_MEMORY_CASE=cells:
+workload	items	run	peak_extra_bytes	live_after_drop_bytes	allocation_calls
+local_cells	100	1-3	10052	0	1294
+call_cells	100	1-3	10852	0	1396
+escaped_cell	100	1-3	11552	0	1303
+cyclic_cells	100	1-3	75396	0	2779
+local_cells	1000	1-3	11832	0	12184
+call_cells	1000	1-3	12632	0	13186
+escaped_cell	1000	1-3	13332	0	12205
+cyclic_cells	1000	1-3	75396	0	26909
+local_cells	10000	1-3	39012	0	120814
+call_cells	10000	1-3	39812	0	130822
+escaped_cell	10000	1-3	40512	0	121302
+cyclic_cells	10000	1-3	75396	0	268753
+
+Peak/live reading: live heap after every run and after dropping the result is 0,
+while the in-run peak reaches 98.3 MB (eager 1M) and 15.9 MB (group_by 100k) —
+the entire transient working set is invisible to any retained/live limit.
+Lazy streaming keeps peak at ~21 KB regardless of item count (contrast: 98 MB eager).
+
+=====================================================================
+4. AST vs source size (benches/inventory.rs, RUSH_INVENTORY_CASE unset or =ast)
+=====================================================================
+retained_parse_bytes = AST + token vector held by Parse, measured via counting allocator.
+file	source_bytes	tokens	ast_nodes	retained_parse_bytes	peak_extra_bytes	allocation_calls	retained_per_source_byte	nodes_per_100_source_bytes
+examples/scripts/flower.r	287	98	45	9576	13496	46	33.37	15.7
+examples/scripts/spiral.r	157	60	31	5664	8064	35	36.08	19.7
+examples/scripts/coroutine-motion.r	330	97	27	8144	12024	29	24.68	8.2
+<generated 2000 declarations>	66696	44023	20008	3841672	5602592	16044	57.60	30.0
+
+Parse output retained ~= 33-58 bytes per source byte (~0.66 tokens/byte,
+~10-30 AST nodes per 100 source bytes). A 16 MiB source (max_input_bytes default)
+implies roughly 0.5-0.9 GiB of parse-side heap, none of it covered by any limit
+except the token COUNT (max_tokens, lexer.rs:29).
+
+=====================================================================
+5. String concatenation transient spike (benches/inventory.rs, =concat)
+=====================================================================
+Source: mut s = ''; for i in range_iter(0,N) { s = s + 'x' }; s
+workload	iterations	run	peak_extra_bytes	cumulative_alloc_bytes	live_result_bytes	allocation_calls
+concat	100	1	20560	59390	100	521
+concat	100	2	20560	59390	100	521
+concat	100	3	20560	59390	100	521
+concat	1000	1	24160	2541140	1000	5021
+concat	1000	2	24160	2541140	1000	5021
+concat	1000	3	24160	2541140	1000	5021
+concat	10000	1	60160	250108640	10000	50021
+concat	10000	2	60160	250108640	10000	50021
+concat	10000	3	60160	250108640	10000	50021
+
+1000 iterations: 2.54 MB cumulatively allocated for a 1000-byte live result (~2541x).
+10000 iterations: 250.1 MB cumulative for a 10 KB result (~25000x) — quadratic, as expected.
+max_string_bytes (expr.rs:583) caps only the CURRENT string length; cumulative work
+and allocator churn are invisible to every existing limit. Peak stays small (~60 KB
+at 10k iterations) because each intermediate string is freed on the next iteration,
+so even a peak-heap counter would miss the quadratic cost; only cumulative accounting
+(or the steps budget) sees it.

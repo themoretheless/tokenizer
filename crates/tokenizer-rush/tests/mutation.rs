@@ -79,6 +79,22 @@ fn struct_field_type_violation_is_rejected() {
 }
 
 #[test]
+fn nested_struct_field_mutation_keeps_declared_types() {
+    let script = "struct Inner { v: number }\nstruct Outer { inner: Inner }\nmut o = Outer({ inner: Inner({ v: 1 }) })\no.inner.v = 42\no.inner = Inner({ v: 7 })\no.inner.v";
+    assert_eq!(evaluate(script, 1000).unwrap(), Value::Number(7.0));
+
+    // A plain record does not satisfy a nominal struct field.
+    let bad = "struct Inner { v: number }\nstruct Outer { inner: Inner }\nmut o = Outer({ inner: Inner({ v: 1 }) })\no.inner = { v: 2 }";
+    let err = evaluate(bad, 1000).unwrap_err();
+    assert_eq!(err.message, "Assignment violates variable type");
+
+    // A nested write that violates the inner field type is rejected and rolled back.
+    let bad_nested = "struct Inner { v: number }\nstruct Outer { inner: Inner }\nmut o = Outer({ inner: Inner({ v: 1 }) })\no.inner.v = 'bad'";
+    let err = evaluate(bad_nested, 1000).unwrap_err();
+    assert_eq!(err.message, "Assignment violates variable type");
+}
+
+#[test]
 fn vector_component_mutation_via_member_and_index() {
     let script = "mut v = vec3(1, 2, 3); v.x = 10; v.y += 20; v[2] *= 4; v";
     let res = evaluate(script, 1000).unwrap();

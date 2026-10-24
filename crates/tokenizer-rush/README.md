@@ -389,8 +389,12 @@ range_iter(0, 1000000000000)
 `collect(sequence, maximum)` returns at most `maximum` results, without requesting
 an extra item. The maximum is a required nonnegative integer; zero invokes no
 callbacks. `for`, `fold`, `any`, and `all` consume sequences directly. `any` and
-`all` stop as soon as their answer is known. `flat_map` accepts sequences but
-still collects its output eagerly.
+`all` stop as soon as their answer is known. `flat_map` is eager for lists and
+deferred for sequences: each callback result's items are emitted one at a time
+before the next source item, the buffered expansion counts against the
+collection-item limit, and consumption stays within the step budget and
+cancellation token. A non-list callback result is a runtime error at
+consumption time.
 
 Transformations run in order for each input. Reusing a sequence starts it again
 and reruns callbacks, including side effects on captured mutable variables.
@@ -435,8 +439,10 @@ remain separate work.
 to recompute with new finite numeric parameters. Each run starts with a fresh
 environment and budget. Input names must be unique and cannot replace builtins;
 script declarations can shadow inputs. Input name lifetimes follow the program
-source lifetime. `run_with_host` accepts typed callbacks (described below);
-opaque application-owned objects remain unimplemented.
+source lifetime. `run_with_host` accepts typed callbacks (described below). Opaque
+application-owned objects are supported as `HostObject` references: registered
+functions accept and return them under `ValueType::HostObject` contracts,
+while scripts see identity-comparable aliases (described below).
 
 `CancellationToken` is cloneable and can be cancelled from another thread.
 Cancellation is checked at statement/expression boundaries, function calls and
@@ -465,8 +471,11 @@ and null. Arguments are checked before calling Rust; results are checked afterwa
 Registered functions can be passed to `map` and called through pipelines.
 Callbacks receive the cancellation token and return `Result<Value, String>`.
 They must cooperate with cancellation; Rush cannot preempt native code, catch
-all native failures or account for native allocations. Stateful closures and
-opaque application objects are not supported by this initial callback interface.
+all native failures or account for native allocations. Stateful closures are
+supported through `HostRegistration::new`, which captures application state
+(for example `Rc<RefCell<Scene>>`) next to the public signature, and opaque
+application objects are supported as `HostObject` references (both described
+below).
 Signatures are public metadata. `analyze_host_calls(source, &functions)` uses
 the same registrations for static argument-count checks and provably incompatible
 argument types, including pipelines and immutable aliases. Local declarations
@@ -497,7 +506,9 @@ Runtime annotations support `number` (`f64`), `bool`, `vec2`, `vec3`, `vec4`,
 `polygon` and recursive `list[T]` types. Named function parameter/result contracts
 and constant annotations use the same `ValueType` checks as host functions.
 Unknown annotations produce errors when their declarations execute. This is
-runtime validation; static inference and user-defined types remain planned.
+runtime validation; whole-program static inference remains planned, while
+user-defined `struct` and `enum` declarations (described below) already extend
+these contracts to nominal named types.
 
 ### 3D transformation matrices
 
@@ -550,7 +561,8 @@ Strings support single/double quotes, Unicode text, `\n`, `\r`, `\t`, escaped
 quotes and backslashes. Unknown escapes fail during evaluation. Strings concatenate
 with `+` and support `string` contracts. Equality compares data values structurally;
 comparing a function encountered during structural traversal is an error. Record
-patterns are supported; named record type declarations remain planned.
+patterns are supported, and `struct` declarations (described below) provide
+nominal named record types with checked fields.
 
 Structural comparison consumes execution budget for traversed values, strings,
 record keys and polygon points. Nested collections use an explicit work list.
@@ -614,9 +626,12 @@ cryptographic randomness or multidimensional gradient noise.
 Built-in variants `Some(value)`, `None()`, `Ok(value)` and `Err(error)` support
 explicit optional/results data. Match arms can use nested constructor patterns,
 for example `Some(Ok(x)) => x`. Bindings belong to the selected arm and are
-immutable. Missing matches fail at runtime. These are initial built-in variants;
-user-defined algebraic types, exhaustiveness
-checking and automatic error propagation are still planned.
+immutable. Missing matches fail at runtime. Beyond these built-ins, user-defined
+`enum` declarations provide nominal algebraic types, known enums/booleans and
+annotated Option/Result require exhaustive unguarded coverage at compile time,
+and the postfix `?` operator propagates None/Err from the nearest named
+function (all described below). Missing-match failures for unknown dynamic
+values remain runtime errors.
 
 `Option[T]`, `Result[T, E]` and `tuple[T, U, ...]` annotations validate nested
 payload types at runtime and are also available through `ValueType` for host
@@ -711,6 +726,8 @@ WASM package (`npm run build:pages` in `playground`).
 `flat_map(list, callback)` maps each item to a list and concatenates those lists
 in input order, flattening exactly one level. It also accepts pipeline syntax:
 `[1, 2] | flat_map(x => [x, x * 10])` produces `[1, 10, 2, 20]`.
+Over a sequence the transformation is deferred like `map`/`filter` and emits the
+expanded items one at a time before reading the next source item.
 Returning a non-list is an error. Each emitted item consumes execution budget,
 including when callbacks return an existing list.
 
@@ -933,8 +950,8 @@ binding or alias; mutable source bindings do not retain their initial shape. Sha
 bindings use their own metadata. Static diagnostics reject member access on
 known unsupported values (such as numbers, booleans, strings, lists and null);
 unknown parameter types remain checked at runtime. A trailing dot supports limited completion
-recovery; arbitrary incomplete syntax, dynamic fields and call results are not
-inferred by this completion path.
+recovery; arbitrary incomplete syntax, dynamic index keys and calls with an
+unknown result type are not inferred by this completion path.
 
 
 ### Cancellation latency benchmark
@@ -1130,7 +1147,9 @@ might contain fewer items. The source expression itself is evaluated normally.
 Zero permits empty ranges and `collect(..., 0)`. Literal length is checked before
 any element is evaluated. Eager transforms check before appending/extending output;
 the callback producing an overflowing result has already run, so its side effects
-are not rolled back. Flat-map errors close an open source without reading another
+are not rolled back. A deferred `flat_map` bounds its buffered expansion the same
+way while the sequence is consumed. Flat-map errors close an open source without
+reading another
 item. Each nested collection has its own length bound.
 
 This is the first part of data-size enforcement: other constructors, element sizes,
@@ -1208,7 +1227,10 @@ filters them by the typed prefix and inserts a plain field access. Computed or
 string keys and mutable records are not inferred yet. Analysis follows known
 nested record fields and preserves their value types. Completion follows known
 dotted paths such as `config.camera.position.` and offers vector components.
-Calls and indexing within the completion path are not supported yet.
+Literal indexing (`config["camera"].`, `[vec3(1,2,3)][0].`) and calls with a
+known result type (builtins, host functions, annotated user functions, `vecN`
+constructors) continue the completion path; dynamic keys and calls with an
+unknown result type yield no candidates.
 
 ### Record processing with JSON owned by the host
 

@@ -2,6 +2,7 @@
 //! zero-allocation builtin dispatch, and ExecutionLimits / CancellationToken support.
 use crate::bytecode::iterator::{
     BytecodeIterator, BytecodeSequence, BytecodeSequenceSource, BytecodeSequenceStage,
+    BytecodeStageKind,
 };
 use crate::bytecode::opcode::{
     BytecodeClosure, BytecodeFunction, Chunk, Opcode, PathTarget, Upvalue,
@@ -2612,7 +2613,7 @@ impl<'c> Vm<'c> {
                             },
                             stages: vec![BytecodeSequenceStage {
                                 callback: callback.clone(),
-                                filter: false,
+                                kind: BytecodeStageKind::Map,
                                 span,
                             }],
                         };
@@ -2622,7 +2623,7 @@ impl<'c> Vm<'c> {
                         let mut stages = seq.stages.clone();
                         stages.push(BytecodeSequenceStage {
                             callback: callback.clone(),
-                            filter: false,
+                            kind: BytecodeStageKind::Map,
                             span,
                         });
                         Ok(Value::BytecodeSequence(Rc::new(BytecodeSequence {
@@ -2646,19 +2647,51 @@ impl<'c> Vm<'c> {
                 if args.len() != 2 {
                     return Err(self.error(span, "flat_map requires a list and a callback"));
                 }
-                let (Value::List(items), callback) = (&args[0], &args[1]) else {
-                    return Err(self.error(span, "flat_map requires a list and a callback"));
-                };
-                let mut output = Vec::new();
-                for item in items {
-                    let Value::List(values) =
-                        self.invoke_callable(callback, std::slice::from_ref(item), span)?
-                    else {
-                        return Err(self.error(span, "flat_map callback must return a list"));
-                    };
-                    output.extend(values);
+                let (source, callback) = (&args[0], &args[1]);
+                match source {
+                    Value::Range { start, end, step } => {
+                        let seq = BytecodeSequence {
+                            source: BytecodeSequenceSource::Range {
+                                start: *start,
+                                end: *end,
+                                step: *step,
+                            },
+                            stages: vec![BytecodeSequenceStage {
+                                callback: callback.clone(),
+                                kind: BytecodeStageKind::FlatMap,
+                                span,
+                            }],
+                        };
+                        Ok(Value::BytecodeSequence(Rc::new(seq)))
+                    }
+                    Value::BytecodeSequence(seq) => {
+                        let mut stages = seq.stages.clone();
+                        stages.push(BytecodeSequenceStage {
+                            callback: callback.clone(),
+                            kind: BytecodeStageKind::FlatMap,
+                            span,
+                        });
+                        Ok(Value::BytecodeSequence(Rc::new(BytecodeSequence {
+                            source: seq.source.clone(),
+                            stages,
+                        })))
+                    }
+                    Value::List(items) => {
+                        let mut output = Vec::new();
+                        for item in items {
+                            let Value::List(values) =
+                                self.invoke_callable(callback, std::slice::from_ref(item), span)?
+                            else {
+                                return Err(
+                                    self.error(span, "flat_map callback must return a list")
+                                );
+                            };
+                            output.extend(values);
+                        }
+                        Ok(Value::List(output))
+                    }
+                    _ => Err(self.error(span, "flat_map requires a list or sequence and a callback")),
                 }
-                Ok(Value::List(output))
             }
             Builtin::Filter => {
                 if args.len() != 2 {
@@ -2675,7 +2708,7 @@ impl<'c> Vm<'c> {
                             },
                             stages: vec![BytecodeSequenceStage {
                                 callback: callback.clone(),
-                                filter: true,
+                                kind: BytecodeStageKind::Filter,
                                 span,
                             }],
                         };
@@ -2685,7 +2718,7 @@ impl<'c> Vm<'c> {
                         let mut stages = seq.stages.clone();
                         stages.push(BytecodeSequenceStage {
                             callback: callback.clone(),
-                            filter: true,
+                            kind: BytecodeStageKind::Filter,
                             span,
                         });
                         Ok(Value::BytecodeSequence(Rc::new(BytecodeSequence {

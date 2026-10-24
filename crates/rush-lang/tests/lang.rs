@@ -360,3 +360,174 @@ fn control_flow_errors_are_stable() {
     }
     assert_eq!(drained, Err(RushError::CallTooDeep));
 }
+
+#[test]
+fn break_exits_for_and_foreach_loops() {
+    // `break` ends the loop after the current command, mid-word-list.
+    let executed = ok("for n in a b c:\n    echo $n\n    break\necho after\n");
+    assert_eq!(executed, vec!["echo $n", "echo after"]);
+
+    // Same for a host-fed `foreach` loop.
+    let (executed, outcome) = run_with_sources(
+        "foreach f in ls:\n    echo $f\n    break\necho after\n",
+        &[],
+        &[("ls", "one two three")],
+    );
+    assert_eq!(outcome.map(|_| ()), Ok(()));
+    assert_eq!(executed, vec!["echo $f", "echo after"]);
+
+    // A `break` in a dead branch does not fire.
+    let executed =
+        ok("for n in a b:\n    if 1 = 2:\n        break\n    echo $n\necho done\n");
+    assert_eq!(executed, vec!["echo $n", "echo $n", "echo done"]);
+}
+
+#[test]
+fn continue_skips_to_the_next_iteration() {
+    let executed = ok(
+        "for n in a b c:\n    if $n = b:\n        continue\n    echo $n\necho done\n",
+    );
+    assert_eq!(executed, vec!["echo $n", "echo $n", "echo done"]);
+
+    // `continue` skips the rest of the body, not just one line.
+    let executed =
+        ok("for n in a b:\n    echo one-$n\n    continue\n    echo two-$n\necho done\n");
+    assert_eq!(executed, vec!["echo one-$n", "echo one-$n", "echo done"]);
+
+    // Same for `foreach`.
+    let (executed, outcome) = run_with_sources(
+        "foreach f in ls:\n    if $f = b:\n        continue\n    echo $f\necho done\n",
+        &[],
+        &[("ls", "a b c")],
+    );
+    assert_eq!(outcome.map(|_| ()), Ok(()));
+    assert_eq!(executed, vec!["echo $f", "echo $f", "echo done"]);
+}
+
+#[test]
+fn loop_control_outside_a_loop_is_an_error() {
+    let mut interp = Interpreter::new();
+    assert_eq!(
+        interp.step("break"),
+        Err(RushError::LoopControlOutsideLoop)
+    );
+    let mut interp = Interpreter::new();
+    assert_eq!(
+        interp.step("continue"),
+        Err(RushError::LoopControlOutsideLoop)
+    );
+
+    // A `fn` body is its own replay frame, not a loop: `break` inside a
+    // function errors even when the call site is top level.
+    let (_, outcome) = run("fn stop:\n    break\nstop\n", &[]);
+    assert_eq!(outcome, Err(RushError::LoopControlOutsideLoop));
+}
+
+#[test]
+fn loop_control_does_not_cross_the_fn_boundary() {
+    // Documented behaviour: a `fn` call is a hard boundary for loop
+    // control. `break`/`continue` inside a function called from a loop
+    // body errors (`LoopControlOutsideLoop`) instead of punching through
+    // to the caller's loop — the callee's replay frame is not a loop.
+    let (_, outcome) = run("fn stop:\n    break\nfor n in a b:\n    stop\necho after\n", &[]);
+    assert_eq!(outcome, Err(RushError::LoopControlOutsideLoop));
+
+    let (_, outcome) = run("fn skip:\n    continue\nfor n in a b:\n    skip\n", &[]);
+    assert_eq!(outcome, Err(RushError::LoopControlOutsideLoop));
+
+    // Calls from a loop still work when the callee uses no loop control.
+    let executed = ok("fn say word:\n    echo $word\nfor n in a b:\n    say $n\necho done\n");
+    assert_eq!(
+        executed,
+        vec!["echo $word", "echo $word", "echo done"]
+    );
+}
+
+#[test]
+fn else_if_chains_pick_the_first_taken_branch() {
+    // Middle rung matches: later `else` stays dead.
+    let executed =
+        ok("if 1 = 2:\n    echo a\nelse if 2 = 2:\n    echo b\nelse:\n    echo c\necho after\n");
+    assert_eq!(executed, vec!["echo b", "echo after"]);
+
+    // First branch taken: later rungs stay dead even when true.
+    let executed = ok("if 1:\n    echo a\nelse if 1:\n    echo b\nelse:\n    echo c\n");
+    assert_eq!(executed, vec!["echo a"]);
+
+    // Nothing taken: `else` runs.
+    let executed =
+        ok("if 1 = 2:\n    echo a\nelse if 3 = 4:\n    echo b\nelse:\n    echo c\n");
+    assert_eq!(executed, vec!["echo c"]);
+
+    // Chain without `else`: nothing runs, no error.
+    let executed =
+        ok("if 1 = 2:\n    echo a\nelse if 3 = 4:\n    echo b\necho after\n");
+    assert_eq!(executed, vec!["echo after"]);
+
+    // Longer chain: first matching rung wins.
+    let executed = ok(
+        "if 1 = 2:\n    echo a\nelse if 2 = 3:\n    echo b\nelse if 3 = 3:\n    echo c\nelse if 4 = 4:\n    echo d\nelse:\n    echo e\n",
+    );
+    assert_eq!(executed, vec!["echo c"]);
+
+    // `else if` under a dead outer `if` evaluates but stays dead.
+    let executed =
+        ok("if 1 = 2:\n    if 1 = 2:\n        echo a\n    else if 1:\n        echo b\necho top\n");
+    assert_eq!(executed, vec!["echo top"]);
+}
+
+#[test]
+fn else_if_errors_are_stable() {
+    // `else if` without a matching open `if`.
+    let mut interp = Interpreter::new();
+    assert_eq!(
+        interp.step("else if 1:"),
+        Err(RushError::ElseWithoutIf)
+    );
+
+    // Malformed condition.
+    let mut interp = Interpreter::new();
+    assert_eq!(interp.step("if 1:"), Ok(Step::Skip));
+    assert_eq!(
+        interp.step("else if $STATUS 0:"),
+        Err(RushError::BadCondition)
+    );
+
+    // `else if` after `else:` — the chain is already closed.
+    let mut interp = Interpreter::new();
+    assert_eq!(interp.step("if 1:"), Ok(Step::Skip));
+    assert_eq!(interp.step("else:"), Ok(Step::Skip));
+    assert_eq!(
+        interp.step("else if 1:"),
+        Err(RushError::ElseWithoutIf)
+    );
+}
+
+#[test]
+fn break_inside_nested_if_in_a_loop() {
+    // `break` nested two `if` levels deep still exits the loop, and the
+    // stale branch frames do not leak past it.
+    let executed = ok(
+        "for n in 1 2 3:\n    if $n != 1:\n        if $n != 3:\n            break\n    echo $n\necho done\n",
+    );
+    assert_eq!(executed, vec!["echo $n", "echo done"]);
+
+    // A loop nested in a block: replayed body lines must not disturb the
+    // enclosing `if` frame, whether the loop ends via `break`...
+    let executed = ok(
+        "if 1:\n    for n in a b c:\n        echo $n\n        if $n = b:\n            break\n    echo inner\necho top\n",
+    );
+    assert_eq!(
+        executed,
+        vec!["echo $n", "echo $n", "echo inner", "echo top"]
+    );
+
+    // ...or by running the word list out with a dead branch at the tail.
+    let executed = ok(
+        "if 1:\n    for n in a b:\n        echo $n\n        if 1 = 2:\n            echo never\n    echo inner\necho top\n",
+    );
+    assert_eq!(
+        executed,
+        vec!["echo $n", "echo $n", "echo inner", "echo top"]
+    );
+}

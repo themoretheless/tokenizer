@@ -75,5 +75,9 @@ harness = false
 name = "bytecode_vm"
 harness = false
 
+[[bench]]
+name = "inventory"
+harness = false
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
