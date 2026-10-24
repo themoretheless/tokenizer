@@ -303,6 +303,9 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         self.runtime.max_depth = limits.max_depth;
         self.runtime.max_collection_items = limits.max_collection_items;
         self.runtime.max_string_bytes = limits.max_string_bytes;
+        self.runtime
+            .memory
+            .set_limits(limits.max_heap_bytes, limits.max_allocated_bytes);
         if self.runtime.cancellation.is_cancelled() {
             self.runtime.coroutines.clear();
             self.runtime.reclaim_cells();

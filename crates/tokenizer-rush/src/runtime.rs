@@ -97,6 +97,9 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         self.runtime.max_depth = limits.max_depth;
         self.runtime.max_collection_items = limits.max_collection_items;
         self.runtime.max_string_bytes = limits.max_string_bytes;
+        self.runtime
+            .memory
+            .set_limits(limits.max_heap_bytes, limits.max_allocated_bytes);
         self.runtime.check(self.span)?;
         let function = self.get(name).ok_or_else(|| RuntimeError {
             stack: Vec::new(),
@@ -581,7 +584,10 @@ impl<'s> Program<'s> {
             });
         }
         let root_contracts = prepared.root_contracts;
-        let memory = memory::Budget::new(limits.max_heap_bytes);
+        let memory = memory::Budget::with_allocated_limit(
+            limits.max_heap_bytes,
+            limits.max_allocated_bytes,
+        );
         let mut runtime = Runtime {
             module: None,
             early_return: None,
@@ -802,20 +808,32 @@ impl<'s> Runtime<'_, 's> {
         Ok(())
     }
     fn string_growth(&self, current: usize, added: usize, span: Span) -> Result<()> {
-        if current
-            .checked_add(added)
-            .is_none_or(|size| size > self.max_string_bytes)
-        {
+        let Some(size) = current.checked_add(added) else {
             return self.error(span, "String byte limit exceeded");
+        };
+        if size > self.max_string_bytes {
+            return self.error(span, "String byte limit exceeded");
+        }
+        // String results are built into a fresh buffer, so the cumulative work
+        // budget is charged the full result size, not just the marginal bytes.
+        if self.memory.charge_allocated(size).is_err() {
+            return self.error(span, "Allocation limit exceeded");
         }
         Ok(())
     }
     fn collection_growth(&self, current: usize, added: usize, span: Span) -> Result<()> {
-        if current
-            .checked_add(added)
-            .is_none_or(|size| size > self.max_collection_items)
-        {
+        let Some(size) = current.checked_add(added) else {
             return self.error(span, "Collection item limit exceeded");
+        };
+        if size > self.max_collection_items {
+            return self.error(span, "Collection item limit exceeded");
+        }
+        // Collections grow amortized: charge the marginal items at the size of
+        // one Value slot. Real capacity reservations are covered separately by
+        // memory::Cover at eager-operation buffers.
+        let bytes = added.saturating_mul(std::mem::size_of::<Value>());
+        if self.memory.charge_allocated(bytes).is_err() {
+            return self.error(span, "Allocation limit exceeded");
         }
         Ok(())
     }

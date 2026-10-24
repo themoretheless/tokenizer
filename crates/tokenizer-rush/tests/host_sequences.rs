@@ -226,6 +226,7 @@ fn depth_exhaustion_in_imported_callbacks_closes_open_sources() {
                     max_collection_items: usize::MAX,
                     max_string_bytes: usize::MAX,
                     max_heap_bytes: usize::MAX,
+                max_allocated_bytes: usize::MAX,
                 },
                 &Default::default(),
                 &[],

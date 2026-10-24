@@ -10,6 +10,23 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
 
+impl Runtime<'_, '_> {
+    /// Maps a Cover rejection to the corresponding limit error.
+    fn cover_error(&self, span: crate::Span, error: memory::CoverError) -> RuntimeError {
+        let message = match error {
+            memory::CoverError::Heap => "Heap limit exceeded",
+            memory::CoverError::Allocated => "Allocation limit exceeded",
+        };
+        RuntimeError {
+            stack: Vec::new(),
+            location: None,
+            module: self.module.map(str::to_owned),
+            span,
+            message: message.into(),
+        }
+    }
+}
+
 impl<'s> Runtime<'_, 's> {
     pub(super) fn call(
         &mut self,
@@ -189,13 +206,7 @@ impl<'s> Runtime<'_, 's> {
                     };
                     self.charge(1, span)?;
                     output.push(item);
-                    cover.cover_vec(&output).map_err(|e| RuntimeError {
-                        stack: Vec::new(),
-                        location: None,
-                        module: self.module.map(str::to_owned),
-                        span,
-                        message: e.message("Runtime collect allocation failed"),
-                    })?;
+                    cover.cover_vec(&output).map_err(|e| self.cover_error(span, e))?;
                 }
                 return Ok(Value::List(output));
             }
@@ -833,13 +844,7 @@ impl<'s> Runtime<'_, 's> {
                         return self.error(span, "Collection item limit exceeded");
                     }
                     values.push(Value::Number(current));
-                    cover.cover_vec(&values).map_err(|e| RuntimeError {
-                        stack: Vec::new(),
-                        location: None,
-                        module: self.module.map(str::to_owned),
-                        span,
-                        message: e.message("Runtime range allocation failed"),
-                    })?;
+                    cover.cover_vec(&values).map_err(|e| self.cover_error(span, e))?;
                     let next = (values.len() as f64).mul_add(step, start);
                     if !next.is_finite() || next == current {
                         return self.error(span, "Range cannot advance finitely");
@@ -916,13 +921,7 @@ impl<'s> Runtime<'_, 's> {
                     } else if let Value::List(values) = &mut groups[position].1 {
                         self.collection_growth(values.len(), 1, span)?;
                         values.push(item);
-                        covers[position].cover_vec(values).map_err(|e| RuntimeError {
-                            stack: Vec::new(),
-                            location: None,
-                            module: self.module.map(str::to_owned),
-                            span,
-                            message: e.message("Runtime grouping allocation failed"),
-                        })?;
+                        covers[position].cover_vec(values).map_err(|e| self.cover_error(span, e))?;
                     }
                 }
                 let group_shape: RecordShape = Rc::from([String::from("key"), String::from(field)]);
@@ -985,26 +984,14 @@ impl<'s> Runtime<'_, 's> {
                     Builtin::Map => {
                         self.collection_growth(output.len(), 1, span)?;
                         output.push(result);
-                        cover.cover_vec(&output).map_err(|e| RuntimeError {
-                            stack: Vec::new(),
-                            location: None,
-                            module: self.module.map(str::to_owned),
-                            span,
-                            message: e.message("Runtime transform allocation failed"),
-                        })?;
+                        cover.cover_vec(&output).map_err(|e| self.cover_error(span, e))?;
                     }
                     Builtin::FlatMap => match result {
                         Value::List(values) => {
                             self.charge(values.len(), span)?;
                             self.collection_growth(output.len(), values.len(), span)?;
                             output.extend(values);
-                            cover.cover_vec(&output).map_err(|e| RuntimeError {
-                                stack: Vec::new(),
-                                location: None,
-                                module: self.module.map(str::to_owned),
-                                span,
-                                message: e.message("Runtime transform allocation failed"),
-                            })?;
+                            cover.cover_vec(&output).map_err(|e| self.cover_error(span, e))?;
                         }
                         _ => return self.error(span, "Flat map callback must return a list"),
                     },
@@ -1012,13 +999,7 @@ impl<'s> Runtime<'_, 's> {
                         Value::Bool(true) => {
                             self.collection_growth(output.len(), 1, span)?;
                             output.push(item);
-                            cover.cover_vec(&output).map_err(|e| RuntimeError {
-                                stack: Vec::new(),
-                                location: None,
-                                module: self.module.map(str::to_owned),
-                                span,
-                                message: e.message("Runtime transform allocation failed"),
-                            })?;
+                            cover.cover_vec(&output).map_err(|e| self.cover_error(span, e))?;
                         }
                         Value::Bool(false) => {}
                         _ => return self.error(span, "Filter callback must return a boolean"),
