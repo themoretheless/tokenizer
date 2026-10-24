@@ -13,7 +13,15 @@
 //! the source while deeper than their header, then replayed through a
 //! bounded pending-line stack, so loops and calls need no source rewind and
 //! no heap. Nested `fn`/`for` inside a captured body is rejected
-//! (`NestedControl`); `if`/`else` nest freely.
+//! (`NestedControl`); `if`/`else` nest freely. This rejection is a permanent
+//! design boundary of the fixed-size `no_std` model, not temporary stage debt.
+//!
+//! Stage 6 adds whole-line `break`/`continue` in `for`/`foreach` bodies —
+//! valid only while the innermost replay frame is a loop, so a `fn` call
+//! is a hard boundary for loop control (`LoopControlOutsideLoop`) — and
+//! `else if` chains, which reuse the open `if` frame's taken accounting.
+//! Replay frames floor the indentation stack (`frame_floor`), so a loop or
+//! call nested in a block never pops or corrupts enclosing frames.
 
 use core::str;
 
@@ -76,6 +84,10 @@ pub enum RushError {
     BadMatchArm,
     /// `foreach` header that is not `foreach name in <source>:`.
     BadForeach,
+    /// `break`/`continue` with no enclosing loop replay: at top level, or
+    /// inside a `fn` body — a call frame is not a loop, so loop control
+    /// never punches through a call boundary into the caller's loop.
+    LoopControlOutsideLoop,
 }
 
 /// A captured `foreach` loop waiting for the host to run its source
@@ -214,6 +226,10 @@ struct PendingFrame {
     len: u16,
     pc: u16,
     is_loop: bool,
+    /// Indentation-stack depth when the frame was pushed: replayed body
+    /// lines never pop frames at or below this floor, and popping the
+    /// frame truncates the stack back to it.
+    frame_floor: u8,
     var: [u8; MAX_NAME],
     var_len: u8,
     words: [u8; MAX_LOOP_WORDS],
@@ -228,6 +244,7 @@ impl PendingFrame {
             len: 0,
             pc: 0,
             is_loop: false,
+            frame_floor: 0,
             var: [0; MAX_NAME],
             var_len: 0,
             words: [0; MAX_LOOP_WORDS],
@@ -447,6 +464,7 @@ impl Interpreter {
         }
         frame.words_len = words.len() as u16;
         frame.word_offset = 0;
+        frame.frame_floor = self.depth as u8;
         self.pending_len += 1;
         self.advance_loop_word()
     }
@@ -465,7 +483,10 @@ impl Interpreter {
             let mut scratch = [0u8; MAX_BODY_LINE];
             if let Some(len) = self.take_pending_line(&mut scratch)? {
                 let text = str::from_utf8(scratch.get(..len).unwrap_or(&[])).unwrap_or("");
-                return self.process_line(text, true);
+                // The line came from the top replay frame, which is still
+                // on the stack; its floor bounds indentation popping.
+                let floor = usize::from(self.pending[self.pending_len - 1].frame_floor);
+                return self.process_line(text, Some(floor));
             }
         }
         if self.pushback_len > 0 {
@@ -476,13 +497,13 @@ impl Interpreter {
                 dst.copy_from_slice(src);
             }
             let text = str::from_utf8(scratch.get(..len).unwrap_or(&[])).unwrap_or("");
-            return self.process_line(text, false);
+            return self.process_line(text, None);
         }
         // A waiting `foreach` is serviced by the host, not by input lines.
         if self.foreach.is_some() {
             return Ok(Step::Skip);
         }
-        self.process_line(line, false)
+        self.process_line(line, None)
     }
 
     /// End of script: indentation blocks close implicitly at EOF
@@ -494,7 +515,7 @@ impl Interpreter {
 
     // ─── line processing ────────────────────────────────────────────────
 
-    fn process_line(&mut self, line: &str, nested: bool) -> Result<Step<'_>, RushError> {
+    fn process_line(&mut self, line: &str, floor: Option<usize>) -> Result<Step<'_>, RushError> {
         let text = line.strip_suffix('\r').unwrap_or(line);
         let trimmed = text.trim_start_matches([' ', '\t']);
 
@@ -524,14 +545,30 @@ impl Interpreter {
             return Ok(Step::Skip);
         }
         let indent = indent_width(text);
+        // `Some(floor)` = the line replays from a pending frame: it must
+        // not close indentation frames at or below that floor.
+        let replayed = floor.is_some();
+        let floor = floor.unwrap_or(0);
 
-        // `else:` attaches to the matching open `if` before any popping.
+        // `else:` / `else if <cond>:` attach to the matching open `if`
+        // before any popping.
         if trimmed == "else:" {
-            return self.step_else(indent);
+            return self.step_else(indent, floor);
+        }
+        if let Some(condition) = trimmed
+            .strip_prefix("else if ")
+            .or_else(|| trimmed.strip_prefix("else if\t"))
+        {
+            let Some(condition) = condition.trim_end().strip_suffix(':') else {
+                return Err(RushError::BadCondition);
+            };
+            return self.step_else_if(condition.trim(), indent, floor);
         }
 
-        // A line at or left of a frame's indent closes that frame.
-        while self.depth > 0 && indent <= usize::from(self.frames[self.depth - 1].indent) {
+        // A line at or left of a frame's indent closes that frame, but
+        // never below the replay floor: a loop or call nested in a block
+        // leaves the enclosing frames alone.
+        while self.depth > floor && indent <= usize::from(self.frames[self.depth - 1].indent) {
             self.depth -= 1;
         }
 
@@ -580,17 +617,23 @@ impl Interpreter {
         // `fn` and `for` headers open captures even in dead branches (the
         // body must be consumed), but replay only when active.
         if trimmed.starts_with("fn ") || trimmed.starts_with("fn\t") {
-            return self.start_fn_capture(trimmed, indent, active, nested);
+            return self.start_fn_capture(trimmed, indent, active, replayed);
         }
         if trimmed.starts_with("for ") || trimmed.starts_with("for\t") {
-            return self.start_for_capture(trimmed, indent, active, nested);
+            return self.start_for_capture(trimmed, indent, active, replayed);
         }
         if trimmed.starts_with("foreach ") || trimmed.starts_with("foreach\t") {
-            return self.start_foreach_capture(trimmed, indent, active, nested);
+            return self.start_foreach_capture(trimmed, indent, active, replayed);
         }
 
         if !active {
             return Ok(Step::Skip);
+        }
+
+        // Whole-line `break` / `continue` steer the innermost loop replay.
+        // Any other use (chained, with arguments) stays an ordinary command.
+        if trimmed == "break" || trimmed == "continue" {
+            return self.step_loop_control(trimmed == "break", replayed);
         }
 
         if let Some((name, value)) = parse_assignment(trimmed) {
@@ -611,10 +654,11 @@ impl Interpreter {
 
     // ─── blocks ─────────────────────────────────────────────────────────
 
-    fn step_else(&mut self, indent: usize) -> Result<Step<'static>, RushError> {
-        let Some(top) = self.depth.checked_sub(1) else {
+    fn step_else(&mut self, indent: usize, floor: usize) -> Result<Step<'static>, RushError> {
+        if self.depth <= floor {
             return Err(RushError::ElseWithoutIf);
-        };
+        }
+        let top = self.depth - 1;
         let (kind, frame_indent, parent_active, taken) = {
             let f = &self.frames[top];
             (f.kind, f.indent, f.parent_active, f.taken)
@@ -625,6 +669,57 @@ impl Interpreter {
         self.frames[top].kind = FrameKind::Else;
         self.frames[top].active = parent_active && !taken;
         self.frames[top].taken = true;
+        Ok(Step::Skip)
+    }
+
+    /// `else if <cond>:` reuses the open `if` frame (no new frame, same
+    /// taken accounting): the branch runs only when the parent is active,
+    /// no earlier branch was taken, and the condition holds. Like `if`,
+    /// the condition is evaluated even in dead branches.
+    fn step_else_if(
+        &mut self,
+        condition: &str,
+        indent: usize,
+        floor: usize,
+    ) -> Result<Step<'static>, RushError> {
+        if self.depth <= floor {
+            return Err(RushError::ElseWithoutIf);
+        }
+        let top = self.depth - 1;
+        let frame = self.frames[top];
+        if frame.kind != FrameKind::If || usize::from(frame.indent) != indent {
+            return Err(RushError::ElseWithoutIf);
+        }
+        let Some(taken_now) = eval_condition(condition, self) else {
+            return Err(RushError::BadCondition);
+        };
+        self.frames[top].active = frame.parent_active && !frame.taken && taken_now;
+        self.frames[top].taken = frame.taken || taken_now;
+        Ok(Step::Skip)
+    }
+
+    /// Whole-line `break` / `continue`. Valid only while the top replay
+    /// frame is a loop: at top level there is no loop, and a `fn` call is
+    /// a hard boundary — a callee's frame is not a loop, so loop control
+    /// errors (`LoopControlOutsideLoop`) instead of punching through to
+    /// the caller's loop. `continue` skips the rest of the body for this
+    /// iteration; `break` pops the loop frame outright.
+    fn step_loop_control(
+        &mut self,
+        is_break: bool,
+        replayed: bool,
+    ) -> Result<Step<'static>, RushError> {
+        let in_loop =
+            replayed && self.pending_len > 0 && self.pending[self.pending_len - 1].is_loop;
+        if !in_loop {
+            return Err(RushError::LoopControlOutsideLoop);
+        }
+        if is_break {
+            self.pop_pending();
+        } else {
+            let top = self.pending_len - 1;
+            self.pending[top].pc = self.pending[top].len;
+        }
         Ok(Step::Skip)
     }
 
@@ -1029,9 +1124,19 @@ impl Interpreter {
         }
         frame.words_len = cap.words_len;
         frame.word_offset = 0;
+        frame.frame_floor = self.depth as u8;
         self.pending_len += 1;
         // Bind the first word immediately, or pop if word list is whitespace-only.
         self.advance_loop_word()
+    }
+
+    /// Pop the top replay frame, truncating the indentation stack back to
+    /// the floor recorded when the frame was pushed: frames pushed while
+    /// replaying the body must not outlive the replay.
+    fn pop_pending(&mut self) {
+        let floor = usize::from(self.pending[self.pending_len - 1].frame_floor);
+        self.depth = floor;
+        self.pending_len -= 1;
     }
 
     /// Advance the top loop frame to its next whitespace-delimited word and bind
@@ -1050,6 +1155,9 @@ impl Interpreter {
             let rest = words.get(usize::from(frame.word_offset)..).unwrap_or("");
             let trimmed = rest.trim_start();
             if trimmed.is_empty() {
+                // Word list exhausted: pop with the floor restore, exactly
+                // like `pop_pending` (inline — `frame` is still borrowed).
+                self.depth = usize::from(frame.frame_floor);
                 self.pending_len -= 1;
                 return Ok(());
             }
@@ -1106,7 +1214,7 @@ impl Interpreter {
                 self.advance_loop_word()?;
                 continue;
             }
-            self.pending_len -= 1;
+            self.pop_pending();
         }
     }
 
@@ -1166,6 +1274,7 @@ impl Interpreter {
             frame.var_len = 0;
             frame.words_len = 0;
             frame.word_offset = 0;
+            frame.frame_floor = self.depth as u8;
         }
         self.pending_len += 1;
         // Bind parameters.

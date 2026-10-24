@@ -278,7 +278,11 @@ fn oversized_collect_request_does_not_open_host_source() {
 fn flat_map_size_error_closes_the_source_without_prefetch() {
     use themoretheless_tokenizer_rush::ExecutionLimits;
     let stats = fresh();
-    let program = Program::compile("source(6) | flat_map(x => [x,x])").unwrap();
+    // flat_map is lazy over sequences; the size error surfaces when the first
+    // expansion is buffered during consumption, without reading ahead.
+    let program =
+        Program::compile("source(6) | flat_map(x => [x, x, x, x]) | fold(0, (a, x) => a + x)")
+            .unwrap();
     let limits = ExecutionLimits {
         max_collection_items: 2,
         ..ExecutionLimits::new(1000)
@@ -287,7 +291,7 @@ fn flat_map_size_error_closes_the_source_without_prefetch() {
         .run_with_limits(limits, &Default::default(), &[], &[registered()], &[])
         .unwrap_err();
     assert_eq!(error.message, "Collection item limit exceeded");
-    assert_eq!(counts(&stats), (1, 2, 1));
+    assert_eq!(counts(&stats), (1, 1, 1));
 }
 
 #[test]

@@ -95,6 +95,7 @@ fn contracts_cycles_and_keyed_expansion_are_checked() {
             &json!({})
         )
         .unwrap_err()
+        .message
         .contains("Циклическая")
     );
     assert!(
@@ -132,6 +133,7 @@ fn contracts_cycles_and_keyed_expansion_are_checked() {
             &mut |_, _| Ok(json!({}))
         )
         .unwrap_err()
+        .message
         .contains("Повторный ключ")
     );
 }
@@ -265,4 +267,165 @@ fn extended_types_units_lint_and_formatter_work() {
 
     let formatted = format_source("component A { Row { width: 10px; } }").unwrap();
     assert!(formatted.contains("component A {\n  Row {\n    width: 10px;\n  }\n}\n"));
+}
+#[test]
+fn formatter_preserves_comments_and_round_trips() {
+    use themoretheless_tokenizer_forma::frontend::format_source;
+
+    // line comments before/inside a block, trailing line comment, block comment
+    let src = "// Шапка компонента\ncomponent A {\n  // перед Row\n  Row {\n    width: 10px; // trailing\n    /* блочный */\n    height: 20px;\n  }\n}";
+    let formatted = format_source(src).unwrap();
+    assert_eq!(
+        formatted,
+        "// Шапка компонента\ncomponent A {\n  // перед Row\n  Row {\n    width: 10px; // trailing\n    /* блочный */\n    height: 20px;\n  }\n}\n"
+    );
+    // round-trip: parse → format → parse → format is a fixed point
+    let again = format_source(&formatted).unwrap();
+    assert_eq!(formatted, again);
+    assert!(parse(&formatted).is_ok());
+
+    // inline block comment stays inside the output line, multi-line block
+    // comment text is preserved verbatim
+    let src = "component A { Text { width: /* hint */ 10px; } /* много\n   строк */ }";
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("width: /* hint */ 10px;"));
+    assert!(formatted.contains("/* много\n   строк */"));
+    assert_eq!(formatted, format_source(&formatted).unwrap());
+
+    // comments inside string literals are not treated as trivia
+    let src = "component A { Text { text: 'a // b /* c */'; } }";
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("text: 'a // b /* c */';"));
+    assert_eq!(formatted, format_source(&formatted).unwrap());
+
+    // a comment between } and else keeps the else-branch attached
+    let src = "component A { if state.a { Text { width: 1px; } } /* mid */ else { Text { width: 2px; } } }";
+    let formatted = format_source(src).unwrap();
+    assert!(formatted.contains("} /* mid */ else {"));
+    assert_eq!(formatted, format_source(&formatted).unwrap());
+
+    // UTF-16 positions of trivia match the source
+    let src = "component A { Text { width: 10px; } } // 😀 финал";
+    let (_, trivia) = themoretheless_tokenizer_forma::tokenize_with_trivia(src).unwrap();
+    assert_eq!(trivia.len(), 1);
+    let at = src.find("// 😀 финал").unwrap();
+    assert_eq!(trivia[0].start, src[..at].encode_utf16().count());
+    assert_eq!(trivia[0].end, src.encode_utf16().count());
+}
+
+fn lint_codes(src: &str) -> Vec<(String, String)> {
+    use themoretheless_tokenizer_forma::frontend::lint_document;
+    let warnings = lint_document(src).unwrap();
+    warnings
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| {
+            (
+                w["code"].as_str().unwrap().to_string(),
+                w["name"].as_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn lint_usage_analysis_follows_ast_references() {
+    // prop used only through a call inside a tokens value: not unused
+    let src = "component A { prop gap: Number = 8; tokens { spacing: max(props.gap, 4); } Text { width: tokens.spacing; } }";
+    assert_eq!(lint_codes(src), []);
+    // prop used only through a string interpolation in a state default
+    let src = "component A { prop label: String = 'x'; state s: String = 'Label: ${props.label}'; Text { text: s; } }";
+    assert_eq!(lint_codes(src), []);
+    // state used only through a call in another state's default
+    let src =
+        "component A { state a: Number = 1; state b: Number = max(state.a, 2); Text { text: b; } }";
+    assert_eq!(lint_codes(src), []);
+    // prop used only inside a component-level slot
+    let src = "component A { prop hint: String = 'h'; slot header { Text { text: hint; } } }";
+    assert_eq!(lint_codes(src), []);
+    // a plain string literal that merely looks like a path is not a reference
+    let src = "component A { prop title: String = 'x'; Text { text: 'props.title'; } }";
+    assert_eq!(
+        lint_codes(src),
+        [("unused-prop".to_string(), "title".to_string())]
+    );
+    // an escaped interpolation is literal text, not a reference
+    let src = "component A { prop name: String = 'x'; Text { text: '\\${name}'; } }";
+    assert_eq!(
+        lint_codes(src),
+        [("unused-prop".to_string(), "name".to_string())]
+    );
+}
+
+#[test]
+fn unused_token_and_i18n_key_lints() {
+    use themoretheless_tokenizer_forma::frontend::lint_document;
+
+    let src = "component A {\n  tokens { usedGap: 8px; deadGap: 4px; }\n  tokens color { brand: #fff; dead: #000; }\n  i18n { title: 'T'; deadKey: 'D'; }\n  i18n en { hello: 'H'; bye: 'B'; }\n  i18n ru { hello: 'П'; }\n  Text { width: tokens.usedGap; color: tokens.color.brand; text: i18n.title; }\n  Text { text: i18n.hello; }\n}";
+    let warnings = lint_document(src).unwrap();
+    let mut got: Vec<(&str, &str)> = warnings
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| (w["code"].as_str().unwrap(), w["name"].as_str().unwrap()))
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            ("unused-i18n-key", "deadKey"),
+            ("unused-i18n-key", "en.bye"),
+            ("unused-token", "color.dead"),
+            ("unused-token", "deadGap"),
+        ]
+    );
+    // ranges are UTF-16 offsets of the key itself
+    let w = warnings
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["name"] == "deadGap")
+        .unwrap();
+    let at = src.find("deadGap").unwrap();
+    assert_eq!(w["from"], src[..at].encode_utf16().count());
+    assert_eq!(w["to"], src[..at].encode_utf16().count() + "deadGap".len());
+    assert!(
+        w["message"]
+            .as_str()
+            .unwrap()
+            .contains("Неиспользуемый токен tokens deadGap")
+    );
+    let w = warnings
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["name"] == "en.bye")
+        .unwrap();
+    let at = src.find("bye").unwrap();
+    assert_eq!(w["from"], src[..at].encode_utf16().count());
+    assert!(
+        w["message"]
+            .as_str()
+            .unwrap()
+            .contains("Неиспользуемый ключ i18n en.bye")
+    );
+
+    // group-head reference keeps every key of the group alive
+    let src =
+        "component A { tokens color { brand: #fff; deep: #111; } Text { color: tokens.color; } }";
+    assert_eq!(lint_codes(src), []);
+    // bare reference reaches a grouped key (parser mirrors it under the bare name)
+    let src = "component A { tokens color { brand: #fff; } Text { color: tokens.brand; } }";
+    assert_eq!(lint_codes(src), []);
+    // token referenced from a style, style applied: nothing unused
+    let src =
+        "component A { tokens { brand: #fff; } style s { color: tokens.brand; } Row { apply s; } }";
+    assert_eq!(lint_codes(src), []);
+    // token referenced from another token: the chain keeps both alive
+    let src = "component A { tokens { base: 4px; gap: tokens.base; } Text { width: tokens.gap; } }";
+    assert_eq!(lint_codes(src), []);
+    // shared module files (no component/design body) expose keys as their API
+    let src = "tokens { a: 1px; b: 2px; }\ni18n { hi: 'H'; }\ni18n en { hello: 'H'; }";
+    assert_eq!(lint_codes(src), []);
 }

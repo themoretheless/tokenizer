@@ -1,21 +1,25 @@
 //! Bounded pure expression evaluation. References are resolved by the host;
 //! there is no host-language eval or access to arbitrary object properties.
+use crate::diagnostic::Diagnostic;
 use serde_json::{Value as V, json};
-type R<T> = Result<T, String>;
+type R<T> = Result<T, Diagnostic>;
 pub fn truth(v: &V) -> R<bool> {
     v.as_bool()
-        .ok_or_else(|| "Логическое выражение ожидает Bool".into())
+        .ok_or_else(|| Diagnostic::new("expected-bool", "Логическое выражение ожидает Bool"))
 }
 fn number(v: &V) -> R<f64> {
     v.as_f64()
         .filter(|n| n.is_finite())
-        .ok_or_else(|| "Арифметика ожидает конечное число".into())
+        .ok_or_else(|| Diagnostic::new("expected-number", "Арифметика ожидает конечное число"))
 }
 fn numeric(n: f64) -> R<V> {
     if n.is_finite() {
         Ok(json!(n))
     } else {
-        Err("Арифметика ожидает конечное число".into())
+        Err(Diagnostic::new(
+            "expected-number",
+            "Арифметика ожидает конечное число",
+        ))
     }
 }
 pub fn text(v: &V) -> R<String> {
@@ -31,7 +35,10 @@ pub fn text(v: &V) -> R<String> {
         } else {
             n.as_f64().unwrap().to_string()
         }),
-        _ => Err("Строковое преобразование ожидает скалярное значение".into()),
+        _ => Err(Diagnostic::new(
+            "expected-scalar",
+            "Строковое преобразование ожидает скалярное значение",
+        )),
     }
 }
 pub fn equal(a: &V, b: &V) -> bool {
@@ -64,9 +71,15 @@ fn parse_hex_color(v: &V) -> R<(u8, u8, u8, u8)> {
     let s = raw
         .trim()
         .strip_prefix('#')
-        .ok_or("Функция цвета ожидает hex-цвет (#rgb, #rrggbb или #rrggbbaa)")?;
+        .ok_or_else(|| {
+            Diagnostic::new(
+                "invalid-color",
+                "Функция цвета ожидает hex-цвет (#rgb, #rrggbb или #rrggbbaa)",
+            )
+        })?;
     let hex = |slice: &str| {
-        u8::from_str_radix(slice, 16).map_err(|_| String::from("Некорректный hex-цвет"))
+        u8::from_str_radix(slice, 16)
+            .map_err(|_| Diagnostic::new("invalid-color", "Некорректный hex-цвет"))
     };
     match s.len() {
         3 => {
@@ -82,7 +95,10 @@ fn parse_hex_color(v: &V) -> R<(u8, u8, u8, u8)> {
             hex(&s[4..6])?,
             hex(&s[6..8])?,
         )),
-        _ => Err("Функция цвета ожидает #rgb, #rrggbb или #rrggbbaa".into()),
+        _ => Err(Diagnostic::new(
+            "invalid-color",
+            "Функция цвета ожидает #rgb, #rrggbb или #rrggbbaa",
+        )),
     }
 }
 fn format_hex_color(r: u8, g: u8, b: u8, a: u8, as_expr: bool) -> V {
@@ -97,23 +113,23 @@ fn format_hex_color(r: u8, g: u8, b: u8, a: u8, as_expr: bool) -> V {
         json!(s)
     }
 }
-pub fn matches_constraint_pattern(s: &str, pat: &str) -> bool {
-    match pat {
+pub fn matches_constraint_pattern(s: &str, pat: &str) -> R<bool> {
+    Ok(match pat {
         "nonempty" => !s.trim().is_empty(),
         "digits" => !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()),
         "alpha" => !s.is_empty() && s.chars().all(|c| c.is_alphabetic()),
         "alphanumeric" => !s.is_empty() && s.chars().all(|c| c.is_alphanumeric()),
-        "email" => {
-            let Some((user, domain)) = s.split_once('@') else {
-                return false;
-            };
-            !user.is_empty()
-                && !user.contains('@')
-                && domain.contains('.')
-                && !domain.starts_with('.')
-                && !domain.ends_with('.')
-                && domain.split('.').all(|p| !p.is_empty())
-        }
+        "email" => match s.split_once('@') {
+            Some((user, domain)) => {
+                !user.is_empty()
+                    && !user.contains('@')
+                    && domain.contains('.')
+                    && !domain.starts_with('.')
+                    && !domain.ends_with('.')
+                    && domain.split('.').all(|p| !p.is_empty())
+            }
+            None => false,
+        },
         "url" => {
             let rest = s
                 .strip_prefix("https://")
@@ -123,8 +139,8 @@ pub fn matches_constraint_pattern(s: &str, pat: &str) -> bool {
         "hex" => s.strip_prefix('#').is_some_and(|h| {
             [3, 6, 8].contains(&h.len()) && h.bytes().all(|b| b.is_ascii_hexdigit())
         }),
-        _ => regex_like_match(s, pat),
-    }
+        _ => return regex_like_match(s, pat),
+    })
 }
 
 #[derive(Clone)]
@@ -317,13 +333,16 @@ fn match_tokens_at(
     ci: usize,
     anchored_end: bool,
     steps: &mut usize,
-) -> bool {
+) -> R<bool> {
     *steps += 1;
     if *steps > 8192 {
-        return false;
+        return Err(Diagnostic::new(
+            "pattern-too-complex",
+            "Шаблон слишком сложен: превышен предел в 8192 шага сопоставления",
+        ));
     }
     if ti == tokens.len() {
-        return !anchored_end || ci == chars.len();
+        return Ok(!anchored_end || ci == chars.len());
     }
     let tok = &tokens[ti];
     let mut count = 0usize;
@@ -336,19 +355,24 @@ fn match_tokens_at(
         count += 1;
     }
     if count < tok.min {
-        return false;
+        return Ok(false);
     }
     for k in (tok.min..=count).rev() {
-        if match_tokens_at(tokens, ti + 1, chars, ci + k, anchored_end, steps) {
-            return true;
+        if match_tokens_at(tokens, ti + 1, chars, ci + k, anchored_end, steps)? {
+            return Ok(true);
         }
     }
-    false
+    Ok(false)
 }
 
-fn regex_like_match(s: &str, pat: &str) -> bool {
+fn regex_like_match(s: &str, pat: &str) -> R<bool> {
     if pat.contains('|') && !pat.contains('[') {
-        return pat.split('|').any(|sub| regex_like_match(s, sub));
+        for sub in pat.split('|') {
+            if regex_like_match(s, sub)? {
+                return Ok(true);
+            }
+        }
+        return Ok(false);
     }
     let (anchored_start, anchored_end, tokens) = parse_regex_tokens(pat);
     let chars: Vec<char> = s.chars().collect();
@@ -356,8 +380,12 @@ fn regex_like_match(s: &str, pat: &str) -> bool {
     if anchored_start {
         match_tokens_at(&tokens, 0, &chars, 0, anchored_end, &mut steps)
     } else {
-        (0..=chars.len())
-            .any(|start| match_tokens_at(&tokens, 0, &chars, start, anchored_end, &mut steps))
+        for start in 0..=chars.len() {
+            if match_tokens_at(&tokens, 0, &chars, start, anchored_end, &mut steps)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 
@@ -429,7 +457,10 @@ where
     F: FnMut(&str, bool) -> R<V>,
 {
     if depth > 128 {
-        return Err("Превышен предел вложенности выражения".into());
+        return Err(Diagnostic::new(
+            "nesting-limit",
+            "Превышен предел вложенности выражения",
+        ));
     }
     let next = depth + 1;
     if let Some(a) = v.as_array() {
@@ -464,7 +495,10 @@ where
     }
     if let Some(subject) = v.get("match") {
         let actual = run(subject, false, next, resolver)?;
-        for branch in v["branches"].as_array().ok_or("Некорректные ветки match")? {
+        for branch in v["branches"]
+            .as_array()
+            .ok_or_else(|| Diagnostic::new("invalid-match", "Некорректные ветки match"))?
+        {
             if matches_pattern(&branch["pattern"], &actual, &mut |p| {
                 run(p, false, next, resolver)
             })? {
@@ -476,7 +510,10 @@ where
                 return run(&branch["value"], false, next, resolver);
             }
         }
-        return Err("match: нет подходящей ветки; добавьте _ => …".into());
+        return Err(Diagnostic::new(
+            "no-match-branch",
+            "match: нет подходящей ветки; добавьте _ => …",
+        ));
     }
     let Some(e) = v.get("expression") else {
         let mut o = serde_json::Map::new();
@@ -485,7 +522,9 @@ where
         }
         return Ok(V::Object(o));
     };
-    let k = e["kind"].as_str().ok_or("Некорректное выражение")?;
+    let k = e["kind"]
+        .as_str()
+        .ok_or_else(|| Diagnostic::new("invalid-expression", "Некорректное выражение"))?;
     match k {
         "conditional" => {
             let condition = run(&e["condition"], false, next, resolver)?;
@@ -511,7 +550,10 @@ where
                 return if optional || opt {
                     Ok(V::Null)
                 } else {
-                    Err("Нельзя прочитать свойство пустого значения; используйте ?.".into())
+                    Err(Diagnostic::new(
+                        "null-property-access",
+                        "Нельзя прочитать свойство пустого значения; используйте ?.",
+                    ))
                 };
             }
             let computed;
@@ -523,7 +565,10 @@ where
                 &computed
             };
             if matches!(key, "__proto__" | "prototype" | "constructor") {
-                return Err(format!("Недоступное свойство {key}"));
+                return Err(Diagnostic::new(
+                    "forbidden-property",
+                    format!("Недоступное свойство {key}"),
+                ));
             }
             if key == "length" {
                 if let Some(s) = object.as_str() {
@@ -541,15 +586,25 @@ where
             match value {
                 Some(v) => Ok(v.clone()),
                 None if optional || opt => Ok(V::Null),
-                _ => Err(format!("Неизвестное свойство {key}")),
+                _ => Err(Diagnostic::new(
+                    "unknown-property",
+                    format!("Неизвестное свойство {key}"),
+                )),
             }
         }
         "call" => {
-            let name = e["name"].as_str().ok_or("Некорректный вызов")?;
-            let raw_args = e["args"].as_array().ok_or("Некорректные аргументы")?;
+            let name = e["name"]
+                .as_str()
+                .ok_or_else(|| Diagnostic::new("invalid-call", "Некорректный вызов"))?;
+            let raw_args = e["args"]
+                .as_array()
+                .ok_or_else(|| Diagnostic::new("invalid-call", "Некорректные аргументы"))?;
             if name == "coalesce" {
                 if raw_args.is_empty() {
-                    return Err("coalesce: неверное число аргументов".into());
+                    return Err(Diagnostic::new(
+                        "invalid-argument-count",
+                        "coalesce: неверное число аргументов",
+                    ));
                 }
                 for raw in raw_args {
                     let val = run(raw, true, next, resolver)?;
@@ -581,7 +636,10 @@ where
                 _ => count == 1,
             };
             if !valid {
-                return Err(format!("{name}: неверное число аргументов"));
+                return Err(Diagnostic::new(
+                    "invalid-argument-count",
+                    format!("{name}: неверное число аргументов"),
+                ));
             }
             match name {
                 "String" => Ok(json!(text(&args[0])?)),
@@ -592,12 +650,22 @@ where
                     } else if let Some(s) = args[0].as_str() {
                         let s = s.trim();
                         if s.is_empty() || s.starts_with(['i', 'I', 'n', 'N']) {
-                            return Err("Number ожидает число или непустую числовую строку".into());
+                            return Err(Diagnostic::new(
+                                "invalid-argument",
+                                "Number ожидает число или непустую числовую строку",
+                            ));
                         }
-                        s.parse::<f64>()
-                            .map_err(|_| "Number ожидает число или непустую числовую строку")?
+                        s.parse::<f64>().map_err(|_| {
+                            Diagnostic::new(
+                                "invalid-argument",
+                                "Number ожидает число или непустую числовую строку",
+                            )
+                        })?
                     } else {
-                        return Err("Number ожидает число или непустую числовую строку".into());
+                        return Err(Diagnostic::new(
+                            "invalid-argument",
+                            "Number ожидает число или непустую числовую строку",
+                        ));
                     };
                     numeric(n)
                 }
@@ -611,7 +679,10 @@ where
                     {
                         Ok(json!(o.len()))
                     } else {
-                        Err("len ожидает строку, массив или объект".into())
+                        Err(Diagnostic::new(
+                            "invalid-argument",
+                            "len ожидает строку, массив или объект",
+                        ))
                     }
                 }
                 "isEmpty" => {
@@ -625,11 +696,15 @@ where
                     Ok(json!(empty))
                 }
                 "count" => {
-                    let a = args[0].as_array().ok_or("count ожидает массив")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "count ожидает массив")
+                    })?;
                     Ok(json!(a.len()))
                 }
                 "any" => {
-                    let a = args[0].as_array().ok_or("any ожидает массив")?;
+                    let a = args[0]
+                        .as_array()
+                        .ok_or_else(|| Diagnostic::new("invalid-argument", "any ожидает массив"))?;
                     let mut res = false;
                     for item in a {
                         if truth(item)? {
@@ -640,7 +715,9 @@ where
                     Ok(json!(res))
                 }
                 "all" => {
-                    let a = args[0].as_array().ok_or("all ожидает массив")?;
+                    let a = args[0]
+                        .as_array()
+                        .ok_or_else(|| Diagnostic::new("invalid-argument", "all ожидает массив"))?;
                     let mut res = true;
                     for item in a {
                         if !truth(item)? {
@@ -651,8 +728,12 @@ where
                     Ok(json!(res))
                 }
                 "pluck" => {
-                    let a = args[0].as_array().ok_or("pluck ожидает массив")?;
-                    let key = args[1].as_str().ok_or("pluck ожидает имя поля-строку")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "pluck ожидает массив")
+                    })?;
+                    let key = args[1].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "pluck ожидает имя поля-строку")
+                    })?;
                     let mut out = Vec::with_capacity(a.len());
                     for item in a {
                         out.push(item.get(key).cloned().unwrap_or(V::Null));
@@ -660,9 +741,13 @@ where
                     Ok(V::Array(out))
                 }
                 "sortBy" => {
-                    let a = args[0].as_array().ok_or("sortBy ожидает массив")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "sortBy ожидает массив")
+                    })?;
                     let key = if count == 2 {
-                        Some(args[1].as_str().ok_or("sortBy ожидает имя поля-строку")?)
+                        Some(args[1].as_str().ok_or_else(|| {
+                            Diagnostic::new("invalid-argument", "sortBy ожидает имя поля-строку")
+                        })?)
                     } else {
                         None
                     };
@@ -792,7 +877,10 @@ where
                     let lo = number(&args[1])?;
                     let hi = number(&args[2])?;
                     if lo > hi {
-                        return Err("clamp: минимум превышает максимум".into());
+                        return Err(Diagnostic::new(
+                            "invalid-range",
+                            "clamp: минимум превышает максимум",
+                        ));
                     }
                     numeric(a.max(lo).min(hi))
                 }
@@ -800,7 +888,10 @@ where
                 "sqrt" => {
                     let n = number(&args[0])?;
                     if n < 0.0 {
-                        return Err("sqrt ожидает неотрицательное число".into());
+                        return Err(Diagnostic::new(
+                            "invalid-argument",
+                            "sqrt ожидает неотрицательное число",
+                        ));
                     }
                     numeric(n.sqrt())
                 }
@@ -821,12 +912,17 @@ where
                     let o0 = number(&args[3])?;
                     let o1 = number(&args[4])?;
                     if (i1 - i0).abs() < f64::EPSILON {
-                        return Err("remap: пустой входной диапазон".into());
+                        return Err(Diagnostic::new(
+                            "invalid-range",
+                            "remap: пустой входной диапазон",
+                        ));
                     }
                     numeric(o0 + ((v - i0) / (i1 - i0)) * (o1 - o0))
                 }
                 "avg" => {
-                    let a = args[0].as_array().ok_or("avg ожидает массив чисел")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "avg ожидает массив чисел")
+                    })?;
                     if a.is_empty() {
                         return Ok(json!(0.0));
                     }
@@ -846,19 +942,27 @@ where
                     })
                 }
                 "trim" => {
-                    let s = args[0].as_str().ok_or("trim ожидает строку")?;
+                    let s = args[0].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "trim ожидает строку")
+                    })?;
                     Ok(json!(s.trim()))
                 }
                 "upper" => {
-                    let s = args[0].as_str().ok_or("upper ожидает строку")?;
+                    let s = args[0].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "upper ожидает строку")
+                    })?;
                     Ok(json!(s.to_uppercase()))
                 }
                 "lower" => {
-                    let s = args[0].as_str().ok_or("lower ожидает строку")?;
+                    let s = args[0].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "lower ожидает строку")
+                    })?;
                     Ok(json!(s.to_lowercase()))
                 }
                 "capitalize" => {
-                    let s = args[0].as_str().ok_or("capitalize ожидает строку")?;
+                    let s = args[0].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "capitalize ожидает строку")
+                    })?;
                     let mut chars = s.chars();
                     let out = match chars.next() {
                         Some(first) => {
@@ -870,10 +974,14 @@ where
                     Ok(json!(out))
                 }
                 "padStart" | "padEnd" => {
-                    let s = args[0].as_str().ok_or("pad ожидает строку")?;
+                    let s = args[0]
+                        .as_str()
+                        .ok_or_else(|| Diagnostic::new("invalid-argument", "pad ожидает строку"))?;
                     let target = (number(&args[1])?.max(0.) as usize).min(4096);
                     let pad = if count == 3 {
-                        args[2].as_str().ok_or("pad ожидает строку заполнения")?
+                        args[2].as_str().ok_or_else(|| {
+                            Diagnostic::new("invalid-argument", "pad ожидает строку заполнения")
+                        })?
                     } else {
                         " "
                     };
@@ -893,12 +1001,17 @@ where
                     }))
                 }
                 "truncate" => {
-                    let s = args[0].as_str().ok_or("truncate ожидает строку")?;
+                    let s = args[0].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "truncate ожидает строку")
+                    })?;
                     let max_len = number(&args[1])?.max(0.) as usize;
                     let suffix = if count == 3 {
-                        args[2]
-                            .as_str()
-                            .ok_or("truncate ожидает строковый суффикс")?
+                        args[2].as_str().ok_or_else(|| {
+                            Diagnostic::new(
+                                "invalid-argument",
+                                "truncate ожидает строковый суффикс",
+                            )
+                        })?
                     } else {
                         "…"
                     };
@@ -913,26 +1026,38 @@ where
                     }
                 }
                 "repeat" => {
-                    let s = args[0].as_str().ok_or("repeat ожидает строку")?;
+                    let s = args[0].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "repeat ожидает строку")
+                    })?;
                     let n = number(&args[1])?.max(0.) as usize;
                     if s.len().saturating_mul(n) > 65536 {
-                        return Err("repeat: превышен предел длины строки".into());
+                        return Err(Diagnostic::new(
+                            "size-limit",
+                            "repeat: превышен предел длины строки",
+                        ));
                     }
                     Ok(json!(s.repeat(n)))
                 }
                 "contains" | "includes" => {
                     if let Some(s) = args[0].as_str() {
-                        let sub = args[1].as_str().ok_or("contains ожидает подстроку")?;
+                        let sub = args[1].as_str().ok_or_else(|| {
+                            Diagnostic::new("invalid-argument", "contains ожидает подстроку")
+                        })?;
                         Ok(json!(s.contains(sub)))
                     } else if let Some(a) = args[0].as_array() {
                         Ok(json!(a.iter().any(|x| equal(x, &args[1]))))
                     } else {
-                        Err("contains ожидает строку или массив".into())
+                        Err(Diagnostic::new(
+                            "invalid-argument",
+                            "contains ожидает строку или массив",
+                        ))
                     }
                 }
                 "indexOf" => {
                     if let Some(s) = args[0].as_str() {
-                        let sub = args[1].as_str().ok_or("indexOf ожидает подстроку")?;
+                        let sub = args[1].as_str().ok_or_else(|| {
+                            Diagnostic::new("invalid-argument", "indexOf ожидает подстроку")
+                        })?;
                         let idx = s
                             .find(sub)
                             .map(|byte_idx| s[..byte_idx].chars().count() as i64)
@@ -946,27 +1071,40 @@ where
                             .unwrap_or(-1);
                         Ok(json!(idx))
                     } else {
-                        Err("indexOf ожидает строку или массив".into())
+                        Err(Diagnostic::new(
+                            "invalid-argument",
+                            "indexOf ожидает строку или массив",
+                        ))
                     }
                 }
                 "startsWith" => {
-                    let s = args[0].as_str().ok_or("startsWith ожидает строку")?;
-                    let p = args[1]
-                        .as_str()
-                        .ok_or("startsWith ожидает префикс-строку")?;
+                    let s = args[0].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "startsWith ожидает строку")
+                    })?;
+                    let p = args[1].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "startsWith ожидает префикс-строку")
+                    })?;
                     Ok(json!(s.starts_with(p)))
                 }
                 "endsWith" => {
-                    let s = args[0].as_str().ok_or("endsWith ожидает строку")?;
-                    let sfx = args[1].as_str().ok_or("endsWith ожидает суффикс-строку")?;
+                    let s = args[0].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "endsWith ожидает строку")
+                    })?;
+                    let sfx = args[1].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "endsWith ожидает суффикс-строку")
+                    })?;
                     Ok(json!(s.ends_with(sfx)))
                 }
                 "replace" => {
-                    let s = args[0].as_str().ok_or("replace ожидает строку")?;
-                    let from = args[1]
-                        .as_str()
-                        .ok_or("replace ожидает искомую подстроку")?;
-                    let to = args[2].as_str().ok_or("replace ожидает строку замены")?;
+                    let s = args[0].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "replace ожидает строку")
+                    })?;
+                    let from = args[1].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "replace ожидает искомую подстроку")
+                    })?;
+                    let to = args[2].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "replace ожидает строку замены")
+                    })?;
                     Ok(json!(s.replace(from, to)))
                 }
                 "slice" => {
@@ -995,18 +1133,29 @@ where
                         let en = norm(end.unwrap_or(len as isize), len).max(st);
                         Ok(json!(a[st..en].to_vec()))
                     } else {
-                        Err("slice ожидает строку или массив".into())
+                        Err(Diagnostic::new(
+                            "invalid-argument",
+                            "slice ожидает строку или массив",
+                        ))
                     }
                 }
                 "split" => {
-                    let s = args[0].as_str().ok_or("split ожидает строку")?;
-                    let sep = args[1].as_str().ok_or("split ожидает разделитель-строку")?;
+                    let s = args[0].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "split ожидает строку")
+                    })?;
+                    let sep = args[1].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "split ожидает разделитель-строку")
+                    })?;
                     Ok(json!(s.split(sep).collect::<Vec<_>>()))
                 }
                 "join" => {
-                    let a = args[0].as_array().ok_or("join ожидает массив")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "join ожидает массив")
+                    })?;
                     let sep = if count == 2 {
-                        args[1].as_str().ok_or("join ожидает разделитель-строку")?
+                        args[1].as_str().ok_or_else(|| {
+                            Diagnostic::new("invalid-argument", "join ожидает разделитель-строку")
+                        })?
                     } else {
                         ", "
                     };
@@ -1024,21 +1173,30 @@ where
                     } else if let Some(s) = args[0].as_str() {
                         Ok(json!(s.chars().rev().collect::<String>()))
                     } else {
-                        Err("reverse ожидает массив или строку".into())
+                        Err(Diagnostic::new(
+                            "invalid-argument",
+                            "reverse ожидает массив или строку",
+                        ))
                     }
                 }
                 "take" => {
-                    let a = args[0].as_array().ok_or("take ожидает массив")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "take ожидает массив")
+                    })?;
                     let n = number(&args[1])?.max(0.) as usize;
                     Ok(V::Array(a.iter().take(n).cloned().collect()))
                 }
                 "skip" => {
-                    let a = args[0].as_array().ok_or("skip ожидает массив")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "skip ожидает массив")
+                    })?;
                     let n = number(&args[1])?.max(0.) as usize;
                     Ok(V::Array(a.iter().skip(n).cloned().collect()))
                 }
                 "sum" => {
-                    let a = args[0].as_array().ok_or("sum ожидает массив чисел")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "sum ожидает массив чисел")
+                    })?;
                     let mut total = 0.0;
                     for item in a {
                         total += number(item)?;
@@ -1052,7 +1210,10 @@ where
                         return Ok(json!([]));
                     }
                     if en - st > 4096 {
-                        return Err("Превышен предел размера диапазона (макс. 4096)".into());
+                        return Err(Diagnostic::new(
+                            "size-limit",
+                            "Превышен предел размера диапазона (макс. 4096)",
+                        ));
                     }
                     Ok(V::Array((st..en).map(|i| json!(i)).collect()))
                 }
@@ -1066,9 +1227,13 @@ where
                     }
                 }
                 "unique" => {
-                    let a = args[0].as_array().ok_or("unique ожидает массив")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "unique ожидает массив")
+                    })?;
                     let key = if count == 2 {
-                        Some(args[1].as_str().ok_or("unique ожидает имя поля-строку")?)
+                        Some(args[1].as_str().ok_or_else(|| {
+                            Diagnostic::new("invalid-argument", "unique ожидает имя поля-строку")
+                        })?)
                     } else {
                         None
                     };
@@ -1086,8 +1251,12 @@ where
                     Ok(V::Array(out))
                 }
                 "find" => {
-                    let a = args[0].as_array().ok_or("find ожидает массив")?;
-                    let key = args[1].as_str().ok_or("find ожидает имя поля-строку")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "find ожидает массив")
+                    })?;
+                    let key = args[1].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "find ожидает имя поля-строку")
+                    })?;
                     let target = &args[2];
                     let found = a
                         .iter()
@@ -1097,7 +1266,9 @@ where
                     Ok(found)
                 }
                 "compact" => {
-                    let a = args[0].as_array().ok_or("compact ожидает массив")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "compact ожидает массив")
+                    })?;
                     let out: Vec<V> = a
                         .iter()
                         .filter(|v| !v.is_null() && *v != &V::Bool(false) && v.as_str() != Some(""))
@@ -1106,7 +1277,9 @@ where
                     Ok(V::Array(out))
                 }
                 "flatten" => {
-                    let a = args[0].as_array().ok_or("flatten ожидает массив")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "flatten ожидает массив")
+                    })?;
                     let mut out = Vec::with_capacity(a.len());
                     for item in a {
                         if let Some(sub) = item.as_array() {
@@ -1118,33 +1291,50 @@ where
                     Ok(V::Array(out))
                 }
                 "chunk" => {
-                    let a = args[0].as_array().ok_or("chunk ожидает массив")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "chunk ожидает массив")
+                    })?;
                     let sz = number(&args[1])? as usize;
                     if sz == 0 {
-                        return Err("chunk: размер должен быть положительным".into());
+                        return Err(Diagnostic::new(
+                            "invalid-argument",
+                            "chunk: размер должен быть положительным",
+                        ));
                     }
                     Ok(V::Array(
                         a.chunks(sz).map(|c| V::Array(c.to_vec())).collect(),
                     ))
                 }
                 "zip" => {
-                    let a = args[0].as_array().ok_or("zip ожидает два массива")?;
-                    let b = args[1].as_array().ok_or("zip ожидает два массива")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "zip ожидает два массива")
+                    })?;
+                    let b = args[1].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "zip ожидает два массива")
+                    })?;
                     Ok(V::Array(
                         a.iter().zip(b.iter()).map(|(x, y)| json!([x, y])).collect(),
                     ))
                 }
                 "first" => {
-                    let a = args[0].as_array().ok_or("first ожидает массив")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "first ожидает массив")
+                    })?;
                     Ok(a.first().cloned().unwrap_or(V::Null))
                 }
                 "last" => {
-                    let a = args[0].as_array().ok_or("last ожидает массив")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "last ожидает массив")
+                    })?;
                     Ok(a.last().cloned().unwrap_or(V::Null))
                 }
                 "groupBy" => {
-                    let a = args[0].as_array().ok_or("groupBy ожидает массив")?;
-                    let key = args[1].as_str().ok_or("groupBy ожидает имя поля-строку")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "groupBy ожидает массив")
+                    })?;
+                    let key = args[1].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "groupBy ожидает имя поля-строку")
+                    })?;
                     let mut groups: Vec<(V, Vec<V>)> = Vec::new();
                     for item in a {
                         let k = item.get(key).cloned().unwrap_or(V::Null);
@@ -1162,19 +1352,27 @@ where
                     ))
                 }
                 "keys" => {
-                    let o = args[0].as_object().ok_or("keys ожидает объект")?;
+                    let o = args[0].as_object().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "keys ожидает объект")
+                    })?;
                     Ok(V::Array(o.keys().map(|k| json!(k)).collect()))
                 }
                 "values" => {
-                    let o = args[0].as_object().ok_or("values ожидает объект")?;
+                    let o = args[0].as_object().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "values ожидает объект")
+                    })?;
                     Ok(V::Array(o.values().cloned().collect()))
                 }
                 "entries" => {
-                    let o = args[0].as_object().ok_or("entries ожидает объект")?;
+                    let o = args[0].as_object().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "entries ожидает объект")
+                    })?;
                     Ok(V::Array(o.iter().map(|(k, v)| json!([k, v])).collect()))
                 }
                 "fromEntries" => {
-                    let a = args[0].as_array().ok_or("fromEntries ожидает массив пар")?;
+                    let a = args[0].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "fromEntries ожидает массив пар")
+                    })?;
                     let mut out = serde_json::Map::with_capacity(a.len());
                     for item in a {
                         if let Some(pair) = item.as_array()
@@ -1186,9 +1384,10 @@ where
                         {
                             out.insert(text(k)?, v.clone());
                         } else {
-                            return Err(
-                                "fromEntries ожидает пары [key, value] или {key, value}".into()
-                            );
+                            return Err(Diagnostic::new(
+                                "invalid-argument",
+                                "fromEntries ожидает пары [key, value] или {key, value}",
+                            ));
                         }
                     }
                     Ok(V::Object(out))
@@ -1196,7 +1395,9 @@ where
                 "merge" => {
                     let mut out = serde_json::Map::new();
                     for arg in &args {
-                        let o = arg.as_object().ok_or("merge ожидает объекты")?;
+                        let o = arg.as_object().ok_or_else(|| {
+                            Diagnostic::new("invalid-argument", "merge ожидает объекты")
+                        })?;
                         for (k, v) in o {
                             out.insert(k.clone(), v.clone());
                         }
@@ -1204,11 +1405,17 @@ where
                     Ok(V::Object(out))
                 }
                 "pick" | "omit" => {
-                    let o = args[0].as_object().ok_or("ожидается объект")?;
-                    let ks = args[1].as_array().ok_or("ожидается массив ключей")?;
+                    let o = args[0]
+                        .as_object()
+                        .ok_or_else(|| Diagnostic::new("invalid-argument", "ожидается объект"))?;
+                    let ks = args[1].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-argument", "ожидается массив ключей")
+                    })?;
                     let mut key_set = std::collections::HashSet::with_capacity(ks.len());
                     for k in ks {
-                        key_set.insert(k.as_str().ok_or("ключ должен быть строкой")?);
+                        key_set.insert(k.as_str().ok_or_else(|| {
+                            Diagnostic::new("invalid-argument", "ключ должен быть строкой")
+                        })?);
                     }
                     let mut out = serde_json::Map::new();
                     for (k, v) in o {
@@ -1257,18 +1464,26 @@ where
                         };
                         Ok(json!(ok))
                     } else {
-                        let pat = args[1]
-                            .as_str()
-                            .ok_or("isValid ожидает строковый шаблон или правило")?;
+                        let pat = args[1].as_str().ok_or_else(|| {
+                            Diagnostic::new(
+                                "invalid-argument",
+                                "isValid ожидает строковый шаблон или правило",
+                            )
+                        })?;
                         let s = text(&args[0])?;
-                        Ok(json!(matches_constraint_pattern(&s, pat)))
+                        Ok(json!(matches_constraint_pattern(&s, pat)?))
                     }
                 }
-                _ => Err(format!("Неизвестная чистая функция {name}")),
+                _ => Err(Diagnostic::new(
+                    "unknown-function",
+                    format!("Неизвестная чистая функция {name}"),
+                )),
             }
         }
         "binary" => {
-            let op = e["operator"].as_str().ok_or("Некорректный оператор")?;
+            let op = e["operator"]
+                .as_str()
+                .ok_or_else(|| Diagnostic::new("invalid-operator", "Некорректный оператор"))?;
             let a = run(&e["left"], op == "??" || optional, next, resolver)?;
             match op {
                 "??" => {
@@ -1301,7 +1516,12 @@ where
                 "==" | "===" => Ok(json!(equal(&a, &b))),
                 "!=" | "!==" => Ok(json!(!equal(&a, &b))),
                 "<" | "<=" | ">" | ">=" => {
-                    let o = compare(&a, &b).ok_or("Сравнение ожидает два числа или две строки")?;
+                    let o = compare(&a, &b).ok_or_else(|| {
+                        Diagnostic::new(
+                            "type-mismatch",
+                            "Сравнение ожидает два числа или две строки",
+                        )
+                    })?;
                     Ok(json!(match op {
                         "<" => o.is_lt(),
                         "<=" => !o.is_gt(),
@@ -1318,7 +1538,10 @@ where
                         return Ok(json!([]));
                     }
                     if count > 4096 {
-                        return Err("Превышен предел размера диапазона (макс. 4096)".into());
+                        return Err(Diagnostic::new(
+                            "size-limit",
+                            "Превышен предел размера диапазона (макс. 4096)",
+                        ));
                     }
                     let items: Vec<V> = if inclusive {
                         (st..=en).map(|i| json!(i)).collect()
@@ -1341,12 +1564,20 @@ where
                         "*" => a * b,
                         "/" => a / b,
                         "%" => a % b,
-                        _ => return Err(format!("Неизвестный оператор {op}")),
+                        _ => {
+                            return Err(Diagnostic::new(
+                                "unknown-operator",
+                                format!("Неизвестный оператор {op}"),
+                            ));
+                        }
                     })
                 }
             }
         }
-        _ => Err(format!("Неизвестное выражение {k}")),
+        _ => Err(Diagnostic::new(
+            "unknown-expression",
+            format!("Неизвестное выражение {k}"),
+        )),
     }
 }
 pub fn references(v: &V) -> Vec<String> {
