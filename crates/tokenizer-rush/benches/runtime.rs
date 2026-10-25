@@ -41,6 +41,16 @@ fn main() {
     );
     let selected = std::env::var("RUSH_BENCH_CASE").ok();
     let operation = std::env::var("RUSH_BENCH_OPERATION").ok();
+    // Optional heap/work budgets for limit-overhead measurement: generous
+    // values keep the limits active without firing (default: off).
+    let heap_bytes = std::env::var("RUSH_BENCH_HEAP_BYTES")
+        .ok()
+        .map(|s| s.parse::<usize>().expect("integer RUSH_BENCH_HEAP_BYTES"))
+        .unwrap_or(usize::MAX);
+    let allocated_bytes = std::env::var("RUSH_BENCH_ALLOCATED_BYTES")
+        .ok()
+        .map(|s| s.parse::<usize>().expect("integer RUSH_BENCH_ALLOCATED_BYTES"))
+        .unwrap_or(usize::MAX);
     if let Some(operation) = &operation {
         assert!(
             ["compile", "prepared_run", "compile_and_run", "verify"].contains(&operation.as_str()),
@@ -139,7 +149,19 @@ fn main() {
             .is_none_or(|operation| operation == "prepared_run")
         {
             measure(name, "prepared_run", iterations, || {
-                program.run(budget, &cancellation, &[]).unwrap()
+                program
+                    .run_with_limits(
+                        themoretheless_tokenizer_rush::ExecutionLimits {
+                            max_heap_bytes: heap_bytes,
+                            max_allocated_bytes: allocated_bytes,
+                            ..themoretheless_tokenizer_rush::ExecutionLimits::new(budget)
+                        },
+                        &cancellation,
+                        &[],
+                        &[],
+                        &[],
+                    )
+                    .unwrap()
             });
         }
         if operation
