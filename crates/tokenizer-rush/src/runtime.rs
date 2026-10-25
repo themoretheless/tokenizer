@@ -20,7 +20,7 @@ mod env;
 mod expr;
 mod instance;
 pub mod json;
-mod memory;
+pub(crate) mod memory;
 mod model;
 mod mutation;
 pub(crate) mod ops;
@@ -584,10 +584,8 @@ impl<'s> Program<'s> {
             });
         }
         let root_contracts = prepared.root_contracts;
-        let memory = memory::Budget::with_allocated_limit(
-            limits.max_heap_bytes,
-            limits.max_allocated_bytes,
-        );
+        let memory =
+            memory::Budget::with_allocated_limit(limits.max_heap_bytes, limits.max_allocated_bytes);
         let mut runtime = Runtime {
             module: None,
             early_return: None,

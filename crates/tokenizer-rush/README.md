@@ -354,8 +354,10 @@ Both budgets follow the current call's `ExecutionLimits`: `call` and
 independent and reports `Execution cancelled` regardless of memory budgets.
 
 AST storage
-(bounded separately by `InputLimits::max_ast_bytes`), host allocations,
-allocator overhead and the experimental bytecode VM are outside this budget.
+(bounded separately by `InputLimits::max_ast_bytes`), host allocations and
+allocator overhead are outside this budget. The bytecode VM shares the same
+ledger: both limits apply to its eager materializations and to nested VM calls
+from the tree-walk runtime through a shared budget.
 
 Variable mutation, host callbacks and 2D polygon execution are supported. Parsing a construct does not yet imply that it can be evaluated.
 

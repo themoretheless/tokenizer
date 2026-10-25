@@ -1,9 +1,23 @@
 # Rush: дизайн лимитов памяти (draft)
 
 Дата: 2026-10-24. Ветка `language-improvements`, локальный macOS/aarch64. Это
-дизайн-документ: реализация не написана, семантика runtime не менялась. Все числа
+дизайн-документ; разделы 2a–2c, валидация (§4) и покрытие bytecode VM (§3)
+реализованы — статусы отмечены по месту и в сводной таблице ниже. Все числа
 воспроизводимы командами из [инвентаризации](benchmarks/rush-memory-inventory-2026-10-24.txt)
 (далее — «инвентаризация»).
+
+## Сводная таблица лимитов
+
+| Лимит | Что считает | Ошибка при исчерпании | Умолчание | Статус |
+| --- | --- | --- | --- | --- |
+| `InputLimits::max_ast_bytes` | удерживаемые токены + AST после разбора | диагностика `ast-limit` «Parse output byte limit exceeded» | 64 × `max_input_bytes` | реализовано (§2a) |
+| `ExecutionLimits::max_heap_bytes` | пик журнала резерваций + транзиентные буферы eager-операций (tree-walk и bytecode VM) | `Heap limit exceeded` | off (`usize::MAX`) | реализовано (§2b, VM — §3) |
+| `ExecutionLimits::max_allocated_bytes` | кумулятивная работа: рост строк/коллекций, eager-буферы, включая освобождённое (tree-walk и bytecode VM) | `Allocation limit exceeded` | off (`usize::MAX`) | реализовано (§2c, VM — §3) |
+| retained-бюджет инстанса (`set_memory_limit`) | живые данные инстанса на границах вызовов | `Instance retained-data limit exceeded` | off | существовал до драфта |
+| `ExecutionLimits::steps` | таксы выполнения (операции, не байты) | `Execution limit exceeded` | задаётся хостом | существовал до драфта |
+
+Полнота картины: первые три строки — предмет этого дизайна, две последние
+добавлены для ориентации и здесь не меняются.
 
 ## 1. Контекст и измеренная мотивация
 
@@ -177,14 +191,22 @@ lazy-пайплайнами, которые сегодня легально вы
   хостам — переменная окружения `MallocLargeCache` / давление
   `malloc_zone_pressure_relief` — относится к README/документации хоста, не к
   runtime-лимитам.
-- **Bytecode VM.** VM имеет только `fuel` (= `limits.steps`, bytecode/vm.rs:31,
-  55, 198-215) и не пользуется `Budget`/`Reservation` — grep по
-  `crates/tokenizer-rush/src/bytecode*.rs` не находит ни одного обращения к
-  `memory::`. Стек/кадры VM — обычные `Vec::with_capacity` (vm.rs:47-49).
-  Лимиты 2b/2c в предлагаемом виде VM **не покрывают**; если bytecode-режим
-  должен получить те же гарантии, это отдельная работа (свои точки учёта в
-  аллокаторах значений VM), и её следует явно назвать в плане, а не считать
-  включённой.
+- **Bytecode VM.** ~~VM имеет только `fuel`~~ → **Статус: покрыто 2026-10-25
+  (этот коммит).** `Vm` получил поле `memory: Budget` (bytecode/vm.rs):
+  `Vm::with_limits` строит бюджет из `limits.max_heap_bytes` /
+  `limits.max_allocated_bytes`, `Vm::new` оставляет оба лимита off. Все бинарные
+  операции идут через обёртку `Vm::eval_binary`, которая заряжает кумулятивный
+  бюджет за свежее хранилище результата (строки — длиной, списки/кортежи/записи —
+  элементами по размеру слота Value); то же делают литералы BuildList/BuildTuple/
+  BuildRecord и интерполяция. Пиковый учёт — `memory::Cover` на буферах
+  eager-материализаций (`range`, `collect`, `map`/`filter`/`flat_map`/`zip`/
+  `group_by` по спискам). Вложенный VM из tree-walk (runtime/calls.rs) создаётся
+  через `Vm::with_shared_budget` и делит бюджет вызывающего, поэтому лимиты
+  держатся и на границе двух runtime. Ошибки — те же `Heap limit exceeded` /
+  `Allocation limit exceeded`. Тесты — crates/tokenizer-rush/tests/bytecode_limits.rs.
+  Ленивые последовательности VM (`BytecodeSequence`/`BytecodeIterator`) по-прежнему
+  не материализуют источники и в учёте не нуждаются; кадры/стек VM (фиксированные
+  `Vec::with_capacity` на запуск) остаются вне журнала, как и раньше.
 - **Аллокаторный оверхед и выравнивание.** Все лимиты считают запрошенные
   байты, а не реальные footprint аллокатора (та же оговорка, что в
   memory.rs:1-2 и в bench `memory`: «Requested heap bytes; stack/allocator
