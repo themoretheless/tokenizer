@@ -55,7 +55,8 @@ impl<'s> Runtime<'_, 's> {
         let result = match function {
             Value::Function(function) => self.call_user(function, arguments, span),
             Value::BytecodeFunction(closure) => {
-                let mut vm = crate::bytecode::Vm::new(self.remaining);
+                let mut vm =
+                    crate::bytecode::Vm::with_shared_budget(self.remaining, self.memory.clone());
                 let static_args: Vec<_> = arguments.iter().filter_map(|a| a.to_static()).collect();
                 if static_args.len() != arguments.len() {
                     return self.error(span, "Non-static arguments in bytecode call");
@@ -206,7 +207,9 @@ impl<'s> Runtime<'_, 's> {
                     };
                     self.charge(1, span)?;
                     output.push(item);
-                    cover.cover_vec(&output).map_err(|e| self.cover_error(span, e))?;
+                    cover
+                        .cover_vec(&output)
+                        .map_err(|e| self.cover_error(span, e))?;
                 }
                 return Ok(Value::List(output));
             }
@@ -844,7 +847,9 @@ impl<'s> Runtime<'_, 's> {
                         return self.error(span, "Collection item limit exceeded");
                     }
                     values.push(Value::Number(current));
-                    cover.cover_vec(&values).map_err(|e| self.cover_error(span, e))?;
+                    cover
+                        .cover_vec(&values)
+                        .map_err(|e| self.cover_error(span, e))?;
                     let next = (values.len() as f64).mul_add(step, start);
                     if !next.is_finite() || next == current {
                         return self.error(span, "Range cannot advance finitely");
@@ -921,7 +926,9 @@ impl<'s> Runtime<'_, 's> {
                     } else if let Value::List(values) = &mut groups[position].1 {
                         self.collection_growth(values.len(), 1, span)?;
                         values.push(item);
-                        covers[position].cover_vec(values).map_err(|e| self.cover_error(span, e))?;
+                        covers[position]
+                            .cover_vec(values)
+                            .map_err(|e| self.cover_error(span, e))?;
                     }
                 }
                 let group_shape: RecordShape = Rc::from([String::from("key"), String::from(field)]);
@@ -984,14 +991,18 @@ impl<'s> Runtime<'_, 's> {
                     Builtin::Map => {
                         self.collection_growth(output.len(), 1, span)?;
                         output.push(result);
-                        cover.cover_vec(&output).map_err(|e| self.cover_error(span, e))?;
+                        cover
+                            .cover_vec(&output)
+                            .map_err(|e| self.cover_error(span, e))?;
                     }
                     Builtin::FlatMap => match result {
                         Value::List(values) => {
                             self.charge(values.len(), span)?;
                             self.collection_growth(output.len(), values.len(), span)?;
                             output.extend(values);
-                            cover.cover_vec(&output).map_err(|e| self.cover_error(span, e))?;
+                            cover
+                                .cover_vec(&output)
+                                .map_err(|e| self.cover_error(span, e))?;
                         }
                         _ => return self.error(span, "Flat map callback must return a list"),
                     },
@@ -999,7 +1010,9 @@ impl<'s> Runtime<'_, 's> {
                         Value::Bool(true) => {
                             self.collection_growth(output.len(), 1, span)?;
                             output.push(item);
-                            cover.cover_vec(&output).map_err(|e| self.cover_error(span, e))?;
+                            cover
+                                .cover_vec(&output)
+                                .map_err(|e| self.cover_error(span, e))?;
                         }
                         Value::Bool(false) => {}
                         _ => return self.error(span, "Filter callback must return a boolean"),
