@@ -213,7 +213,11 @@ impl<'s> Runtime<'_, 's> {
                 }
                 Ok(assigned)
             }
-            ExprKind::Lambda { parameters, body } => {
+            ExprKind::Lambda {
+                parameters,
+                body,
+                is_async,
+            } => {
                 let body = self.shared_body(expression.span, || {
                     FunctionBody::Expression((**body).clone())
                 });
@@ -227,7 +231,7 @@ impl<'s> Runtime<'_, 's> {
                     environment: self.capture(expression.span, environment)?,
                     references: self.current_references.clone(),
                     siblings: Rc::new(Vec::new()),
-                    is_async: false,
+                    is_async: *is_async,
                 })))
             }
             ExprKind::Tuple(items) | ExprKind::List(items) => {

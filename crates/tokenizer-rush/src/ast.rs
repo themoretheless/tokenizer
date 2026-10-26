@@ -129,7 +129,7 @@ pub struct Expr<'s> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprKind<'s> {
     Try(Box<Expr<'s>>),
-    /// `await expr`; stage A supports it as a task statement (≡ `yield`).
+    /// `await expr` in an async function or closure body.
     Await(Box<Expr<'s>>),
     If {
         condition: Box<Expr<'s>>,
@@ -139,6 +139,8 @@ pub enum ExprKind<'s> {
     Lambda {
         parameters: Vec<Expr<'s>>,
         body: Box<Expr<'s>>,
+        /// Calling an async closure creates a task over its captured environment.
+        is_async: bool,
     },
     Name(Name<'s>),
     Number(&'s str),

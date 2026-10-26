@@ -77,13 +77,15 @@ legacy spellings. `Geometry`, `Row`, `T`, `print`, `where`, `select`, `count`,
   as `echo "hello"` use whitespace-separated arguments on the same line,
   beginning with a name or scalar literal. Use parenthesized calls for list,
   map and unary arguments.
-- `async fn` declares a task function: calling it spawns a coroutine task and
-  returns an opaque task handle. Inside an `async fn`, statement, `let` and
-  `return` positions support `await Wait.After(..)` / `await Wait.Event(..)`
-  and `await task`, which suspends until the task completes and yields its
-  result. Awaiting any other value returns it immediately. `await` outside an
-  async body is a parse error (`await-outside-async`); async closures, event
-  payloads and bytecode-VM `await` remain unsupported (see
+- `async fn` and `async (x) => expr` declare task functions: calling them
+  spawns a coroutine task and returns an opaque task handle. Async closures
+  also accept `async => expr` and `async x => expr`, and capture their
+  environment like ordinary lambdas. Statement, `let` and `return` positions
+  support `await Wait.After(..)` / `await Wait.Event(..)` and `await task`;
+  awaiting any other value returns it immediately. Event payloads are delivered
+  by `CoroutineScheduler::emit_with_payload`; `emit` supplies `null`. `await`
+  outside an async body is a parse error (`await-outside-async`); bytecode-VM
+  `await` and async closures remain unsupported (see
   `docs/rush-async-design.md`).
 
 ## Pipelines and match

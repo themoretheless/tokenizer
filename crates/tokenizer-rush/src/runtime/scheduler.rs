@@ -32,12 +32,12 @@ struct ScheduledTask {
     order: u64,
     waiting: Waiting,
     /// Copied from the coroutine at suspend time: an `await` suspension
-    /// consumes a delivered wake value (task result, or null for
-    /// timer/event), a plain `yield` does not.
+    /// consumes a delivered wake value (task result, event payload, or null),
+    /// a plain `yield` does not.
     delivers: bool,
 }
 /// Borrows one instance; time advances only through `poll`, events through `emit`.
-/// Events are broadcast to current subscribers, are not buffered, and carry no payload.
+/// Events are broadcast with an optional payload to current subscribers, never buffered.
 /// Drop cancels every owned task, closing its iterators and removing subscriptions.
 pub struct CoroutineScheduler<'i, 'a, 's> {
     instance: &'i mut ScriptInstance<'a, 's>,
@@ -54,7 +54,7 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
             order: 0,
         }
     }
-    /// Access handlers/state on the same instance, for example to deliver an event payload.
+    /// Access handlers/state on the same instance between scheduler calls.
     pub fn instance_mut(&mut self) -> &mut ScriptInstance<'a, 's> {
         self.instance
     }
@@ -125,13 +125,23 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
         );
         Ok(id)
     }
-    /// Wake all current subscribers in creation order at the scheduler's current time.
+    /// Wake all current subscribers with `null`, preserving the original API.
     pub fn emit(&mut self, event: &str) -> Result<usize> {
+        self.emit_with_payload(event, Value::Null)
+    }
+    /// Wake all current subscribers and deliver a clone of `payload` to each
+    /// `await Wait.Event`. Events are not buffered for future subscribers.
+    pub fn emit_with_payload(&mut self, event: &str, payload: Value<'s>) -> Result<usize> {
         self.check_cancelled()?;
         let mut count = 0;
-        for task in self.tasks.values_mut() {
+        for (id, task) in self.tasks.iter_mut() {
             if matches!(&task.waiting,Waiting::Event(name) if name == event) {
                 task.waiting = Waiting::Ready(self.now);
+                if task.delivers
+                    && let Some(coroutine) = self.instance.runtime.coroutines.get_mut(id)
+                {
+                    coroutine.pending_wake = Some(payload.clone());
+                }
                 count += 1;
             }
         }
@@ -220,7 +230,12 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
     }
     /// Wake or fail every task awaiting `finished`, in creation order; a
     /// failure cascades to the waiters' own waiters.
-    fn settle_waiters(&mut self, finished: CoroutineId, outcome: &ScheduledState<'s>, steps: &mut Vec<ScheduledStep<'s>>) {
+    fn settle_waiters(
+        &mut self,
+        finished: CoroutineId,
+        outcome: &ScheduledState<'s>,
+        steps: &mut Vec<ScheduledStep<'s>>,
+    ) {
         let mut waiters: Vec<_> = self
             .tasks
             .iter()
@@ -299,9 +314,8 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
         for (_, id) in orphaned {
             self.tasks.remove(&id);
             self.instance.cancel_coroutine(id);
-            let state = ScheduledState::Failed(
-                self.error::<()>("Awaited task was cancelled").unwrap_err(),
-            );
+            let state =
+                ScheduledState::Failed(self.error::<()>("Awaited task was cancelled").unwrap_err());
             self.settle_waiters(id, &state, &mut steps);
             steps.push(ScheduledStep { id, state });
         }
@@ -371,7 +385,10 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
             };
             steps.push(ScheduledStep { id, state });
             if let Some(step) = steps.last() {
-                if matches!(step.state, ScheduledState::Complete(_) | ScheduledState::Failed(_)) {
+                if matches!(
+                    step.state,
+                    ScheduledState::Complete(_) | ScheduledState::Failed(_)
+                ) {
                     let state = step.state.clone();
                     self.settle_waiters(id, &state, &mut steps);
                 }
@@ -440,6 +457,9 @@ impl OwnedCoroutineScheduler {
     }
     pub fn emit(&mut self, event: &str) -> Result<usize> {
         self.with_scheduler(|s| s.emit(event))
+    }
+    pub fn emit_with_payload(&mut self, event: &str, payload: Value<'static>) -> Result<usize> {
+        self.with_scheduler(|s| s.emit_with_payload(event, payload))
     }
     /// Adopt a task handle produced by an `async fn` call inside the script.
     pub fn spawn_task(&mut self, id: CoroutineId) -> Result<CoroutineId> {

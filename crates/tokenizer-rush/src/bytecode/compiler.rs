@@ -1528,7 +1528,17 @@ impl<'s> Compiler<'s> {
                 let end_len = self.current().chunk.code.len();
                 self.current().chunk.patch_jump(end_jump, end_len);
             }
-            ExprKind::Lambda { parameters, body } => {
+            ExprKind::Lambda {
+                parameters,
+                body,
+                is_async,
+            } => {
+                if *is_async {
+                    return Err(self.error(
+                        span,
+                        "async closures are not supported in bytecode compilation",
+                    ));
+                }
                 self.push_state(None, parameters.len());
                 for (i, p) in parameters.iter().enumerate() {
                     if let Some(p_name) = extract_pattern_name(p) {

@@ -543,7 +543,14 @@ impl<'s> Writer<'s> {
                 }
                 self.text("}");
             }
-            ExprKind::Lambda { parameters, body } => {
+            ExprKind::Lambda {
+                parameters,
+                body,
+                is_async,
+            } => {
+                if *is_async {
+                    self.text("async ");
+                }
                 self.text("(");
                 for (i, pattern) in parameters.iter().enumerate() {
                     if i > 0 {

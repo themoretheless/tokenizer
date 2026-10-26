@@ -7,11 +7,11 @@ fn nested_lambdas_preserve_parameters_and_body() {
     let StmtKind::Declaration { value, .. } = &parsed.module.items[0].kind else {
         panic!()
     };
-    let ExprKind::Lambda { parameters, body } = &value.kind else {
+    let ExprKind::Lambda { parameters, body, .. } = &value.kind else {
         panic!()
     };
     assert!(matches!(&parameters[0].kind, ExprKind::Name(name) if name.text == "factor"));
-    let ExprKind::Lambda { parameters, body } = &body.kind else {
+    let ExprKind::Lambda { parameters, body, .. } = &body.kind else {
         panic!()
     };
     assert_eq!(

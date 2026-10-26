@@ -61,9 +61,59 @@ fn cancellation_drop_and_broadcast_release_subscriptions() {
     scheduler.spawn("task", &[], LIMITS).unwrap();
     scheduler.poll(Duration::ZERO, LIMITS).unwrap();
     token.cancel();
-    assert!(scheduler.emit("go").is_err());
+    assert!(
+        scheduler
+            .emit_with_payload("go", Value::Number(1.))
+            .is_err()
+    );
     assert!(scheduler.is_empty());
 }
+#[test]
+fn event_payload_reaches_all_awaiters_and_emit_defaults_to_null() {
+    let source = format!(
+        "{WAIT}async fn listener() {{let payload = await Wait.Event('go'); return payload}}"
+    );
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    scheduler.spawn("listener", &[], LIMITS).unwrap();
+    scheduler.spawn("listener", &[], LIMITS).unwrap();
+    assert_eq!(
+        scheduler
+            .emit_with_payload("go", Value::String("early".into()))
+            .unwrap(),
+        0
+    );
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert_eq!(steps.len(), 2);
+    assert_eq!(scheduler.subscriptions("go"), 2);
+    assert_eq!(
+        scheduler
+            .emit_with_payload("go", Value::String("value".into()))
+            .unwrap(),
+        2
+    );
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert_eq!(steps.len(), 2);
+    for step in steps {
+        assert_eq!(
+            step.state,
+            ScheduledState::Complete(Value::String("value".into()))
+        );
+    }
+    scheduler.spawn("listener", &[], LIMITS).unwrap();
+    scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert_eq!(scheduler.emit("go").unwrap(), 1);
+    assert_eq!(
+        scheduler.poll(Duration::ZERO, LIMITS).unwrap()[0].state,
+        ScheduledState::Complete(Value::Null)
+    );
+    assert!(scheduler.is_empty());
+}
+
 #[test]
 fn bad_requests_fail_one_task_and_monotonic_time_preserves_peers() {
     let source = format!(
@@ -219,14 +269,18 @@ fn async_tasks_spawned_by_name_await_events_and_fail_terminally() {
     let listener = scheduler.spawn("listener", &[], LIMITS).unwrap();
     let bad = scheduler.spawn("bad", &[], LIMITS).unwrap();
     let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
-    assert!(matches!(&steps[0].state, ScheduledState::Waiting(WakeRequest::Event(name)) if name == "go"));
-    assert!(matches!(&steps[1].state, ScheduledState::Waiting(WakeRequest::After(_))));
+    assert!(
+        matches!(&steps[0].state, ScheduledState::Waiting(WakeRequest::Event(name)) if name == "go")
+    );
+    assert!(matches!(
+        &steps[1].state,
+        ScheduledState::Waiting(WakeRequest::After(_))
+    ));
     assert_eq!(scheduler.subscriptions("go"), 1);
     assert_eq!(scheduler.emit("go").unwrap(), 1);
     let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
     assert_eq!(steps.len(), 2);
-    let by_id: std::collections::HashMap<_, _> =
-        steps.iter().map(|s| (s.id, &s.state)).collect();
+    let by_id: std::collections::HashMap<_, _> = steps.iter().map(|s| (s.id, &s.state)).collect();
     assert!(matches!(
         by_id[&listener],
         ScheduledState::Complete(Value::Number(1.0))
@@ -304,7 +358,10 @@ fn await_task_delivers_the_result_and_preserves_fairness() {
     // First step: outer suspends on the task handle; inner is auto-adopted.
     let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
     assert!(
-        matches!(&steps[0].state, ScheduledState::Waiting(WakeRequest::Task(_))),
+        matches!(
+            &steps[0].state,
+            ScheduledState::Waiting(WakeRequest::Task(_))
+        ),
         "{:?}",
         steps[0].state
     );
@@ -351,8 +408,16 @@ fn await_task_failure_is_terminal_and_cascades_to_waiters() {
     // inner fails; the failure terminates middle and top in the same poll,
     // after the failing task's own step.
     assert_eq!(steps.len(), 3, "{steps:?}");
-    assert!(matches!(&steps[0].state, ScheduledState::Failed(e) if e.message.contains("missing")), "{:?}", steps[0]);
-    assert!(steps.iter().all(|s| matches!(&s.state, ScheduledState::Failed(_))));
+    assert!(
+        matches!(&steps[0].state, ScheduledState::Failed(e) if e.message.contains("missing")),
+        "{:?}",
+        steps[0]
+    );
+    assert!(
+        steps
+            .iter()
+            .all(|s| matches!(&s.state, ScheduledState::Failed(_)))
+    );
     assert!(scheduler.is_empty());
 }
 
@@ -455,6 +520,41 @@ fn cancelling_the_awaited_task_cancels_waiters_and_orphans_fail() {
         "{:?}",
         steps
     );
+    assert!(scheduler.is_empty());
+}
+
+#[test]
+fn async_closures_create_tasks_capture_and_await() {
+    let source = format!(
+        "{WAIT}let captured = 40; let identity = async x => x; let direct = async => captured; let awaiting = async x => await x; let awaited_task = identity(2); let direct_task = direct(); let await_task = awaiting(awaited_task)"
+    );
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let direct = instance.get("direct_task").unwrap().task_id().unwrap();
+    let awaiting = instance.get("await_task").unwrap().task_id().unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    scheduler.spawn_task(direct).unwrap();
+    scheduler.spawn_task(awaiting).unwrap();
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0].state, ScheduledState::Complete(Value::Number(40.)));
+    assert!(
+        matches!(
+            steps[1].state,
+            ScheduledState::Waiting(WakeRequest::Task(_))
+        ),
+        "{:?}",
+        steps[1].state
+    );
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].state, ScheduledState::Complete(Value::Number(2.)));
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].state, ScheduledState::Complete(Value::Number(2.)));
     assert!(scheduler.is_empty());
 }
 
