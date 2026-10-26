@@ -537,6 +537,7 @@ pub(super) fn owned_value(value: Value<'_>) -> std::result::Result<Value<'static
         ),
         Value::Host(v) => Value::Host(v),
         Value::Builtin(v) => Value::Builtin(v),
+        Value::Task(id) => Value::Task(id),
         Value::BytecodeFunction(v) => Value::BytecodeFunction(v),
         Value::BytecodeSequence(v) => Value::BytecodeSequence(v),
         Value::BytecodeIterator(v) => Value::BytecodeIterator(v),

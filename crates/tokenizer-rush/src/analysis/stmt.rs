@@ -159,6 +159,7 @@ impl<'s> Checker<'s> {
                     name,
                     parameters,
                     body,
+                    is_async,
                     ..
                 } if claimed.insert(name.text)
                     && !self.scopes.last().unwrap().contains_key(name.text) =>
@@ -170,7 +171,10 @@ impl<'s> Checker<'s> {
                         .unwrap()
                         .insert(name.text, (true, name.span, arity, None));
                     self.hoisted_declarations.insert(name.span.start);
-                    if Self::contains_yield(&body.stmts) {
+                    // Async functions suspend by design; a synchronous call
+                    // spawns a task and returns its handle, so they are not
+                    // "suspending" for the coroutine-call check.
+                    if !*is_async && Self::contains_yield(&body.stmts) {
                         self.suspending_functions.insert(name.span.start);
                     }
                     hoisted_functions.push(idx);
@@ -281,6 +285,7 @@ impl<'s> Checker<'s> {
                         parameters,
                         body,
                         result,
+                        ..
                     } = &statements[idx].kind
                     else {
                         continue;
@@ -504,6 +509,9 @@ impl<'s> Checker<'s> {
     pub(super) fn contains_yield(statements: &[Stmt<'s>]) -> bool {
         statements.iter().any(|statement| match &statement.kind {
             StmtKind::Yield(_) => true,
+            StmtKind::Expr(expression) => {
+                matches!(&expression.kind, ExprKind::Await(_))
+            }
             StmtKind::If {
                 then_block,
                 else_block,
@@ -769,8 +777,11 @@ impl<'s> Checker<'s> {
                 parameters,
                 body,
                 result,
+                is_async,
             } => {
-                if Self::contains_yield(&body.stmts) {
+                // Async functions suspend by design and are called
+                // synchronously: the call spawns a task and returns a handle.
+                if !*is_async && Self::contains_yield(&body.stmts) {
                     self.suspending_functions.insert(name.span.start);
                 }
                 let result_type = result.as_ref().and_then(|ty| self.checked_annotation(ty));

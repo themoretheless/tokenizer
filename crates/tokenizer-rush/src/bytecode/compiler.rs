@@ -1721,6 +1721,9 @@ impl<'s> Compiler<'s> {
                     self.current().chunk.patch_jump(ej, end_target);
                 }
             }
+            ExprKind::Await(_) => {
+                return Err(self.error(span, "await is not supported in bytecode compilation"));
+            }
             _ => {
                 return Err(self.error(span, "Expression not supported in bytecode compilation"));
             }

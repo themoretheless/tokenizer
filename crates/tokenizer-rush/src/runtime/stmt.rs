@@ -364,6 +364,7 @@ impl<'s> Runtime<'_, 's> {
             parameters,
             body,
             result,
+            is_async,
         } = &statement.kind
         else {
             unreachable!("function declaration");
@@ -408,6 +409,7 @@ impl<'s> Runtime<'_, 's> {
             environment: self.capture_excluding(statement.span, environment, excluded_defs)?,
             references: self.current_references.clone(),
             siblings: Rc::new(Vec::new()),
+            is_async: *is_async,
         })
     }
 

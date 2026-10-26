@@ -1070,6 +1070,7 @@ impl<'s> Runtime<'_, 's> {
                 .map_err(|e| self.environment_error(name.span, e))?,
             references: Rc::new(Vec::new()),
             siblings: Rc::new(Vec::new()),
+            is_async: false,
         })))
     }
 
@@ -1160,6 +1161,11 @@ impl<'s> Runtime<'_, 's> {
         }
         if matches!(&*function.body, FunctionBody::Constructor { .. }) {
             return self.call_constructor(&function, arguments, span);
+        }
+        if function.is_async {
+            // Stage A: the call spawns a task and returns its handle; the body
+            // runs only through resume_coroutine / the scheduler.
+            return self.spawn_async_task(function, &arguments, span);
         }
         let mut environment = self.take_call_environment(&function.environment);
         for sib in function.siblings.iter() {

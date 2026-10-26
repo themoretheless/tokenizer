@@ -76,6 +76,9 @@ pub enum StmtKind<'s> {
         parameters: Vec<Parameter<'s>>,
         result: Option<Type<'s>>,
         body: Block<'s>,
+        /// `async fn`: calling it spawns a task and returns its handle;
+        /// the body runs only through the coroutine machine.
+        is_async: bool,
     },
     Declaration {
         role: DeclarationRole,
@@ -126,6 +129,8 @@ pub struct Expr<'s> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprKind<'s> {
     Try(Box<Expr<'s>>),
+    /// `await expr`; stage A supports it as a task statement (≡ `yield`).
+    Await(Box<Expr<'s>>),
     If {
         condition: Box<Expr<'s>>,
         then_value: Box<Expr<'s>>,

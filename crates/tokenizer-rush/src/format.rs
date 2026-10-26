@@ -274,7 +274,11 @@ impl<'s> Writer<'s> {
                 parameters,
                 result,
                 body,
+                is_async,
             } => {
+                if *is_async {
+                    self.text("async ");
+                }
                 self.text("fn ");
                 self.name(name);
                 self.text("(");
@@ -468,6 +472,10 @@ impl<'s> Writer<'s> {
             ExprKind::Unary { operator, value } => {
                 self.text(operator);
                 self.text(" ");
+                self.expr(value, 19);
+            }
+            ExprKind::Await(value) => {
+                self.text("await ");
                 self.expr(value, 19);
             }
             ExprKind::Binary {
