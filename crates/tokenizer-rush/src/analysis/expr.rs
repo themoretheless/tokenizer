@@ -371,6 +371,8 @@ impl<'s> Checker<'s> {
 
     pub(super) fn expr(&mut self, expr: &Expr<'s>) {
         match &expr.kind {
+            // Stage A: the operand is analysed; result hints arrive in stage B.
+            ExprKind::Await(value) => self.expr(value),
             ExprKind::Try(value) => {
                 if self.calls {
                     let operand = self.shape(value);

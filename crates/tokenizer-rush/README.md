@@ -77,8 +77,12 @@ legacy spellings. `Geometry`, `Row`, `T`, `print`, `where`, `select`, `count`,
   as `echo "hello"` use whitespace-separated arguments on the same line,
   beginning with a name or scalar literal. Use parenthesized calls for list,
   map and unary arguments.
-- `async` and `await` are reserved and produce `unsupported-syntax`;
-  their runtime and grammar are deliberately not implied by highlighting.
+- `async fn` declares a task function: calling it spawns a coroutine task and
+  returns an opaque task handle; statement-position `await Wait.After(..)` /
+  `await Wait.Event(..)` inside an `async fn` is the typed form of `yield`.
+  `await` outside an async body is a parse error (`await-outside-async`);
+  awaiting another task, async closures and event payloads are not part of
+  this stage (see `docs/rush-async-design.md`).
 
 ## Pipelines and match
 

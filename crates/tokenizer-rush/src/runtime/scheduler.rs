@@ -91,6 +91,29 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
         );
         Ok(id)
     }
+    /// Adopt a task produced by calling an `async fn` in the script (the id
+    /// comes from `Value::Task`): the task becomes ready at the current time.
+    pub fn spawn_task(&mut self, id: CoroutineId) -> Result<CoroutineId> {
+        self.check_cancelled()?;
+        if !self.instance.runtime.coroutines.contains_key(&id) {
+            return self.error("Task is not active");
+        }
+        if self.tasks.contains_key(&id) {
+            return Ok(id);
+        }
+        let Some(order) = self.order.checked_add(1) else {
+            return self.error("Scheduler order exhausted");
+        };
+        self.order = order;
+        self.tasks.insert(
+            id,
+            ScheduledTask {
+                order,
+                waiting: Waiting::Ready(self.now),
+            },
+        );
+        Ok(id)
+    }
     /// Wake all current subscribers in creation order at the scheduler's current time.
     pub fn emit(&mut self, event: &str) -> Result<usize> {
         self.check_cancelled()?;
@@ -261,6 +284,10 @@ impl OwnedCoroutineScheduler {
     }
     pub fn emit(&mut self, event: &str) -> Result<usize> {
         self.with_scheduler(|s| s.emit(event))
+    }
+    /// Adopt a task handle produced by an `async fn` call inside the script.
+    pub fn spawn_task(&mut self, id: CoroutineId) -> Result<CoroutineId> {
+        self.with_scheduler(|s| s.spawn_task(id))
     }
     pub fn cancel(&mut self, id: CoroutineId) -> bool {
         self.with_scheduler(|s| s.cancel(id))

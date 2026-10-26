@@ -172,3 +172,118 @@ fn owned_scheduler_preserves_time_events_and_locals_between_host_calls() {
     );
     assert!(scheduler.is_empty());
 }
+
+#[test]
+fn async_fn_call_returns_a_task_handle_adopted_by_the_scheduler() {
+    let source = format!(
+        "{WAIT}async fn worker()->number {{await Wait.After(1); return 42}}; let t = worker()"
+    );
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    // The async call already ran at instantiate: it returned a handle without
+    // executing the body.
+    let handle = scheduler.instance_mut().get("t").unwrap();
+    let id = handle.task_id().expect("task handle");
+    scheduler.spawn_task(id).unwrap();
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert_eq!(steps.len(), 1);
+    assert!(
+        matches!(&steps[0].state, ScheduledState::Waiting(WakeRequest::After(d)) if *d == Duration::from_secs(1))
+    );
+    let steps = scheduler.poll(Duration::from_secs(1), LIMITS).unwrap();
+    assert!(
+        matches!(&steps[0].state, ScheduledState::Complete(Value::Number(n)) if *n == 42.0),
+        "{:?}",
+        steps[0].state
+    );
+    assert!(scheduler.is_empty());
+    // Re-adopting an inactive handle is an error, not a panic.
+    assert!(scheduler.spawn_task(id).is_err());
+}
+
+#[test]
+fn async_tasks_spawned_by_name_await_events_and_fail_terminally() {
+    let source = format!(
+        "{WAIT}async fn listener()->number {{await Wait.Event('go'); return 1}}; async fn bad() {{await Wait.After(0); missing()}}"
+    );
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    let listener = scheduler.spawn("listener", &[], LIMITS).unwrap();
+    let bad = scheduler.spawn("bad", &[], LIMITS).unwrap();
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert!(matches!(&steps[0].state, ScheduledState::Waiting(WakeRequest::Event(name)) if name == "go"));
+    assert!(matches!(&steps[1].state, ScheduledState::Waiting(WakeRequest::After(_))));
+    assert_eq!(scheduler.subscriptions("go"), 1);
+    assert_eq!(scheduler.emit("go").unwrap(), 1);
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert_eq!(steps.len(), 2);
+    let by_id: std::collections::HashMap<_, _> =
+        steps.iter().map(|s| (s.id, &s.state)).collect();
+    assert!(matches!(
+        by_id[&listener],
+        ScheduledState::Complete(Value::Number(1.0))
+    ));
+    assert!(matches!(by_id[&bad], ScheduledState::Failed(_)));
+    assert!(scheduler.is_empty());
+}
+
+#[test]
+fn nested_await_is_a_stage_a_boundary_error() {
+    let source = format!("{WAIT}async fn f() {{let x = await Wait.After(1)}}");
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    scheduler.spawn("f", &[], LIMITS).unwrap();
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    let ScheduledState::Failed(error) = &steps[0].state else {
+        panic!("{:?}", steps[0].state)
+    };
+    assert!(
+        error.message.contains("only supported as a statement"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn async_fn_result_annotation_is_enforced() {
+    // Static path: a literal mismatch is rejected at compile time, exactly as
+    // for plain functions; the runtime completion check is the shared
+    // resume_coroutine path covered by coroutine tests.
+    let source = format!("{WAIT}async fn f()->str {{await Wait.After(0); return 1}}");
+    let Err(error) = Program::compile(&source) else {
+        panic!("mismatched async result compiled")
+    };
+    assert!(
+        error.message.contains("result annotation"),
+        "{}",
+        error.message
+    );
+    // A matching annotation compiles and the value arrives at completion.
+    let source = format!("{WAIT}async fn f()->str {{await Wait.After(0); return 'ok'}}");
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    scheduler.spawn("f", &[], LIMITS).unwrap();
+    scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert!(
+        matches!(&steps[0].state, ScheduledState::Complete(Value::String(s)) if s == "ok"),
+        "{:?}",
+        steps[0].state
+    );
+}

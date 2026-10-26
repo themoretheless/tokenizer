@@ -10,6 +10,19 @@ impl CoroutineId {
     }
 }
 
+fn next_coroutine_id(span: Span) -> Result<CoroutineId> {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .map(CoroutineId)
+        .map_err(|_| RuntimeError {
+            module: None,
+            span,
+            message: "Coroutine IDs exhausted".into(),
+            stack: Vec::new(),
+            location: None,
+        })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum CoroutineState<'s> {
     Yielded(Value<'s>),
@@ -267,6 +280,17 @@ impl<'s> Coroutine<'s> {
                             };
                             self.push(frame, runtime, span)?;
                         }
+                        StmtKind::Expr(expression)
+                            if matches!(&expression.kind, ExprKind::Await(_)) =>
+                        {
+                            // `await <wait request>` as a task statement is the
+                            // typed form of `yield`: suspend with the request.
+                            let ExprKind::Await(operand) = &expression.kind else {
+                                unreachable!("await statement")
+                            };
+                            let value = runtime.expr(operand, environment)?;
+                            return Ok(CoroutineState::Yielded(value));
+                        }
                         _ => {
                             let (value, flow) =
                                 runtime.statements(std::slice::from_ref(statement), environment)?;
@@ -292,6 +316,67 @@ impl<'s> Coroutine<'s> {
         }
     }
 }
+impl<'s> Runtime<'_, 's> {
+    /// Stage A async/await: calling an `async fn` registers a task without
+    /// running its body and returns the opaque handle to the caller. The task
+    /// starts when the host resumes it or the scheduler adopts the handle.
+    pub(super) fn spawn_async_task(
+        &mut self,
+        function: Rc<Closure<'s>>,
+        arguments: &[Value<'s>],
+        span: Span,
+    ) -> Result<Value<'s>> {
+        let FunctionBody::Block(body) = &*function.body else {
+            return self.error(span, "Async task requires a named function body");
+        };
+        let mut environment = Environment::child(function.environment.clone());
+        for sib in function.siblings.iter() {
+            if sib.name == function.name {
+                continue;
+            }
+            if let Some(sib_name) = sib.name {
+                let mut bound = sib.clone();
+                bound.siblings = function.siblings.clone();
+                environment
+                    .insert(sib_name, Value::Function(Rc::new(bound)))
+                    .map_err(|e| self.environment_error(span, e))?;
+            }
+        }
+        if let Some(name) = function.name {
+            environment
+                .insert(name, Value::Function(function.clone()))
+                .map_err(|e| self.environment_error(span, e))?;
+        }
+        for ((parameter, ty), value) in function
+            .parameters
+            .iter()
+            .zip(&function.parameter_types)
+            .zip(arguments)
+        {
+            self.host_value_size(value, span, 0)?;
+            let coerced = ty
+                .as_ref()
+                .map_or_else(|| value.clone(), |t| value.clone().coerce_for_type(t));
+            self.bind_pattern(parameter, &coerced, &mut environment)?;
+        }
+        let frames = vec![Frame::Block {
+            statements: body.stmts.clone(),
+            next: 0,
+            environment,
+        }];
+        let id = next_coroutine_id(span)?;
+        self.coroutines.insert(
+            id,
+            Coroutine {
+                function,
+                frames,
+                regions: Vec::new(),
+            },
+        );
+        Ok(Value::Task(id))
+    }
+}
+
 impl<'a, 's> ScriptInstance<'a, 's> {
     pub(super) fn coroutine_limits(&mut self, limits: ExecutionLimits) -> Result<()> {
         if limits.max_depth > 64 {
@@ -379,17 +464,7 @@ impl<'a, 's> ScriptInstance<'a, 's> {
             next: 0,
             environment,
         }];
-        static NEXT: AtomicU64 = AtomicU64::new(1);
-        let id = CoroutineId(
-            NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-                .map_err(|_| RuntimeError {
-                    module: None,
-                    span: self.span,
-                    message: "Coroutine IDs exhausted".into(),
-                    stack: Vec::new(),
-                    location: None,
-                })?,
-        );
+        let id = next_coroutine_id(self.span)?;
         self.runtime.coroutines.insert(
             id,
             Coroutine {

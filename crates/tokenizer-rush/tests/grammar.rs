@@ -75,6 +75,7 @@ fn function_signatures_preserve_parameters_types_and_body() {
             parameters,
             result,
             body,
+            ..
         } = &p.module.items[0].kind
         else {
             panic!()
@@ -229,7 +230,8 @@ fn exact_keywords_comments_unicode_and_numbers() {
     bad("let x = \"open\nlet y=2", "unclosed-string");
     let upper = themoretheless_tokenizer_rush::lex("RETURN");
     assert_eq!(upper.tokens[0].kind, SyntaxKind::Identifier);
-    bad("async fn f() {}", "unsupported-syntax");
+    good("async fn f() {}");
+    bad("let g = async => 1", "unsupported-syntax");
 }
 
 #[test]
@@ -356,7 +358,18 @@ fn deterministic_malformed_inputs_terminate_and_keep_utf8_spans() {
 
 #[test]
 fn reserved_expressions_and_negative_literal_patterns() {
-    bad("let x = await f()", "unsupported-syntax");
+    bad("let x = await f()", "await-outside-async");
+    bad("fn f() { await g() }", "await-outside-async");
+    bad("async fn f() { let g = x => await h() }", "await-outside-async");
+    let p = good("async fn f() -> number {\n  await Wait.After(0.25)\n  return 1\n}");
+    let StmtKind::Function { is_async, body, .. } = &p.module.items[0].kind else {
+        panic!()
+    };
+    assert!(is_async);
+    assert!(matches!(
+        &body.stmts[0].kind,
+        StmtKind::Expr(expression) if matches!(&expression.kind, ExprKind::Await(_))
+    ));
     good("let y = match x { -1 => 0, _ => 1 }");
     good("let y = match x {\n1 => a\n-1 => b\n_ => c\n}");
 }

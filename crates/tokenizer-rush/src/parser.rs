@@ -31,6 +31,7 @@ fn expr_bytes(expr: &Expr<'_>) -> usize {
         ExprKind::Name(_) | ExprKind::Number(_) | ExprKind::String(_) => 0,
         ExprKind::Bool(_) | ExprKind::Null | ExprKind::Error => 0,
         ExprKind::Unary { value, .. } => expr_bytes(value),
+        ExprKind::Await(value) => expr_bytes(value),
         ExprKind::Binary { left, right, .. } => expr_bytes(left) + expr_bytes(right),
         ExprKind::Assign { target, value, .. } => expr_bytes(target) + expr_bytes(value),
         ExprKind::Call { callee, arguments } => {
@@ -208,6 +209,7 @@ pub(crate) fn run(source: &str, lexed: Lexed, valid: bool, limits: InputLimits) 
         limits,
         depth: 0,
         functions: 0,
+        async_fns: 0,
         loops: 0,
         roles: Vec::new(),
         ast_bytes: lexed.tokens.len() * std::mem::size_of::<LexToken>(),
@@ -250,6 +252,8 @@ struct Parser<'s> {
     limits: InputLimits,
     depth: usize,
     functions: usize,
+    /// Nesting of `async fn` bodies; `await` is legal only inside one.
+    async_fns: usize,
     loops: usize,
     roles: Vec<(Span, &'static str)>,
     /// Running requested-bytes estimate of the retained parse output
@@ -524,7 +528,23 @@ impl<'s> Parser<'s> {
         }
         let kind = match self.text() {
             "struct" | "enum" => self.user_type(),
-            "fn" => self.function(token.indent),
+            "fn" => self.function(token.indent, false),
+            "async" => {
+                self.bump();
+                if self.peek().is_some_and(|t| t.raw.kind == SyntaxKind::Keyword)
+                    && self.text() == "fn"
+                {
+                    self.function(token.indent, true)
+                } else {
+                    // Async closures (`async =>`) are not part of stage A.
+                    self.error(
+                        "unsupported-syntax",
+                        "This keyword is reserved but its grammar is not supported yet",
+                    );
+                    self.recover();
+                    StmtKind::Error
+                }
+            }
             "export" => {
                 self.bump();
                 let mut names = vec![self.inline_name("export")];
@@ -652,15 +672,7 @@ impl<'s> Parser<'s> {
                     StmtKind::Continue
                 }
             }
-            "async" | "await" => {
-                self.error(
-                    "unsupported-syntax",
-                    "This keyword is reserved but its grammar is not supported yet",
-                );
-                self.bump();
-                self.recover();
-                StmtKind::Error
-            }
+            "await" => StmtKind::Expr(self.expr(0, false, true)),
             _ => StmtKind::Expr(self.expr(0, false, true)),
         };
         self.depth -= 1;
@@ -669,7 +681,7 @@ impl<'s> Parser<'s> {
             kind,
         }
     }
-    fn function(&mut self, indent: usize) -> StmtKind<'s> {
+    fn function(&mut self, indent: usize, is_async: bool) -> StmtKind<'s> {
         self.bump();
         let name = self.inline_name("function");
         let parens = !self.newline() && self.eat("(");
@@ -715,7 +727,9 @@ impl<'s> Parser<'s> {
         let old_loops = self.loops;
         self.loops = 0;
         self.functions += 1;
+        let outer_async = std::mem::replace(&mut self.async_fns, usize::from(is_async));
         let body = self.block(indent);
+        self.async_fns = outer_async;
         self.functions -= 1;
         self.loops = old_loops;
         StmtKind::Function {
@@ -723,6 +737,7 @@ impl<'s> Parser<'s> {
             parameters,
             result,
             body,
+            is_async,
         }
     }
     fn ty(&mut self) -> Type<'s> {
@@ -1126,7 +1141,10 @@ impl<'s> Parser<'s> {
                 self.expect(")");
             }
             self.expect("=>");
+            // A lambda body is not an async fn body: await does not cross it.
+            let outer_async = std::mem::replace(&mut self.async_fns, 0);
             let body = self.required_expr(multiline);
+            self.async_fns = outer_async;
             return Expr {
                 span: Span::new(span.start, body.span.end.max(span.end)),
                 kind: ExprKind::Lambda {
@@ -1262,7 +1280,23 @@ impl<'s> Parser<'s> {
                 self.bump();
                 ExprKind::Null
             }
-            Some(SyntaxKind::Keyword) if matches!(text, "async" | "await" | "import") => {
+            Some(SyntaxKind::Keyword) if text == "await" => {
+                self.bump();
+                if self.async_fns == 0 {
+                    self.error_at(
+                        span,
+                        "await-outside-async",
+                        "await requires an async function body",
+                    );
+                }
+                let value = if !multiline && self.newline() {
+                    self.required_expr(false)
+                } else {
+                    self.expr(19, multiline, false)
+                };
+                ExprKind::Await(Box::new(value))
+            }
+            Some(SyntaxKind::Keyword) if matches!(text, "async" | "import") => {
                 self.error(
                     "unsupported-syntax",
                     "This keyword is reserved but its grammar is not supported yet",
@@ -1723,6 +1757,7 @@ fn offset_expr_spans(expr: &mut Expr<'_>, offset: usize) {
             name.span.end += offset;
         }
         ExprKind::Unary { value, .. } => offset_expr_spans(value, offset),
+        ExprKind::Await(value) => offset_expr_spans(value, offset),
         ExprKind::Binary { left, right, .. } => {
             offset_expr_spans(left, offset);
             offset_expr_spans(right, offset);

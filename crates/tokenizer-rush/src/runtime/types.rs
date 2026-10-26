@@ -589,6 +589,8 @@ pub enum Value<'s> {
     BytecodeIterator(Rc<RefCell<crate::bytecode::BytecodeIterator>>),
     Builtin(Builtin),
     Host(Rc<HostFunction>),
+    /// Opaque handle of a task spawned by calling an `async fn` (stage A).
+    Task(super::coroutine::CoroutineId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -599,6 +601,15 @@ pub struct UserData<'s> {
 }
 
 impl<'s> Value<'s> {
+    /// Id of the task behind an `async fn` call handle, for `spawn_task` /
+    /// `cancel` on the host side.
+    pub fn task_id(&self) -> Option<super::CoroutineId> {
+        match self {
+            Self::Task(id) => Some(*id),
+            _ => None,
+        }
+    }
+
     /// Create a lazy source without opening a resource. Items are checked against item_type.
     pub fn host_sequence(factory: Rc<dyn super::HostSequence>, item_type: ValueType) -> Self {
         Self::Sequence(Rc::new(Sequence {
@@ -768,6 +779,8 @@ pub struct Closure<'s> {
     pub(super) environment: memory::Shared<Environment<'s>>,
     pub(super) references: Rc<Vec<CaptureReference<'s>>>,
     pub(super) siblings: Rc<Vec<Closure<'s>>>,
+    /// `async fn`: calling spawns a coroutine task and returns its handle.
+    pub(super) is_async: bool,
 }
 
 impl<'s> Closure<'s> {
