@@ -237,7 +237,8 @@ fn async_tasks_spawned_by_name_await_events_and_fail_terminally() {
 
 #[test]
 fn nested_await_is_a_stage_a_boundary_error() {
-    let source = format!("{WAIT}async fn f() {{let x = await Wait.After(1)}}");
+    // `let x = await task` is stage B; deeper positions stay a boundary.
+    let source = format!("{WAIT}async fn f() {{show await Wait.After(1)}}");
     let program = Program::compile(&source).unwrap();
     let token = CancellationToken::default();
     let mut instance = program
@@ -286,4 +287,232 @@ fn async_fn_result_annotation_is_enforced() {
         "{:?}",
         steps[0].state
     );
+}
+
+#[test]
+fn await_task_delivers_the_result_and_preserves_fairness() {
+    let source = format!(
+        "{WAIT}async fn inner()->number {{await Wait.After(1); return 7}}; async fn outer()->number {{let x = await inner(); return x + 1}}"
+    );
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    let outer = scheduler.spawn("outer", &[], LIMITS).unwrap();
+    // First step: outer suspends on the task handle; inner is auto-adopted.
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert!(
+        matches!(&steps[0].state, ScheduledState::Waiting(WakeRequest::Task(_))),
+        "{:?}",
+        steps[0].state
+    );
+    // Second step: inner starts and suspends on its timer.
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert!(matches!(
+        &steps[0].state,
+        ScheduledState::Waiting(WakeRequest::After(_))
+    ));
+    // Inner completes; outer is woken with the result but runs next poll.
+    let steps = scheduler.poll(Duration::from_secs(1), LIMITS).unwrap();
+    assert!(
+        matches!(&steps[0].state, ScheduledState::Complete(Value::Number(n)) if *n == 7.0),
+        "{:?}",
+        steps[0].state
+    );
+    let steps = scheduler.poll(Duration::from_secs(1), LIMITS).unwrap();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].id, outer);
+    assert!(
+        matches!(&steps[0].state, ScheduledState::Complete(Value::Number(n)) if *n == 8.0),
+        "{:?}",
+        steps[0].state
+    );
+    assert!(scheduler.is_empty());
+}
+
+#[test]
+fn await_task_failure_is_terminal_and_cascades_to_waiters() {
+    let source = format!(
+        "{WAIT}async fn inner() {{await Wait.After(0); missing()}}; async fn middle() {{let x = await inner()}}; async fn top() {{let y = await middle()}}"
+    );
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    scheduler.spawn("top", &[], LIMITS).unwrap();
+    scheduler.poll(Duration::ZERO, LIMITS).unwrap(); // top awaits middle
+    scheduler.poll(Duration::ZERO, LIMITS).unwrap(); // middle awaits inner
+    scheduler.poll(Duration::ZERO, LIMITS).unwrap(); // inner timer
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    // inner fails; the failure terminates middle and top in the same poll,
+    // after the failing task's own step.
+    assert_eq!(steps.len(), 3, "{steps:?}");
+    assert!(matches!(&steps[0].state, ScheduledState::Failed(e) if e.message.contains("missing")), "{:?}", steps[0]);
+    assert!(steps.iter().all(|s| matches!(&s.state, ScheduledState::Failed(_))));
+    assert!(scheduler.is_empty());
+}
+
+#[test]
+fn cyclic_await_and_self_await_fail_instead_of_hanging() {
+    // A cycle needs shared handles: each `a()`/`b()` call creates a fresh task.
+    // `mut` cells are declared before the functions so their closures capture
+    // the cells and observe the later assignments.
+    let source = format!(
+        "{WAIT}mut ha = null; mut hb = null; async fn a() {{let x = await hb}}; async fn b() {{let y = await ha}}; ha = a(); hb = b()"
+    );
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    let ha = scheduler
+        .instance_mut()
+        .get("ha")
+        .and_then(|v| v.task_id())
+        .unwrap();
+    let hb = scheduler
+        .instance_mut()
+        .get("hb")
+        .and_then(|v| v.task_id())
+        .unwrap();
+    scheduler.spawn_task(ha).unwrap();
+    scheduler.spawn_task(hb).unwrap();
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert!(
+        steps.iter().any(|s| matches!(&s.state, ScheduledState::Failed(e) if e.message.contains("Cyclic task await"))),
+        "{:?}",
+        steps
+    );
+    assert!(scheduler.is_empty());
+
+    // Self-await: the task holds a handle to itself.
+    let source = format!("{WAIT}mut h = null; async fn s() {{let x = await h}}; h = s()");
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    let id = scheduler
+        .instance_mut()
+        .get("h")
+        .and_then(|v| v.task_id())
+        .unwrap();
+    scheduler.spawn_task(id).unwrap();
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert!(
+        matches!(&steps[0].state, ScheduledState::Failed(e) if e.message.contains("Cyclic task await")),
+        "{:?}",
+        steps[0].state
+    );
+    assert!(scheduler.is_empty());
+}
+
+#[test]
+fn cancelling_the_awaited_task_cancels_waiters_and_orphans_fail() {
+    // outer awaits the shared handle h (the task created at top level); the
+    // `mut` cell is declared before the functions so closures observe it.
+    let source = format!(
+        "{WAIT}mut h = null; async fn inner() {{await Wait.Event('never')}}; async fn outer() {{let x = await h}}; h = inner()"
+    );
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let h = instance.get("h").and_then(|v| v.task_id()).unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    scheduler.spawn_task(h).unwrap();
+    scheduler.spawn("outer", &[], LIMITS).unwrap();
+    scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert_eq!(scheduler.len(), 2);
+    // Cancelling the awaited task cascades to the waiter.
+    assert!(scheduler.cancel(h));
+    assert!(scheduler.is_empty());
+    drop(scheduler);
+
+    // Direct coroutine cancellation bypassing the scheduler leaves an orphan
+    // that fails on the next poll instead of hanging.
+    let program = Program::compile(&source).unwrap();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let h = instance.get("h").and_then(|v| v.task_id()).unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    scheduler.spawn_task(h).unwrap();
+    scheduler.spawn("outer", &[], LIMITS).unwrap();
+    scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert_eq!(scheduler.len(), 2);
+    assert!(scheduler.instance_mut().cancel_coroutine(h));
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert!(
+        steps.iter().any(|s| matches!(&s.state, ScheduledState::Failed(e) if e.message.contains("Awaited task was cancelled"))),
+        "{:?}",
+        steps
+    );
+    assert!(scheduler.is_empty());
+}
+
+#[test]
+fn await_of_a_plain_value_is_immediate() {
+    let source = format!(
+        "{WAIT}async fn f()->number {{let x = await 41; return x + 1}}; async fn g()->number {{return await 9}}"
+    );
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    scheduler.spawn("f", &[], LIMITS).unwrap();
+    scheduler.spawn("g", &[], LIMITS).unwrap();
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert!(
+        matches!(&steps[0].state, ScheduledState::Complete(Value::Number(n)) if *n == 42.0),
+        "{:?}",
+        steps[0].state
+    );
+    assert!(
+        matches!(&steps[1].state, ScheduledState::Complete(Value::Number(n)) if *n == 9.0),
+        "{:?}",
+        steps[1].state
+    );
+}
+
+#[test]
+fn awaited_task_memory_limit_fails_both_tasks() {
+    let source = format!(
+        "{WAIT}async fn hungry() {{await Wait.After(0); range(0, 1000000) | collect(1000000)}}; async fn outer() {{let x = await hungry()}}"
+    );
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let limits = ExecutionLimits {
+        steps: 100_000,
+        max_depth: 64,
+        max_collection_items: usize::MAX,
+        max_string_bytes: usize::MAX,
+        max_heap_bytes: 1_000_000,
+        max_allocated_bytes: usize::MAX,
+    };
+    let mut instance = program
+        .instantiate(limits, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    scheduler.spawn("outer", &[], limits).unwrap();
+    scheduler.poll(Duration::ZERO, limits).unwrap();
+    scheduler.poll(Duration::ZERO, limits).unwrap();
+    let steps = scheduler.poll(Duration::ZERO, limits).unwrap();
+    assert!(
+        matches!(&steps[0].state, ScheduledState::Failed(e) if e.message.contains("Heap limit")),
+        "{:?}",
+        steps[0].state
+    );
+    // The waiter's failure follows in the same poll.
+    assert!(matches!(&steps[1].state, ScheduledState::Failed(_)));
+    assert!(scheduler.is_empty());
 }

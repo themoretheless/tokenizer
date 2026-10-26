@@ -2,7 +2,7 @@ use super::{
     Binding, Closure, Environment, FunctionBody, RecordMap, Result, Runtime, RuntimeError, Value,
     ValueType, memory,
 };
-use crate::{Expr, ExprKind, Stmt, StmtKind};
+use crate::{Name, Expr, ExprKind, Stmt, StmtKind};
 use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
 
@@ -531,6 +531,45 @@ impl<'s> Runtime<'_, 's> {
         Ok(())
     }
 
+    /// Bind a `let`/`const`-style declaration to an already computed value;
+    /// shared by the statement interpreter and the coroutine machine when it
+    /// completes an `await` declaration with a delivered wake value.
+    pub(super) fn bind_declaration_value(
+        &mut self,
+        name: &Name<'s>,
+        constant: bool,
+        ty: Option<&crate::Type<'s>>,
+        value: Value<'s>,
+        span: Span,
+        environment: &mut Environment<'s>,
+    ) -> Result<Value<'s>> {
+        let contract = ty.map(|ty| self.annotation(ty)).transpose()?;
+        if let Some(ty) = &contract
+            && !ty.accepts(&value)
+        {
+            return self.error(span, "Value does not match its type annotation");
+        }
+        let value = match &contract {
+            Some(ty) => value.coerce_for_type(ty),
+            None => value,
+        };
+        if constant {
+            environment
+                .insert(name.text, value.clone())
+                .map_err(|e| self.environment_error(name.span, e))?;
+        } else {
+            let cell = self.allocate_cell(
+                value.clone(),
+                contract.or_else(|| ValueType::inferred(&value)),
+                span,
+            )?;
+            environment
+                .insert_binding(name.text, Binding::Cell(cell))
+                .map_err(|e| self.environment_error(name.span, e))?;
+        }
+        Ok(value)
+    }
+
     pub(super) fn statements(
         &mut self,
         statements: &[Stmt<'s>],
@@ -586,31 +625,15 @@ impl<'s> Runtime<'_, 's> {
                     value: expression,
                     ty,
                 } => {
-                    let contract = ty.as_ref().map(|ty| self.annotation(ty)).transpose()?;
                     value = self.expr(expression, environment)?;
-                    if let Some(ty) = &contract {
-                        if !ty.accepts(&value) {
-                            return self.error(
-                                expression.span,
-                                "Value does not match its type annotation",
-                            );
-                        }
-                        value = value.coerce_for_type(ty);
-                    }
-                    if *constant {
-                        environment
-                            .insert(name.text, value.clone())
-                            .map_err(|e| self.environment_error(name.span, e))?;
-                    } else {
-                        let cell = self.allocate_cell(
-                            value.clone(),
-                            contract.or_else(|| ValueType::inferred(&value)),
-                            expression.span,
-                        )?;
-                        environment
-                            .insert_binding(name.text, Binding::Cell(cell))
-                            .map_err(|e| self.environment_error(name.span, e))?;
-                    }
+                    value = self.bind_declaration_value(
+                        name,
+                        *constant,
+                        ty.as_ref(),
+                        value,
+                        expression.span,
+                        environment,
+                    )?;
                     if last_fn.is_some_and(|last| idx < last) {
                         self.hoist_scope_functions(statements, environment)?;
                     }

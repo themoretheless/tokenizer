@@ -73,6 +73,12 @@ pub(super) struct Coroutine<'s> {
     pub(super) frames: Vec<Frame<'s>>,
     /// Region frames parked while the task is suspended at a yield.
     pub(super) regions: Vec<RegionFrame>,
+    /// Result of an awaited task, delivered by the scheduler on wake; the
+    /// suspended await statement consumes it instead of re-evaluating.
+    pub(super) pending_wake: Option<Value<'s>>,
+    /// Set when the task suspended at an `await` (not a plain `yield`):
+    /// the scheduler must deliver a wake value (task result or null).
+    pub(super) expects_wake: bool,
 }
 impl<'s> Coroutine<'s> {
     fn push(&mut self, frame: Frame<'s>, runtime: &Runtime<'_, 's>, span: Span) -> Result<()> {
@@ -112,6 +118,7 @@ impl<'s> Coroutine<'s> {
         Ok(())
     }
     fn advance(&mut self, runtime: &mut Runtime<'_, 's>, span: Span) -> Result<CoroutineState<'s>> {
+        self.expects_wake = false;
         loop {
             runtime.charge(1, span)?;
             let Some(frame) = self.frames.last_mut() else {
@@ -196,6 +203,94 @@ impl<'s> Coroutine<'s> {
                         runtime.reclaim_cells();
                         continue;
                     };
+                    // Await statements suspend *before* consuming the
+                    // statement: on wake the scheduler-delivered value
+                    // completes it (binding, return or discard).
+                    enum AwaitForm {
+                        Statement,
+                        Declare,
+                        Return,
+                    }
+                    let await_form = match &statement.kind {
+                        StmtKind::Expr(expression)
+                        | StmtKind::Declaration {
+                            value: expression, ..
+                        }
+                        | StmtKind::Return(Some(expression)) => match &expression.kind {
+                            ExprKind::Await(operand) => Some((
+                                match &statement.kind {
+                                    StmtKind::Expr(_) => AwaitForm::Statement,
+                                    StmtKind::Declaration { .. } => AwaitForm::Declare,
+                                    _ => AwaitForm::Return,
+                                },
+                                operand,
+                            )),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    if let Some((form, operand)) = await_form {
+                        if let Some(value) = self.pending_wake.take() {
+                            match form {
+                                AwaitForm::Statement => {}
+                                AwaitForm::Declare => {
+                                    let StmtKind::Declaration {
+                                        name, constant, ty, ..
+                                    } = &statement.kind
+                                    else {
+                                        unreachable!("await declaration")
+                                    };
+                                    runtime.bind_declaration_value(
+                                        name,
+                                        *constant,
+                                        ty.as_ref(),
+                                        value,
+                                        statement.span,
+                                        environment,
+                                    )?;
+                                }
+                                AwaitForm::Return => {
+                                    self.unwind(runtime)?;
+                                    return Ok(CoroutineState::Complete(value));
+                                }
+                            }
+                            *next += 1;
+                            continue;
+                        }
+                        let value = runtime.expr(operand, environment)?;
+                        let suspends = matches!(&value, Value::Task(_))
+                            || matches!(&value, Value::UserData(data) if data.type_name.ends_with("::Wait"));
+                        if suspends {
+                            self.expects_wake = true;
+                            return Ok(CoroutineState::Yielded(value));
+                        }
+                        // await of a plain value is immediate and yields it.
+                        match form {
+                            AwaitForm::Statement => {}
+                            AwaitForm::Declare => {
+                                let StmtKind::Declaration {
+                                    name, constant, ty, ..
+                                } = &statement.kind
+                                else {
+                                    unreachable!("await declaration")
+                                };
+                                runtime.bind_declaration_value(
+                                    name,
+                                    *constant,
+                                    ty.as_ref(),
+                                    value,
+                                    statement.span,
+                                    environment,
+                                )?;
+                            }
+                            AwaitForm::Return => {
+                                self.unwind(runtime)?;
+                                return Ok(CoroutineState::Complete(value));
+                            }
+                        }
+                        *next += 1;
+                        continue;
+                    }
                     *next += 1;
                     match &statement.kind {
                         StmtKind::Struct { .. }
@@ -280,17 +375,6 @@ impl<'s> Coroutine<'s> {
                             };
                             self.push(frame, runtime, span)?;
                         }
-                        StmtKind::Expr(expression)
-                            if matches!(&expression.kind, ExprKind::Await(_)) =>
-                        {
-                            // `await <wait request>` as a task statement is the
-                            // typed form of `yield`: suspend with the request.
-                            let ExprKind::Await(operand) = &expression.kind else {
-                                unreachable!("await statement")
-                            };
-                            let value = runtime.expr(operand, environment)?;
-                            return Ok(CoroutineState::Yielded(value));
-                        }
                         _ => {
                             let (value, flow) =
                                 runtime.statements(std::slice::from_ref(statement), environment)?;
@@ -371,6 +455,8 @@ impl<'s> Runtime<'_, 's> {
                 function,
                 frames,
                 regions: Vec::new(),
+                pending_wake: None,
+                expects_wake: false,
             },
         );
         Ok(Value::Task(id))
@@ -471,6 +557,8 @@ impl<'a, 's> ScriptInstance<'a, 's> {
                 function,
                 frames,
                 regions: Vec::new(),
+                pending_wake: None,
+                expects_wake: false,
             },
         );
         if let Err(error) = self.enforce_memory_limit() {
@@ -490,6 +578,11 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         let Some(mut task) = self.runtime.coroutines.remove(&id) else {
             return self.runtime.error(self.span, "Coroutine is not active");
         };
+        // Host-driven resume of a task suspended at `await`: deliver null,
+        // matching the scheduler's payload-less timer/event contract.
+        if task.expects_wake && task.pending_wake.is_none() {
+            task.pending_wake = Some(Value::Null);
+        }
         let previous_module = self.runtime.module;
         let previous_references = std::mem::replace(
             &mut self.runtime.current_references,

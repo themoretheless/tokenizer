@@ -234,8 +234,7 @@ fn expression_receivers_have_member_candidates_at_the_actual_cursor() {
         analyze_editor_details("fn broken(\nvec3(1,2,3).")
             .member_completions
             .is_empty()
-    );
-}
+    );}
 
 #[test]
 fn vector_math_result_shapes_follow_arguments_aliases_and_pipeline_stages() {
@@ -272,5 +271,36 @@ fn vector_math_result_shapes_follow_arguments_aliases_and_pipeline_stages() {
             .find(|c| c.name_span.start == source.len())
             .unwrap();
         assert_eq!(completion.members, expected, "{source}");
+    }
+}
+
+#[test]
+fn await_call_result_has_the_async_functions_annotated_shape() {
+    // The awaited call has the annotated result shape: indexing a vec3 result
+    // out of bounds is diagnosed exactly as for a synchronous call.
+    for (source, expected) in [
+        (
+            "fn point() -> vec3 { return vec3(1,2,3) }; async fn f() { let p = await point(); p[5] }",
+            true,
+        ),
+        (
+            "fn point() -> vec3 { return vec3(1,2,3) }; async fn f() { let p = await point(); p[0] }",
+            false,
+        ),
+        (
+            "fn point() -> vec3 { return vec3(1,2,3) }; async fn f() { (await point())[5] }",
+            true,
+        ),
+    ] {
+        let parsed = themoretheless_tokenizer_rush::analyze_host_calls(source, &[]);
+        assert_eq!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "index-bounds"),
+            expected,
+            "{source}: {:?}",
+            parsed.diagnostics
+        );
     }
 }

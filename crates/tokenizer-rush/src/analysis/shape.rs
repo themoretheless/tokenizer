@@ -487,6 +487,18 @@ impl<'s> Checker<'s> {
             return shape.clone();
         }
         match &expression.kind {
+            ExprKind::Await(inner) => match &inner.kind {
+                // `await make()` yields the async function's annotated result;
+                // a bare handle or a plain value has no further contract.
+                ExprKind::Call { callee, arguments } => self.applied_result_shape(
+                    callee,
+                    &arguments
+                        .iter()
+                        .map(|arg| self.shape(arg))
+                        .collect::<Vec<_>>(),
+                ),
+                _ => self.shape(inner),
+            },
             ExprKind::Try(value) => match self.shape(value) {
                 Shape::Typed(ValueType::Option(ty) | ValueType::Result(ty, _)) => Shape::Typed(*ty),
                 _ => Shape::Unknown,
