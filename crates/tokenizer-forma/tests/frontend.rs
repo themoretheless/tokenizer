@@ -338,8 +338,7 @@ fn lint_usage_analysis_follows_ast_references() {
     let src = "component A { prop label: String = 'x'; state s: String = 'Label: ${props.label}'; Text { text: s; } }";
     assert_eq!(lint_codes(src), []);
     // state used only through a call in another state's default
-    let src =
-        "component A { state a: Number = 1; state b: Number = max(state.a, 2); Text { text: b; } }";
+    let src = "component A { state a: Number = 1; state b: Number = max(state.a, 2); Text { text: String(b); } }";
     assert_eq!(lint_codes(src), []);
     // prop used only inside a component-level slot
     let src = "component A { prop hint: String = 'h'; slot header { Text { text: hint; } } }";

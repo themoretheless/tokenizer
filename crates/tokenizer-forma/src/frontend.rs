@@ -440,15 +440,33 @@ fn is_pure_function(s: &str) -> bool {
             | "isValid"
     )
 }
+#[derive(Debug, Clone)]
+pub(crate) struct ExpressionSpan {
+    pub value: V,
+    pub from: usize,
+    pub to: usize,
+}
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SpanTable {
+    pub entries: Vec<ExpressionSpan>,
+}
 struct Parser<'a> {
     source: &'a str,
     tokens: Vec<BorrowedToken<'a>>,
     eof_utf16: usize,
     i: usize,
     depth: usize,
+    spans: Option<Vec<ExpressionSpan>>,
+    span_base: usize,
 }
 impl<'a> Parser<'a> {
     fn new(source: &'a str) -> R<Self> {
+        Self::with_spans(source, 0, false)
+    }
+    fn new_spanned(source: &'a str, span_base: usize) -> R<Self> {
+        Self::with_spans(source, span_base, true)
+    }
+    fn with_spans(source: &'a str, span_base: usize, collect: bool) -> R<Self> {
         let (tokens, _, eof_utf16) = tokenize_borrowed(source)?;
         Ok(Self {
             source,
@@ -456,6 +474,8 @@ impl<'a> Parser<'a> {
             eof_utf16,
             i: 0,
             depth: 0,
+            spans: collect.then(Vec::new),
+            span_base,
         })
     }
     #[inline(always)]
@@ -568,8 +588,19 @@ impl<'a> Parser<'a> {
         if self.depth > 32 {
             return self.err("Превышен предел глубины разметки");
         }
+        let from = self.pos();
         let result = self.expression_inner(min);
         self.depth -= 1;
+        if let Ok(value) = &result {
+            let to = self.end();
+            if let Some(spans) = &mut self.spans {
+                spans.push(ExpressionSpan {
+                    value: value.clone(),
+                    from: from + self.span_base,
+                    to: to + self.span_base,
+                });
+            }
+        }
         result
     }
     fn expression_inner(&mut self, min: u8) -> R<V> {
@@ -681,6 +712,7 @@ impl<'a> Parser<'a> {
             }
             return Ok(n);
         }
+        let token_start = self.pos();
         let token = self.take("")?;
         match token {
             "(" => {
@@ -747,7 +779,7 @@ impl<'a> Parser<'a> {
             _ => {}
         }
         if token.starts_with(['\'', '"']) {
-            return parse_string(token);
+            return parse_string(token, token_start + self.span_base, &mut self.spans);
         }
         if let Ok(n) = token.parse::<f64>() {
             return Ok(json!(n));
@@ -1946,6 +1978,12 @@ pub fn parse(source: &str) -> R<V> {
 pub fn parse_with_options(source: &str, fragment: bool) -> R<V> {
     Parser::new(source)?.document(fragment)
 }
+pub(crate) fn parse_with_span_table(source: &str) -> R<(V, SpanTable)> {
+    let mut parser = Parser::new_spanned(source, 0)?;
+    let document = parser.document(false)?;
+    let entries = parser.spans.take().unwrap_or_default();
+    Ok((document, SpanTable { entries }))
+}
 pub fn parse_expression(source: &str) -> R<V> {
     let mut p = Parser::new(source)?;
     let v = p.expression(0)?;
@@ -1982,7 +2020,7 @@ fn decode(s: &str) -> String {
     }
     out
 }
-fn parse_string(s: &str) -> R<V> {
+fn parse_string(s: &str, string_base: usize, spans: &mut Option<Vec<ExpressionSpan>>) -> R<V> {
     let body = &s[1..s.len() - 1];
     if !body.contains(['\\', '$']) {
         return Ok(json!(body));
@@ -2026,7 +2064,21 @@ fn parse_string(s: &str) -> R<V> {
                     message: "Незавершённая интерполяция ${…}".into(),
                 });
             }
-            parts.push(parse_expression(&body[from..end])?);
+            let source = &body[from..end];
+            if let Some(all) = spans.as_mut() {
+                let base = string_base + 1 + body[..from].encode_utf16().count();
+                let mut parser = Parser::new_spanned(source, base)?;
+                let value = parser.expression(0)?;
+                if !parser.peek().is_empty() {
+                    return parser.err(format!("Лишний текст в выражении: {}", parser.peek()));
+                }
+                if let Some(nested) = parser.spans.take() {
+                    all.extend(nested);
+                }
+                parts.push(value);
+            } else {
+                parts.push(parse_expression(source)?);
+            }
             i = end + 1;
             start = i;
         } else {
@@ -2504,7 +2556,10 @@ fn dict_key_used(r: &str, k: &str) -> bool {
         || k.rsplit_once('.').is_some_and(|(_, tail)| tail == r)
 }
 pub fn lint_document(source: &str) -> R<V> {
-    let doc = parse(source)?;
+    lint_document_with_context(source, &crate::typecheck::TypeContext::default())
+}
+pub fn lint_document_with_context(source: &str, context: &crate::typecheck::TypeContext) -> R<V> {
+    let (doc, expression_spans) = parse_with_span_table(source)?;
     let mut warnings = Vec::new();
     let mut usage = Usage::default();
 
@@ -2686,5 +2741,7 @@ pub fn lint_document(source: &str) -> R<V> {
     check_matches(&doc["matches"], &mut warnings);
     check_matches(&doc["defaults"], &mut warnings);
 
+    warnings.extend(crate::typecheck::analyze(&doc, &expression_spans, context).diagnostics);
+    warnings.sort_by_key(|warning| warning["from"].as_u64().unwrap_or(u64::MAX));
     Ok(json!(warnings))
 }
