@@ -10,6 +10,19 @@ impl CoroutineId {
     }
 }
 
+fn next_coroutine_id(span: Span) -> Result<CoroutineId> {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .map(CoroutineId)
+        .map_err(|_| RuntimeError {
+            module: None,
+            span,
+            message: "Coroutine IDs exhausted".into(),
+            stack: Vec::new(),
+            location: None,
+        })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum CoroutineState<'s> {
     Yielded(Value<'s>),
@@ -60,6 +73,12 @@ pub(super) struct Coroutine<'s> {
     pub(super) frames: Vec<Frame<'s>>,
     /// Region frames parked while the task is suspended at a yield.
     pub(super) regions: Vec<RegionFrame>,
+    /// Result of an awaited task, delivered by the scheduler on wake; the
+    /// suspended await statement consumes it instead of re-evaluating.
+    pub(super) pending_wake: Option<Value<'s>>,
+    /// Set when the task suspended at an `await` (not a plain `yield`):
+    /// the scheduler must deliver a wake value (task result or null).
+    pub(super) expects_wake: bool,
 }
 impl<'s> Coroutine<'s> {
     fn push(&mut self, frame: Frame<'s>, runtime: &Runtime<'_, 's>, span: Span) -> Result<()> {
@@ -99,6 +118,7 @@ impl<'s> Coroutine<'s> {
         Ok(())
     }
     fn advance(&mut self, runtime: &mut Runtime<'_, 's>, span: Span) -> Result<CoroutineState<'s>> {
+        self.expects_wake = false;
         loop {
             runtime.charge(1, span)?;
             let Some(frame) = self.frames.last_mut() else {
@@ -183,6 +203,94 @@ impl<'s> Coroutine<'s> {
                         runtime.reclaim_cells();
                         continue;
                     };
+                    // Await statements suspend *before* consuming the
+                    // statement: on wake the scheduler-delivered value
+                    // completes it (binding, return or discard).
+                    enum AwaitForm {
+                        Statement,
+                        Declare,
+                        Return,
+                    }
+                    let await_form = match &statement.kind {
+                        StmtKind::Expr(expression)
+                        | StmtKind::Declaration {
+                            value: expression, ..
+                        }
+                        | StmtKind::Return(Some(expression)) => match &expression.kind {
+                            ExprKind::Await(operand) => Some((
+                                match &statement.kind {
+                                    StmtKind::Expr(_) => AwaitForm::Statement,
+                                    StmtKind::Declaration { .. } => AwaitForm::Declare,
+                                    _ => AwaitForm::Return,
+                                },
+                                operand,
+                            )),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    if let Some((form, operand)) = await_form {
+                        if let Some(value) = self.pending_wake.take() {
+                            match form {
+                                AwaitForm::Statement => {}
+                                AwaitForm::Declare => {
+                                    let StmtKind::Declaration {
+                                        name, constant, ty, ..
+                                    } = &statement.kind
+                                    else {
+                                        unreachable!("await declaration")
+                                    };
+                                    runtime.bind_declaration_value(
+                                        name,
+                                        *constant,
+                                        ty.as_ref(),
+                                        value,
+                                        statement.span,
+                                        environment,
+                                    )?;
+                                }
+                                AwaitForm::Return => {
+                                    self.unwind(runtime)?;
+                                    return Ok(CoroutineState::Complete(value));
+                                }
+                            }
+                            *next += 1;
+                            continue;
+                        }
+                        let value = runtime.expr(operand, environment)?;
+                        let suspends = matches!(&value, Value::Task(_))
+                            || matches!(&value, Value::UserData(data) if data.type_name.ends_with("::Wait"));
+                        if suspends {
+                            self.expects_wake = true;
+                            return Ok(CoroutineState::Yielded(value));
+                        }
+                        // await of a plain value is immediate and yields it.
+                        match form {
+                            AwaitForm::Statement => {}
+                            AwaitForm::Declare => {
+                                let StmtKind::Declaration {
+                                    name, constant, ty, ..
+                                } = &statement.kind
+                                else {
+                                    unreachable!("await declaration")
+                                };
+                                runtime.bind_declaration_value(
+                                    name,
+                                    *constant,
+                                    ty.as_ref(),
+                                    value,
+                                    statement.span,
+                                    environment,
+                                )?;
+                            }
+                            AwaitForm::Return => {
+                                self.unwind(runtime)?;
+                                return Ok(CoroutineState::Complete(value));
+                            }
+                        }
+                        *next += 1;
+                        continue;
+                    }
                     *next += 1;
                     match &statement.kind {
                         StmtKind::Struct { .. }
@@ -292,6 +400,76 @@ impl<'s> Coroutine<'s> {
         }
     }
 }
+impl<'s> Runtime<'_, 's> {
+    /// Calling an async function or closure registers a task without running
+    /// its body and returns the opaque handle to the caller. The task starts
+    /// when the host resumes it or the scheduler adopts the handle.
+    pub(super) fn spawn_async_task(
+        &mut self,
+        function: Rc<Closure<'s>>,
+        arguments: &[Value<'s>],
+        span: Span,
+    ) -> Result<Value<'s>> {
+        let statements = match &*function.body {
+            FunctionBody::Block(body) => body.stmts.clone(),
+            FunctionBody::Expression(body) => Rc::new(vec![Stmt {
+                span: body.span,
+                kind: StmtKind::Return(Some(body.clone())),
+            }]),
+            FunctionBody::Constructor { .. } => {
+                return self.error(span, "Async task requires a function body");
+            }
+        };
+        let mut environment = Environment::child(function.environment.clone());
+        for sib in function.siblings.iter() {
+            if sib.name == function.name {
+                continue;
+            }
+            if let Some(sib_name) = sib.name {
+                let mut bound = sib.clone();
+                bound.siblings = function.siblings.clone();
+                environment
+                    .insert(sib_name, Value::Function(Rc::new(bound)))
+                    .map_err(|e| self.environment_error(span, e))?;
+            }
+        }
+        if let Some(name) = function.name {
+            environment
+                .insert(name, Value::Function(function.clone()))
+                .map_err(|e| self.environment_error(span, e))?;
+        }
+        for ((parameter, ty), value) in function
+            .parameters
+            .iter()
+            .zip(&function.parameter_types)
+            .zip(arguments)
+        {
+            self.host_value_size(value, span, 0)?;
+            let coerced = ty
+                .as_ref()
+                .map_or_else(|| value.clone(), |t| value.clone().coerce_for_type(t));
+            self.bind_pattern(parameter, &coerced, &mut environment)?;
+        }
+        let frames = vec![Frame::Block {
+            statements,
+            next: 0,
+            environment,
+        }];
+        let id = next_coroutine_id(span)?;
+        self.coroutines.insert(
+            id,
+            Coroutine {
+                function,
+                frames,
+                regions: Vec::new(),
+                pending_wake: None,
+                expects_wake: false,
+            },
+        );
+        Ok(Value::Task(id))
+    }
+}
+
 impl<'a, 's> ScriptInstance<'a, 's> {
     pub(super) fn coroutine_limits(&mut self, limits: ExecutionLimits) -> Result<()> {
         if limits.max_depth > 64 {
@@ -303,6 +481,9 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         self.runtime.max_depth = limits.max_depth;
         self.runtime.max_collection_items = limits.max_collection_items;
         self.runtime.max_string_bytes = limits.max_string_bytes;
+        self.runtime
+            .memory
+            .set_limits(limits.max_heap_bytes, limits.max_allocated_bytes);
         if self.runtime.cancellation.is_cancelled() {
             self.runtime.coroutines.clear();
             self.runtime.reclaim_cells();
@@ -376,23 +557,15 @@ impl<'a, 's> ScriptInstance<'a, 's> {
             next: 0,
             environment,
         }];
-        static NEXT: AtomicU64 = AtomicU64::new(1);
-        let id = CoroutineId(
-            NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-                .map_err(|_| RuntimeError {
-                    module: None,
-                    span: self.span,
-                    message: "Coroutine IDs exhausted".into(),
-                    stack: Vec::new(),
-                    location: None,
-                })?,
-        );
+        let id = next_coroutine_id(self.span)?;
         self.runtime.coroutines.insert(
             id,
             Coroutine {
                 function,
                 frames,
                 regions: Vec::new(),
+                pending_wake: None,
+                expects_wake: false,
             },
         );
         if let Err(error) = self.enforce_memory_limit() {
@@ -412,6 +585,11 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         let Some(mut task) = self.runtime.coroutines.remove(&id) else {
             return self.runtime.error(self.span, "Coroutine is not active");
         };
+        // Host-driven resume without a scheduler-provided wake value delivers
+        // null, matching emit(name) without an explicit event payload.
+        if task.expects_wake && task.pending_wake.is_none() {
+            task.pending_wake = Some(Value::Null);
+        }
         let previous_module = self.runtime.module;
         let previous_references = std::mem::replace(
             &mut self.runtime.current_references,

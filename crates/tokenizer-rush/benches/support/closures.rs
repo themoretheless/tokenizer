@@ -69,6 +69,7 @@ impl Factory {
                 ExprKind::Lambda {
                     parameters: outer,
                     body,
+                    ..
                 },
             ..
         }) = &parsed.module.items[0].kind
@@ -78,6 +79,7 @@ impl Factory {
         let ExprKind::Lambda {
             parameters: inner,
             body,
+            ..
         } = &body.kind
         else {
             return error(body.span, "Expected returned lambda");

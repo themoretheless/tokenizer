@@ -82,7 +82,18 @@ struct BorrowedToken<'a> {
     start: usize,
     end: usize,
 }
-fn tokenize_borrowed(source: &str) -> R<(Vec<BorrowedToken<'_>>, usize)> {
+/// Trivia comment (`//…` or `/*…*/`) skipped by the parser but preserved for
+/// the formatter. `start`/`end` are UTF-16 units, like token offsets;
+/// `byte_start`/`byte_end` locate the comment in the source bytes.
+#[derive(Debug, Clone, Copy)]
+struct Comment<'a> {
+    text: &'a str,
+    start: usize,
+    end: usize,
+    byte_start: usize,
+    byte_end: usize,
+}
+fn tokenize_borrowed(source: &str) -> R<(Vec<BorrowedToken<'_>>, Vec<Comment<'_>>, usize)> {
     if source.len() > 4 * 1024 * 1024 {
         return Err(Error {
             offset: 0,
@@ -91,6 +102,7 @@ fn tokenize_borrowed(source: &str) -> R<(Vec<BorrowedToken<'_>>, usize)> {
     }
     let bytes = source.as_bytes();
     let mut out = Vec::with_capacity(source.len() / 5);
+    let mut comments = Vec::new();
     let mut i = 0;
     let mut utf16 = 0;
     while i < bytes.len() {
@@ -107,6 +119,7 @@ fn tokenize_borrowed(source: &str) -> R<(Vec<BorrowedToken<'_>>, usize)> {
         let from = i;
         let b0 = bytes[i];
         let mut skip = false;
+        let mut comment = false;
         if b0.is_ascii_alphabetic() || b0 == b'_' {
             i += 1;
             loop {
@@ -154,10 +167,12 @@ fn tokenize_borrowed(source: &str) -> R<(Vec<BorrowedToken<'_>>, usize)> {
         } else if b0 == b'/' && bytes.get(i + 1) == Some(&b'/') {
             i = source[i..].find('\n').map_or(source.len(), |n| i + n);
             skip = true;
+            comment = true;
         } else if b0 == b'/' && bytes.get(i + 1) == Some(&b'*') {
             if let Some(end_offset) = source[i + 2..].find("*/") {
                 i += end_offset + 4;
                 skip = true;
+                comment = true;
             } else {
                 i += 1;
             }
@@ -239,7 +254,15 @@ fn tokenize_borrowed(source: &str) -> R<(Vec<BorrowedToken<'_>>, usize)> {
             slice.encode_utf16().count()
         };
         let end = utf16 + utf16_len;
-        if !skip {
+        if comment {
+            comments.push(Comment {
+                text: slice,
+                start: utf16,
+                end,
+                byte_start: from,
+                byte_end: i,
+            });
+        } else if !skip {
             out.push(BorrowedToken {
                 text: slice,
                 start: utf16,
@@ -254,10 +277,10 @@ fn tokenize_borrowed(source: &str) -> R<(Vec<BorrowedToken<'_>>, usize)> {
         }
         utf16 = end;
     }
-    Ok((out, utf16))
+    Ok((out, comments, utf16))
 }
 pub fn tokenize(source: &str) -> R<Vec<Token>> {
-    let (borrowed, _) = tokenize_borrowed(source)?;
+    let (borrowed, _, _) = tokenize_borrowed(source)?;
     Ok(borrowed
         .into_iter()
         .map(|t| Token {
@@ -266,6 +289,30 @@ pub fn tokenize(source: &str) -> R<Vec<Token>> {
             end: t.end,
         })
         .collect())
+}
+/// Significant tokens plus trivia comments (`//…` and `/*…*/`), in source
+/// order, all with UTF-16 offsets. The parser ignores trivia; tooling such as
+/// the formatter uses it to keep comments in the output.
+pub fn tokenize_with_trivia(source: &str) -> R<(Vec<Token>, Vec<Token>)> {
+    let (borrowed, comments, _) = tokenize_borrowed(source)?;
+    Ok((
+        borrowed
+            .into_iter()
+            .map(|t| Token {
+                text: t.text.into(),
+                start: t.start,
+                end: t.end,
+            })
+            .collect(),
+        comments
+            .into_iter()
+            .map(|c| Token {
+                text: c.text.into(),
+                start: c.start,
+                end: c.end,
+            })
+            .collect(),
+    ))
 }
 fn empty_node(kind: &str, start: usize) -> V {
     json!({"type":kind,"start":start,"props":{},"propertyRanges":{},"statementRanges":{},"bindings":{},"events":{},"children":[],"slots":{},"matches":[],"forward":[]})
@@ -393,22 +440,42 @@ fn is_pure_function(s: &str) -> bool {
             | "isValid"
     )
 }
+#[derive(Debug, Clone)]
+pub(crate) struct ExpressionSpan {
+    pub value: V,
+    pub from: usize,
+    pub to: usize,
+}
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SpanTable {
+    pub entries: Vec<ExpressionSpan>,
+}
 struct Parser<'a> {
     source: &'a str,
     tokens: Vec<BorrowedToken<'a>>,
     eof_utf16: usize,
     i: usize,
     depth: usize,
+    spans: Option<Vec<ExpressionSpan>>,
+    span_base: usize,
 }
 impl<'a> Parser<'a> {
     fn new(source: &'a str) -> R<Self> {
-        let (tokens, eof_utf16) = tokenize_borrowed(source)?;
+        Self::with_spans(source, 0, false)
+    }
+    fn new_spanned(source: &'a str, span_base: usize) -> R<Self> {
+        Self::with_spans(source, span_base, true)
+    }
+    fn with_spans(source: &'a str, span_base: usize, collect: bool) -> R<Self> {
+        let (tokens, _, eof_utf16) = tokenize_borrowed(source)?;
         Ok(Self {
             source,
             tokens,
             eof_utf16,
             i: 0,
             depth: 0,
+            spans: collect.then(Vec::new),
+            span_base,
         })
     }
     #[inline(always)]
@@ -521,8 +588,19 @@ impl<'a> Parser<'a> {
         if self.depth > 32 {
             return self.err("Превышен предел глубины разметки");
         }
+        let from = self.pos();
         let result = self.expression_inner(min);
         self.depth -= 1;
+        if let Ok(value) = &result {
+            let to = self.end();
+            if let Some(spans) = &mut self.spans {
+                spans.push(ExpressionSpan {
+                    value: value.clone(),
+                    from: from + self.span_base,
+                    to: to + self.span_base,
+                });
+            }
+        }
         result
     }
     fn expression_inner(&mut self, min: u8) -> R<V> {
@@ -634,6 +712,7 @@ impl<'a> Parser<'a> {
             }
             return Ok(n);
         }
+        let token_start = self.pos();
         let token = self.take("")?;
         match token {
             "(" => {
@@ -700,7 +779,7 @@ impl<'a> Parser<'a> {
             _ => {}
         }
         if token.starts_with(['\'', '"']) {
-            return parse_string(token);
+            return parse_string(token, token_start + self.span_base, &mut self.spans);
         }
         if let Ok(n) = token.parse::<f64>() {
             return Ok(json!(n));
@@ -1899,6 +1978,12 @@ pub fn parse(source: &str) -> R<V> {
 pub fn parse_with_options(source: &str, fragment: bool) -> R<V> {
     Parser::new(source)?.document(fragment)
 }
+pub(crate) fn parse_with_span_table(source: &str) -> R<(V, SpanTable)> {
+    let mut parser = Parser::new_spanned(source, 0)?;
+    let document = parser.document(false)?;
+    let entries = parser.spans.take().unwrap_or_default();
+    Ok((document, SpanTable { entries }))
+}
 pub fn parse_expression(source: &str) -> R<V> {
     let mut p = Parser::new(source)?;
     let v = p.expression(0)?;
@@ -1935,7 +2020,7 @@ fn decode(s: &str) -> String {
     }
     out
 }
-fn parse_string(s: &str) -> R<V> {
+fn parse_string(s: &str, string_base: usize, spans: &mut Option<Vec<ExpressionSpan>>) -> R<V> {
     let body = &s[1..s.len() - 1];
     if !body.contains(['\\', '$']) {
         return Ok(json!(body));
@@ -1979,7 +2064,21 @@ fn parse_string(s: &str) -> R<V> {
                     message: "Незавершённая интерполяция ${…}".into(),
                 });
             }
-            parts.push(parse_expression(&body[from..end])?);
+            let source = &body[from..end];
+            if let Some(all) = spans.as_mut() {
+                let base = string_base + 1 + body[..from].encode_utf16().count();
+                let mut parser = Parser::new_spanned(source, base)?;
+                let value = parser.expression(0)?;
+                if !parser.peek().is_empty() {
+                    return parser.err(format!("Лишний текст в выражении: {}", parser.peek()));
+                }
+                if let Some(nested) = parser.spans.take() {
+                    all.extend(nested);
+                }
+                parts.push(value);
+            } else {
+                parts.push(parse_expression(source)?);
+            }
             i = end + 1;
             start = i;
         } else {
@@ -2122,15 +2221,83 @@ pub fn serialize_value(v: &V) -> String {
     v.to_string()
 }
 
+/// Emit a trivia comment with the current indentation style (2 spaces per
+/// level). Line comments always terminate the line; block comments are kept
+/// verbatim and only move to their own line when they are not trailing code.
+fn format_comment(
+    out: &mut String,
+    source: &str,
+    comment: &Comment,
+    indent: usize,
+    at_line_start: &mut bool,
+    last_byte_end: Option<usize>,
+    next_tok: &str,
+) {
+    let same_line =
+        last_byte_end.is_some_and(|end| !source[end..comment.byte_start].contains('\n'));
+    if same_line && *at_line_start && out.ends_with('\n') {
+        // The preceding token already terminated the line (";\n", "{\n",
+        // "}\n"): pull the comment back onto it.
+        out.pop();
+        *at_line_start = false;
+    }
+    let line_comment = comment.text.starts_with("//");
+    if same_line && !*at_line_start {
+        if !out.ends_with(' ') {
+            out.push(' ');
+        }
+        out.push_str(comment.text);
+        if line_comment {
+            out.push('\n');
+            *at_line_start = true;
+        } else if !next_tok.is_empty()
+            && !matches!(
+                next_tok,
+                ";" | "," | ")" | "]" | "}" | ":" | "." | "?." | "(" | "{"
+            )
+        {
+            out.push(' ');
+        }
+    } else {
+        if !*at_line_start {
+            out.push('\n');
+        }
+        for _ in 0..indent {
+            out.push_str("  ");
+        }
+        out.push_str(comment.text);
+        out.push('\n');
+        *at_line_start = true;
+    }
+}
+
 pub fn format_source(source: &str) -> R<String> {
     let _ = parse(source)?;
-    let (tokens, _) = tokenize_borrowed(source)?;
+    let (tokens, comments, _) = tokenize_borrowed(source)?;
     let mut out = String::with_capacity(source.len() + 64);
     let mut indent = 0usize;
     let mut at_line_start = true;
+    let base = source.as_ptr() as usize;
+    let mut last_byte_end: Option<usize> = None;
+    let mut ci = 0usize;
     for (idx, tok) in tokens.iter().enumerate() {
         let t = tok.text;
+        let tok_byte_start = t.as_ptr() as usize - base;
         let next = tokens.get(idx + 1).map(|x| x.text).unwrap_or("");
+        while ci < comments.len() && comments[ci].start < tok.start {
+            format_comment(
+                &mut out,
+                source,
+                &comments[ci],
+                indent,
+                &mut at_line_start,
+                last_byte_end,
+                t,
+            );
+            last_byte_end = Some(comments[ci].byte_end);
+            ci += 1;
+        }
+        last_byte_end = Some(tok_byte_start + t.len());
         if t == "}" {
             indent = indent.saturating_sub(1);
             if !at_line_start {
@@ -2196,111 +2363,205 @@ pub fn format_source(source: &str) -> R<String> {
             out.push(' ');
         }
     }
+    while ci < comments.len() {
+        format_comment(
+            &mut out,
+            source,
+            &comments[ci],
+            indent,
+            &mut at_line_start,
+            last_byte_end,
+            "",
+        );
+        last_byte_end = Some(comments[ci].byte_end);
+        ci += 1;
+    }
     Ok(out.trim_end().to_string() + "\n")
 }
 
-pub fn lint_document(source: &str) -> R<V> {
-    let doc = parse(source)?;
-    let mut warnings = Vec::new();
-    let mut used_props: HashSet<&str> = HashSet::new();
-    let mut used_states: HashSet<&str> = HashSet::new();
-    let mut used_styles: HashSet<&str> = HashSet::new();
-
-    fn collect_all<'a>(
-        v: &'a V,
-        used_props: &mut HashSet<&'a str>,
-        used_states: &mut HashSet<&'a str>,
-        used_styles: &mut HashSet<&'a str>,
-        collect_style_decls: bool,
-    ) {
-        if let Some(s) = v["expr"].as_str() {
-            let s = s.strip_prefix('!').unwrap_or(s);
-            if let Some(rest) = s.strip_prefix("props.") {
-                if let Some(head) = rest.split('.').next() {
-                    used_props.insert(head);
-                }
-            } else if let Some(rest) = s.strip_prefix("state.") {
-                if let Some(head) = rest.split('.').next() {
-                    used_states.insert(head);
-                }
-            } else if !s.contains('.') {
-                used_props.insert(s);
-            }
+/// Usage sets gathered by walking the AST (`expr` nodes, bindings, events,
+/// forwards, applies) instead of matching raw source strings, so string
+/// literals never count and interpolated/call expressions are analyzed.
+#[derive(Default)]
+struct Usage {
+    props: HashSet<String>,
+    states: HashSet<String>,
+    styles: HashSet<String>,
+    tokens: HashSet<String>,
+    i18n: HashSet<String>,
+}
+/// Record a resolved reference path (`props.x`, `state.x`, `tokens.a.b`,
+/// `i18n.k` or a bare identifier) into the usage sets. Only syntactically
+/// valid identifier paths are recorded, mirroring `evaluate::references`.
+fn record_reference(u: &mut Usage, raw: &str) {
+    let s = raw.strip_prefix('!').unwrap_or(raw);
+    if let Some(rest) = s.strip_prefix("props.") {
+        if let Some(head) = rest.split('.').next().filter(|h| name(h)) {
+            u.props.insert(head.into());
         }
-        if let Some(forwards) = v["forward"].as_array() {
-            for f in forwards {
-                if let Some(name) = f.as_str() {
-                    used_props.insert(name);
-                }
-            }
+    } else if let Some(rest) = s.strip_prefix("state.") {
+        if let Some(head) = rest.split('.').next().filter(|h| name(h)) {
+            u.states.insert(head.into());
         }
-        if let Some(applies) = v["apply"].as_array() {
-            for a in applies {
-                if let Some(sn) = a.as_str() {
-                    used_styles.insert(sn);
-                }
-            }
+    } else if let Some(rest) = s.strip_prefix("tokens.") {
+        if path(rest) {
+            u.tokens.insert(rest.into());
         }
-        if let Some(bindings) = v["bindings"].as_object() {
-            for bval in bindings.values() {
-                if let Some(s) = bval.as_str() {
-                    if let Some(rest) = s.strip_prefix("state.") {
-                        if let Some(head) = rest.split('.').next() {
-                            used_states.insert(head);
-                        }
-                    } else if let Some(rest) = s.strip_prefix("props.")
-                        && let Some(head) = rest.split('.').next()
-                    {
-                        used_props.insert(head);
-                    }
-                }
-            }
+    } else if let Some(rest) = s.strip_prefix("i18n.") {
+        if path(rest) {
+            u.i18n.insert(rest.into());
         }
-        if let Some(events) = v["events"].as_object() {
-            for eval in events.values() {
-                if let Some(s) = eval.as_str()
-                    && let Some(rest) = s.strip_prefix("state.")
-                    && let Some(head) = rest.split('.').next()
-                {
-                    used_states.insert(head);
-                }
-            }
-        }
-        if let Some(action) = v["action"].as_str()
-            && let Some(rest) = action.strip_prefix("state.")
-            && let Some(head) = rest.split('.').next()
-        {
-            used_states.insert(head);
-        }
-        if let Some(a) = v.as_array() {
-            for item in a {
-                collect_all(
-                    item,
-                    used_props,
-                    used_states,
-                    used_styles,
-                    collect_style_decls,
-                );
-            }
-        } else if let Some(o) = v.as_object() {
-            for (k, val) in o {
-                if matches!(
-                    k.as_str(),
-                    "propDefinitions" | "stateDefinitions" | "defaultRanges" | "statementRanges"
-                ) || (!collect_style_decls && k == "styles")
-                {
-                    continue;
-                }
-                collect_all(
-                    val,
-                    used_props,
-                    used_states,
-                    used_styles,
-                    collect_style_decls,
-                );
+    } else if name(s) {
+        u.props.insert(s.into());
+    }
+}
+fn collect_usage(v: &V, u: &mut Usage, collect_style_decls: bool) {
+    if let Some(s) = v["expr"].as_str() {
+        record_reference(u, s);
+    }
+    if let Some(forwards) = v["forward"].as_array() {
+        for f in forwards {
+            if let Some(name) = f.as_str() {
+                u.props.insert(name.into());
             }
         }
     }
+    if let Some(applies) = v["apply"].as_array() {
+        for a in applies {
+            if let Some(sn) = a.as_str() {
+                u.styles.insert(sn.into());
+            }
+        }
+    }
+    if let Some(bindings) = v["bindings"].as_object() {
+        for bval in bindings.values() {
+            if let Some(s) = bval.as_str() {
+                record_reference(u, s);
+            }
+        }
+    }
+    if let Some(events) = v["events"].as_object() {
+        for eval in events.values() {
+            if let Some(s) = eval.as_str() {
+                record_reference(u, s);
+            }
+        }
+    }
+    if let Some(action) = v["action"].as_str() {
+        record_reference(u, action);
+    }
+    if let Some(a) = v.as_array() {
+        for item in a {
+            collect_usage(item, u, collect_style_decls);
+        }
+    } else if let Some(o) = v.as_object() {
+        for (k, val) in o {
+            if matches!(
+                k.as_str(),
+                "propDefinitions" | "stateDefinitions" | "defaultRanges" | "statementRanges"
+            ) || (!collect_style_decls && k == "styles")
+            {
+                continue;
+            }
+            collect_usage(val, u, collect_style_decls);
+        }
+    }
+}
+/// A `tokens`/`i18n` key declaration re-derived from the source (the
+/// transport AST stores no ranges for dictionary keys). `start`/`end` are
+/// UTF-16 offsets of the key itself; `key` is the full dotted path including
+/// the group, e.g. `color.brand` or `en.greeting`.
+struct DictDecl {
+    i18n: bool,
+    key: String,
+    start: usize,
+    end: usize,
+}
+fn dict_declarations(source: &str) -> R<Vec<DictDecl>> {
+    let (tokens, _, _) = tokenize_borrowed(source)?;
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        let i18n = match tokens[i].text {
+            "tokens" => false,
+            "i18n" => true,
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        let mut j = i + 1;
+        let group = if tokens.get(j).map(|t| t.text) == Some("{") {
+            None
+        } else if tokens.get(j).is_some_and(|t| name(t.text))
+            && tokens.get(j + 1).map(|t| t.text) == Some("{")
+        {
+            let g = tokens[j].text;
+            j += 1;
+            Some(g)
+        } else {
+            i += 1;
+            continue;
+        };
+        j += 1; // past "{"
+        while j < tokens.len() && tokens[j].text != "}" {
+            let key_tok = tokens[j];
+            if !path(key_tok.text) || tokens.get(j + 1).map(|t| t.text) != Some(":") {
+                break;
+            }
+            j += 2;
+            // The value runs until ";" at bracket depth 0 (strings are single
+            // tokens; brackets are balanced because the source parsed).
+            let mut depth = 0usize;
+            while j < tokens.len() {
+                let t = tokens[j].text;
+                if depth == 0 && (t == ";" || t == "}") {
+                    break;
+                }
+                match t {
+                    "{" | "[" | "(" => depth += 1,
+                    "}" | "]" | ")" => depth -= 1,
+                    _ => {}
+                }
+                j += 1;
+            }
+            if j >= tokens.len() || tokens[j].text != ";" {
+                break;
+            }
+            out.push(DictDecl {
+                i18n,
+                key: match group {
+                    Some(g) => format!("{g}.{}", key_tok.text),
+                    None => key_tok.text.into(),
+                },
+                start: key_tok.start,
+                end: key_tok.end,
+            });
+            j += 1; // past ";"
+        }
+        i += 1;
+    }
+    Ok(out)
+}
+/// Does the `tokens.`/`i18n.` reference tail `r` keep the declared key `k`
+/// alive? Covers exact full paths (`tokens.color.brand`), group heads
+/// (`tokens.color`), member access into an object-valued key
+/// (`tokens.font.size` for `font`) and bare copies of grouped keys
+/// (`tokens.brand`, and the locale fallback `i18n.greeting` matching
+/// `en.greeting` in every locale group).
+fn dict_key_used(r: &str, k: &str) -> bool {
+    r == k
+        || (k.starts_with(r) && k[r.len()..].starts_with('.'))
+        || (r.starts_with(k) && r[k.len()..].starts_with('.'))
+        || k.rsplit_once('.').is_some_and(|(_, tail)| tail == r)
+}
+pub fn lint_document(source: &str) -> R<V> {
+    lint_document_with_context(source, &crate::typecheck::TypeContext::default())
+}
+pub fn lint_document_with_context(source: &str, context: &crate::typecheck::TypeContext) -> R<V> {
+    let (doc, expression_spans) = parse_with_span_table(source)?;
+    let mut warnings = Vec::new();
+    let mut usage = Usage::default();
 
     fn check_matches(v: &V, warnings: &mut Vec<V>) {
         if let Some(branches) = v["branches"].as_array() {
@@ -2328,42 +2589,47 @@ pub fn lint_document(source: &str) -> R<V> {
         }
     }
 
-    for section in ["nodes", "matches", "shortcuts", "styles", "i18n"] {
-        collect_all(
-            &doc[section],
-            &mut used_props,
-            &mut used_states,
-            &mut used_styles,
-            section == "styles",
-        );
+    for section in [
+        "nodes",
+        "matches",
+        "shortcuts",
+        "styles",
+        "i18n",
+        "tokens",
+        "slots",
+        "overrides",
+        "states",
+        "entries",
+    ] {
+        collect_usage(&doc[section], &mut usage, section == "styles");
     }
     if let Some(defaults) = doc["defaults"].as_object() {
         for (k, v) in defaults {
             let is_let = doc["lets"].get(k).is_some();
             if is_let {
-                collect_all(
-                    v,
-                    &mut used_props,
-                    &mut used_states,
-                    &mut used_styles,
-                    false,
-                );
+                collect_usage(v, &mut usage, false);
             } else {
-                let mut ignore_props = HashSet::new();
-                collect_all(
-                    v,
-                    &mut ignore_props,
-                    &mut used_states,
-                    &mut used_styles,
-                    false,
-                );
+                // A prop default does not keep other props alive (the prop
+                // itself may be dead), but it does use states/styles/tokens/i18n.
+                let mut inner = Usage::default();
+                collect_usage(v, &mut inner, false);
+                usage.states.extend(inner.states);
+                usage.styles.extend(inner.styles);
+                usage.tokens.extend(inner.tokens);
+                usage.i18n.extend(inner.i18n);
             }
+        }
+    }
+    // State defaults are real expression contexts: references there count.
+    if let Some(state_defs) = doc["stateDefinitions"].as_object() {
+        for def in state_defs.values() {
+            collect_usage(&def["default"], &mut usage, false);
         }
     }
 
     if let Some(lets) = doc["lets"].as_object() {
         for name in lets.keys() {
-            if !used_props.contains(name.as_str()) {
+            if !usage.props.contains(name.as_str()) {
                 let range = &doc["defaultRanges"][name];
                 warnings.push(json!({
                     "code": "unused-let",
@@ -2377,7 +2643,7 @@ pub fn lint_document(source: &str) -> R<V> {
     }
     if let Some(prop_defs) = doc["propDefinitions"].as_object() {
         for name in prop_defs.keys() {
-            if !used_props.contains(name.as_str()) {
+            if !usage.props.contains(name.as_str()) {
                 let range = &doc["defaultRanges"][name];
                 warnings.push(json!({
                     "code": "unused-prop",
@@ -2391,7 +2657,7 @@ pub fn lint_document(source: &str) -> R<V> {
     }
     if let Some(state_defs) = doc["stateDefinitions"].as_object() {
         for name in state_defs.keys() {
-            if !used_states.contains(name.as_str()) {
+            if !usage.states.contains(name.as_str()) {
                 let range = &doc["defaultRanges"][name];
                 warnings.push(json!({
                     "code": "unused-state",
@@ -2405,13 +2671,51 @@ pub fn lint_document(source: &str) -> R<V> {
     }
     if let Some(styles) = doc["styles"].as_object() {
         for name in styles.keys() {
-            if !used_styles.contains(name.as_str()) {
+            if !usage.styles.contains(name.as_str()) {
                 warnings.push(json!({
                     "code": "unused-style",
                     "name": name,
                     "message": format!("Неиспользуемый стиль style {name}")
                 }));
             }
+        }
+    }
+
+    // Dead token/i18n keys. Keys of a shared module file (no component or
+    // design body) are its public API, so the lints only fire with a body.
+    let has_body = !doc["designBody"].is_null()
+        || nonempty(&doc["nodes"])
+        || nonempty(&doc["defaults"])
+        || nonempty(&doc["propDefinitions"])
+        || nonempty(&doc["stateDefinitions"]);
+    if has_body {
+        for decl in dict_declarations(source)? {
+            let used = if decl.i18n {
+                &usage.i18n
+            } else {
+                &usage.tokens
+            };
+            if used.iter().any(|r| dict_key_used(r, &decl.key)) {
+                continue;
+            }
+            let (code, message) = if decl.i18n {
+                (
+                    "unused-i18n-key",
+                    format!("Неиспользуемый ключ i18n {}", decl.key),
+                )
+            } else {
+                (
+                    "unused-token",
+                    format!("Неиспользуемый токен tokens {}", decl.key),
+                )
+            };
+            warnings.push(json!({
+                "code": code,
+                "name": decl.key,
+                "from": decl.start,
+                "to": decl.end,
+                "message": message
+            }));
         }
     }
 
@@ -2437,5 +2741,7 @@ pub fn lint_document(source: &str) -> R<V> {
     check_matches(&doc["matches"], &mut warnings);
     check_matches(&doc["defaults"], &mut warnings);
 
+    warnings.extend(crate::typecheck::analyze(&doc, &expression_spans, context).diagnostics);
+    warnings.sort_by_key(|warning| warning["from"].as_u64().unwrap_or(u64::MAX));
     Ok(json!(warnings))
 }

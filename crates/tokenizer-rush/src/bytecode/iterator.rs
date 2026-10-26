@@ -21,8 +21,20 @@ pub enum BytecodeSequenceSource {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BytecodeSequenceStage {
     pub callback: Value<'static>,
-    pub filter: bool,
+    pub kind: BytecodeStageKind,
     pub span: Span,
+}
+
+/// How a sequence stage transforms a source item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BytecodeStageKind {
+    /// Replaces the item with the callback result.
+    Map,
+    /// Keeps the item only while the callback is truthy.
+    Filter,
+    /// Expands the item into the list returned by the callback, emitting its
+    /// elements one at a time before the remaining source items.
+    FlatMap,
 }
 
 /// Active cursor iterating over a list, range, or sequence in bytecode VM.
@@ -42,6 +54,8 @@ pub enum BytecodeIterator {
     Sequence {
         source_iter: Box<BytecodeIterator>,
         stages: Vec<BytecodeSequenceStage>,
+        /// Buffered flat_map expansions: value plus the stage index it resumes at.
+        pending: std::collections::VecDeque<(Value<'static>, usize)>,
         finished: bool,
     },
 }
@@ -97,6 +111,7 @@ impl BytecodeIterator {
                 Ok(BytecodeIterator::Sequence {
                     source_iter: Box::new(source_iter),
                     stages: seq.stages.clone(),
+                    pending: std::collections::VecDeque::new(),
                     finished: false,
                 })
             }
@@ -163,6 +178,7 @@ impl BytecodeIterator {
             BytecodeIterator::Sequence {
                 source_iter,
                 stages,
+                pending,
                 finished,
             } => {
                 if *finished {
@@ -174,23 +190,50 @@ impl BytecodeIterator {
                     }
                     vm.fuel -= 1;
 
-                    let Some(mut item) = source_iter.next(vm, span)? else {
-                        *finished = true;
-                        return Ok(None);
-                    };
+                    let (mut item, mut stage_index) =
+                        if let Some((value, resume)) = pending.pop_front() {
+                            (value, resume)
+                        } else {
+                            let Some(item) = source_iter.next(vm, span)? else {
+                                *finished = true;
+                                return Ok(None);
+                            };
+                            (item, 0)
+                        };
 
-                    for stage in stages.iter() {
+                    while stage_index < stages.len() {
+                        let stage = &stages[stage_index];
                         let res = vm.invoke_callable(
                             &stage.callback,
                             std::slice::from_ref(&item),
                             stage.span,
                         )?;
-                        if stage.filter {
-                            if !is_truthy(&res) {
-                                continue 'candidate;
+                        stage_index += 1;
+                        match stage.kind {
+                            BytecodeStageKind::Filter => {
+                                if !is_truthy(&res) {
+                                    continue 'candidate;
+                                }
                             }
-                        } else {
-                            item = res;
+                            BytecodeStageKind::Map => item = res,
+                            BytecodeStageKind::FlatMap => {
+                                let Value::List(values) = res else {
+                                    return Err(vm.error(
+                                        stage.span,
+                                        "flat_map callback must return a list",
+                                    ));
+                                };
+                                let mut values = values.into_iter();
+                                let Some(first) = values.next() else {
+                                    continue 'candidate;
+                                };
+                                let buffered: Vec<(Value<'static>, usize)> =
+                                    values.map(|value| (value, stage_index)).collect();
+                                for entry in buffered.into_iter().rev() {
+                                    pending.push_front(entry);
+                                }
+                                item = first;
+                            }
                         }
                     }
                     return Ok(Some(item));

@@ -3,7 +3,7 @@ import {evaluateExpression} from './expressions.js';
 import {parseRust,operation} from './rust.js';
 export const parse=(source,{fragment=false}={})=>parseRust(source,fragment);
 export const formatSource=source=>operation('format',{source});
-export const lintDocument=source=>operation('lint',{source});
+export const lintDocument=(source,context)=>operation('lint',{source,context});
 export const validateDesign=(component,design)=>operation('validateDesign',{component,design});
 export const designStatePatch=(design,stateName=null)=>operation('designStatePatch',{design,stateName});
 export function resolve(v,state,readDesignData=ref=>{throw Error(`No design-data resolver supplied for ${ref}`);}){

@@ -613,6 +613,9 @@ impl RushSchedule {
                 ScheduledState::Waiting(WakeRequest::Event(event)) => {
                     format!("\"state\":\"waiting\",\"event\":{}", json_string(&event))
                 }
+                ScheduledState::Waiting(WakeRequest::Task(id)) => {
+                    format!("\"state\":\"waiting\",\"task\":{}", id.get())
+                }
                 ScheduledState::Complete(value) => {
                     let value = bounded_rush_output(|out| write!(out, "{value:?}"))
                         .map_err(|_| "Text output byte limit exceeded".to_owned())?;

@@ -1,7 +1,7 @@
 use super::stmt::Flow;
 use super::{
     Builtin, CallFrame, Closure, Environment, FunctionBody, RecordMap, RecordShape, RegionStats,
-    Result, Runtime, RuntimeError, SequenceStage, UserData, Value, ValueType,
+    Result, Runtime, RuntimeError, SequenceStage, StageKind, UserData, Value, ValueType,
     format_value_for_display, json, memory,
 };
 use crate::{Expr, ExprKind, Name};
@@ -9,6 +9,23 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
+
+impl Runtime<'_, '_> {
+    /// Maps a Cover rejection to the corresponding limit error.
+    fn cover_error(&self, span: crate::Span, error: memory::CoverError) -> RuntimeError {
+        let message = match error {
+            memory::CoverError::Heap => "Heap limit exceeded",
+            memory::CoverError::Allocated => "Allocation limit exceeded",
+        };
+        RuntimeError {
+            stack: Vec::new(),
+            location: None,
+            module: self.module.map(str::to_owned),
+            span,
+            message: message.into(),
+        }
+    }
+}
 
 impl<'s> Runtime<'_, 's> {
     pub(super) fn call(
@@ -38,7 +55,8 @@ impl<'s> Runtime<'_, 's> {
         let result = match function {
             Value::Function(function) => self.call_user(function, arguments, span),
             Value::BytecodeFunction(closure) => {
-                let mut vm = crate::bytecode::Vm::new(self.remaining);
+                let mut vm =
+                    crate::bytecode::Vm::with_shared_budget(self.remaining, self.memory.clone());
                 let static_args: Vec<_> = arguments.iter().filter_map(|a| a.to_static()).collect();
                 if static_args.len() != arguments.len() {
                     return self.error(span, "Non-static arguments in bytecode call");
@@ -182,23 +200,27 @@ impl<'s> Runtime<'_, 's> {
                 }
                 let mut cursor = self.sequence_cursor(source.clone(), span)?;
                 let mut output = Vec::new();
+                let mut cover = memory::Cover::new(&self.memory);
                 for _ in 0..limit {
                     let Some(item) = self.sequence_next(&mut cursor, span)? else {
                         break;
                     };
                     self.charge(1, span)?;
                     output.push(item);
+                    cover
+                        .cover_vec(&output)
+                        .map_err(|e| self.cover_error(span, e))?;
                 }
                 return Ok(Value::List(output));
             }
-            if matches!(builtin, Builtin::Map | Builtin::Filter)
+            if matches!(builtin, Builtin::Map | Builtin::Filter | Builtin::FlatMap)
                 && matches!(
                     arguments.first(),
                     Some(Value::Range { .. } | Value::Sequence(_) | Value::BytecodeSequence(_))
                 )
             {
                 let [source, callback] = arguments.as_ref() else {
-                    return self.error(span, "map/filter require a sequence and callback");
+                    return self.error(span, "map/filter/flat_map require a sequence and callback");
                 };
                 if !matches!(
                     callback,
@@ -218,7 +240,11 @@ impl<'s> Runtime<'_, 's> {
                         &self.memory,
                         SequenceStage {
                             callback: callback.clone(),
-                            filter: builtin == Builtin::Filter,
+                            kind: match builtin {
+                                Builtin::Filter => StageKind::Filter,
+                                Builtin::FlatMap => StageKind::FlatMap,
+                                _ => StageKind::Map,
+                            },
                             span,
                             module: self.module,
                         },
@@ -228,7 +254,7 @@ impl<'s> Runtime<'_, 's> {
                         location: None,
                         module: self.module.map(str::to_owned),
                         span,
-                        message: format!("Runtime sequence allocation failed: {e:?}"),
+                        message: e.message("Runtime sequence allocation failed"),
                     })?;
                 return Ok(Value::Sequence(Rc::new(sequence)));
             }
@@ -805,6 +831,7 @@ impl<'s> Runtime<'_, 's> {
                     return Ok(Value::Range { start, end, step });
                 }
                 let mut values = Vec::new();
+                let mut cover = memory::Cover::new(&self.memory);
                 let mut current = start;
                 while if step > 0.0 {
                     current < end
@@ -820,6 +847,9 @@ impl<'s> Runtime<'_, 's> {
                         return self.error(span, "Collection item limit exceeded");
                     }
                     values.push(Value::Number(current));
+                    cover
+                        .cover_vec(&values)
+                        .map_err(|e| self.cover_error(span, e))?;
                     let next = (values.len() as f64).mul_add(step, start);
                     if !next.is_finite() || next == current {
                         return self.error(span, "Range cannot advance finitely");
@@ -859,6 +889,7 @@ impl<'s> Runtime<'_, 's> {
                 let mut cursor = self.sequence_cursor(source, span)?;
                 let mut positions = BTreeMap::<String, usize>::new();
                 let mut groups = Vec::<(String, Value<'s>)>::new();
+                let mut covers = Vec::<memory::Cover>::new();
                 while let Some(item) = self.sequence_next(&mut cursor, span)? {
                     let key = self.call(
                         callback.clone(),
@@ -877,6 +908,7 @@ impl<'s> Runtime<'_, 's> {
                         self.string_growth(0, field.len(), span)?;
                         let position = groups.len();
                         positions.insert(key.clone(), position);
+                        covers.push(memory::Cover::new(&self.memory));
                         groups.push((
                             key,
                             if reducer.is_some() {
@@ -894,6 +926,9 @@ impl<'s> Runtime<'_, 's> {
                     } else if let Value::List(values) = &mut groups[position].1 {
                         self.collection_growth(values.len(), 1, span)?;
                         values.push(item);
+                        covers[position]
+                            .cover_vec(values)
+                            .map_err(|e| self.cover_error(span, e))?;
                     }
                 }
                 let group_shape: RecordShape = Rc::from([String::from("key"), String::from(field)]);
@@ -936,6 +971,7 @@ impl<'s> Runtime<'_, 's> {
                 return self.error(span, "Callback must be callable");
             }
             let mut output = Vec::new();
+            let mut cover = memory::Cover::new(&self.memory);
             while let Some(item) = self.sequence_next(&mut cursor, span)? {
                 let result = if builtin == Builtin::Fold {
                     self.call(
@@ -955,12 +991,18 @@ impl<'s> Runtime<'_, 's> {
                     Builtin::Map => {
                         self.collection_growth(output.len(), 1, span)?;
                         output.push(result);
+                        cover
+                            .cover_vec(&output)
+                            .map_err(|e| self.cover_error(span, e))?;
                     }
                     Builtin::FlatMap => match result {
                         Value::List(values) => {
                             self.charge(values.len(), span)?;
                             self.collection_growth(output.len(), values.len(), span)?;
                             output.extend(values);
+                            cover
+                                .cover_vec(&output)
+                                .map_err(|e| self.cover_error(span, e))?;
                         }
                         _ => return self.error(span, "Flat map callback must return a list"),
                     },
@@ -968,6 +1010,9 @@ impl<'s> Runtime<'_, 's> {
                         Value::Bool(true) => {
                             self.collection_growth(output.len(), 1, span)?;
                             output.push(item);
+                            cover
+                                .cover_vec(&output)
+                                .map_err(|e| self.cover_error(span, e))?;
                         }
                         Value::Bool(false) => {}
                         _ => return self.error(span, "Filter callback must return a boolean"),
@@ -1025,6 +1070,7 @@ impl<'s> Runtime<'_, 's> {
                 .map_err(|e| self.environment_error(name.span, e))?,
             references: Rc::new(Vec::new()),
             siblings: Rc::new(Vec::new()),
+            is_async: false,
         })))
     }
 
@@ -1115,6 +1161,11 @@ impl<'s> Runtime<'_, 's> {
         }
         if matches!(&*function.body, FunctionBody::Constructor { .. }) {
             return self.call_constructor(&function, arguments, span);
+        }
+        if function.is_async {
+            // Stage A: the call spawns a task and returns its handle; the body
+            // runs only through resume_coroutine / the scheduler.
+            return self.spawn_async_task(function, &arguments, span);
         }
         let mut environment = self.take_call_environment(&function.environment);
         for sib in function.siblings.iter() {

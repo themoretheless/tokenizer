@@ -17,6 +17,10 @@ fn canonical_blocks_calls_and_bindings() {
         stable("fn add a:number b:number -> number:\n  return a+b\nconst value=add 1 2\nvalue"),
         "fn add(a: number, b: number) -> number {\n    return a + b;\n}\nlet value = add(1, 2);\nvalue;\n"
     );
+    assert_eq!(
+        stable("let f=async x=>x+1\nlet g=async=>await f()"),
+        "let f = async (x) => x + 1;\nlet g = async () => await f();\n"
+    );
     assert_eq!(stable(""), "");
     assert!(format_source("let x =").is_err());
 }

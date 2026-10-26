@@ -2,11 +2,13 @@
 //! zero-allocation builtin dispatch, and ExecutionLimits / CancellationToken support.
 use crate::bytecode::iterator::{
     BytecodeIterator, BytecodeSequence, BytecodeSequenceSource, BytecodeSequenceStage,
+    BytecodeStageKind,
 };
 use crate::bytecode::opcode::{
     BytecodeClosure, BytecodeFunction, Chunk, Opcode, PathTarget, Upvalue,
 };
 use crate::runtime::builtins::{eval_pure_builtin, lookup_builtin};
+use crate::runtime::memory::{Budget, Cover, CoverError};
 use crate::runtime::ops::{
     eval_binary_values, eval_unary_value, format_value_for_display, is_truthy,
 };
@@ -30,6 +32,7 @@ pub struct Vm<'c> {
     pub(crate) fuel: usize,
     max_depth: usize,
     cancel: Option<&'c CancellationToken>,
+    memory: Budget,
     globals: HashMap<String, Value<'static>>,
     frames: Vec<CallFrame>,
     stack: Vec<Value<'static>>,
@@ -38,15 +41,7 @@ pub struct Vm<'c> {
 
 impl<'c> Vm<'c> {
     pub fn new(budget: usize) -> Self {
-        Self {
-            fuel: budget,
-            max_depth: 512,
-            cancel: None,
-            globals: HashMap::new(),
-            frames: Vec::with_capacity(16),
-            stack: Vec::with_capacity(64),
-            open_upvalues: Vec::new(),
-        }
+        Self::with_shared_budget(budget, Budget::with_allocated_limit(usize::MAX, usize::MAX))
     }
 
     pub fn with_limits(limits: ExecutionLimits, cancel: Option<&'c CancellationToken>) -> Self {
@@ -54,6 +49,22 @@ impl<'c> Vm<'c> {
             fuel: limits.steps,
             max_depth: limits.max_depth.max(1),
             cancel,
+            memory: Budget::with_allocated_limit(limits.max_heap_bytes, limits.max_allocated_bytes),
+            globals: HashMap::new(),
+            frames: Vec::with_capacity(16),
+            stack: Vec::with_capacity(64),
+            open_upvalues: Vec::new(),
+        }
+    }
+
+    /// A nested VM sharing the caller's memory budget, so limits hold across
+    /// tree-walk/bytecode boundaries. Fuel is synchronized back by the caller.
+    pub(crate) fn with_shared_budget(fuel: usize, memory: Budget) -> Self {
+        Self {
+            fuel,
+            max_depth: 512,
+            cancel: None,
+            memory,
             globals: HashMap::new(),
             frames: Vec::with_capacity(16),
             stack: Vec::with_capacity(64),
@@ -74,6 +85,48 @@ impl<'c> Vm<'c> {
             stack: Vec::new(),
             location: None,
         }
+    }
+
+    /// Maps a Cover rejection to the corresponding limit error.
+    fn cover_error(&self, span: Span, error: CoverError) -> RuntimeError {
+        self.error(
+            span,
+            match error {
+                CoverError::Heap => "Heap limit exceeded",
+                CoverError::Allocated => "Allocation limit exceeded",
+            },
+        )
+    }
+
+    /// Charges the cumulative work budget for a produced value's fresh
+    /// storage, mirroring string_growth/collection_growth in the tree-walk
+    /// runtime. Scalars and shared structures allocate nothing new.
+    fn charge_produced(&self, value: &Value<'static>, span: Span) -> Result<(), RuntimeError> {
+        let bytes = match value {
+            Value::String(s) => s.len(),
+            Value::List(items) | Value::Tuple(items) => {
+                items.len().saturating_mul(std::mem::size_of::<Value>())
+            }
+            Value::Record(fields) => fields.len().saturating_mul(std::mem::size_of::<Value>()),
+            _ => 0,
+        };
+        if bytes > 0 && self.memory.charge_allocated(bytes).is_err() {
+            return Err(self.error(span, "Allocation limit exceeded"));
+        }
+        Ok(())
+    }
+
+    /// Binary operation with the produced storage charged to the work budget.
+    fn eval_binary(
+        &self,
+        op: &str,
+        left: Value<'static>,
+        right: Value<'static>,
+        span: Span,
+    ) -> Result<Value<'static>, RuntimeError> {
+        let res = eval_binary_values(op, left, right).map_err(|m| self.error(span, m))?;
+        self.charge_produced(&res, span)?;
+        Ok(res)
     }
 
     #[inline(always)]
@@ -585,8 +638,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values("+", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("+", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::Sub => {
@@ -618,8 +670,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values("-", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("-", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::Mul => {
@@ -651,8 +702,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values("*", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("*", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::Div => {
@@ -670,22 +720,19 @@ impl<'c> Vm<'c> {
                         }
                     }
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values("/", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("/", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::Mod => {
                     let right = self.stack.pop().unwrap();
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values("%", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("%", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::Pow => {
                     let right = self.stack.pop().unwrap();
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values("**", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("**", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::BitAnd => {
@@ -695,8 +742,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values("&", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("&", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::BitXor => {
@@ -706,22 +752,19 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values("^", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("^", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::Shl => {
                     let right = self.stack.pop().unwrap();
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values("<<", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("<<", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::Shr => {
                     let right = self.stack.pop().unwrap();
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values(">>", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary(">>", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::Neg => {
@@ -790,15 +833,13 @@ impl<'c> Vm<'c> {
                 Opcode::Equal => {
                     let right = self.stack.pop().unwrap();
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values("==", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("==", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::NotEqual => {
                     let right = self.stack.pop().unwrap();
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values("!=", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("!=", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::Less => {
@@ -819,8 +860,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values("<", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("<", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::LessEqual => {
@@ -841,8 +881,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values("<=", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("<=", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::Greater => {
@@ -863,8 +902,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values(">", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary(">", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::GreaterEqual => {
@@ -885,8 +923,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res =
-                        eval_binary_values(">=", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary(">=", left, right, span)?;
                     self.stack.push(res);
                 }
                 Opcode::AddImm(imm) => {
@@ -908,8 +945,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("+", left, Value::Number(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("+", left, Value::Number(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::SubImm(imm) => {
@@ -931,8 +967,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("-", left, Value::Number(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("-", left, Value::Number(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::MulImm(imm) => {
@@ -954,8 +989,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("*", left, Value::Number(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("*", left, Value::Number(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::ModImm(imm) => {
@@ -980,8 +1014,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("%", left, Value::Number(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("%", left, Value::Number(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::EqualImm(imm) => {
@@ -1001,8 +1034,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("==", left, Value::Number(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("==", left, Value::Number(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::LessImm(imm) => {
@@ -1024,8 +1056,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("<", left, Value::Number(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("<", left, Value::Number(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::LessEqualImm(imm) => {
@@ -1047,8 +1078,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("<=", left, Value::Number(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("<=", left, Value::Number(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::GreaterImm(imm) => {
@@ -1070,8 +1100,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values(">", left, Value::Number(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary(">", left, Value::Number(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::GreaterEqualImm(imm) => {
@@ -1093,8 +1122,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values(">=", left, Value::Number(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary(">=", left, Value::Number(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::LocalAddImm(slot, imm) => {
@@ -1115,8 +1143,8 @@ impl<'c> Vm<'c> {
                             }
                         }
                         Some(other) => {
-                            let res = eval_binary_values("+", other.clone(), Value::Number(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("+", other.clone(), Value::Number(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for +")),
@@ -1140,8 +1168,8 @@ impl<'c> Vm<'c> {
                             }
                         }
                         Some(other) => {
-                            let res = eval_binary_values("-", other.clone(), Value::Number(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("-", other.clone(), Value::Number(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for -")),
@@ -1165,8 +1193,8 @@ impl<'c> Vm<'c> {
                             }
                         }
                         Some(other) => {
-                            let res = eval_binary_values("*", other.clone(), Value::Number(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("*", other.clone(), Value::Number(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for *")),
@@ -1195,8 +1223,8 @@ impl<'c> Vm<'c> {
                             }
                         }
                         Some(other) => {
-                            let res = eval_binary_values("%", other.clone(), Value::Number(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("%", other.clone(), Value::Number(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for %")),
@@ -1211,8 +1239,8 @@ impl<'c> Vm<'c> {
                                 .push(Value::Bool(crate::runtime::int_f64_eq(*a, imm)));
                         }
                         Some(other) => {
-                            let res = eval_binary_values("==", other.clone(), Value::Number(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("==", other.clone(), Value::Number(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for ==")),
@@ -1228,8 +1256,8 @@ impl<'c> Vm<'c> {
                             self.stack.push(Value::Bool(lt));
                         }
                         Some(other) => {
-                            let res = eval_binary_values("<", other.clone(), Value::Number(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("<", other.clone(), Value::Number(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for <")),
@@ -1245,8 +1273,8 @@ impl<'c> Vm<'c> {
                             self.stack.push(Value::Bool(le));
                         }
                         Some(other) => {
-                            let res = eval_binary_values("<=", other.clone(), Value::Number(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("<=", other.clone(), Value::Number(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for <=")),
@@ -1260,8 +1288,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("+", left, Value::Int(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("+", left, Value::Int(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::SubIntImm(imm) => {
@@ -1272,8 +1299,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("-", left, Value::Int(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("-", left, Value::Int(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::MulIntImm(imm) => {
@@ -1284,8 +1310,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("*", left, Value::Int(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("*", left, Value::Int(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::ModIntImm(imm) => {
@@ -1296,8 +1321,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("%", left, Value::Int(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("%", left, Value::Int(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::BitAndIntImm(imm) => {
@@ -1306,8 +1330,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("&", left, Value::Int(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("&", left, Value::Int(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::BitXorIntImm(imm) => {
@@ -1316,8 +1339,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("^", left, Value::Int(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("^", left, Value::Int(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::ShlIntImm(shift) => {
@@ -1326,8 +1348,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("<<", left, Value::Int(i64::from(shift)))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("<<", left, Value::Int(i64::from(shift)), span)?;
                     self.stack.push(res);
                 }
                 Opcode::ShrIntImm(shift) => {
@@ -1336,8 +1357,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values(">>", left, Value::Int(i64::from(shift)))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary(">>", left, Value::Int(i64::from(shift)), span)?;
                     self.stack.push(res);
                 }
                 Opcode::EqualIntImm(imm) => {
@@ -1348,8 +1368,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("==", left, Value::Int(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("==", left, Value::Int(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::LessIntImm(imm) => {
@@ -1360,8 +1379,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("<", left, Value::Int(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("<", left, Value::Int(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::LessEqualIntImm(imm) => {
@@ -1372,8 +1390,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values("<=", left, Value::Int(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("<=", left, Value::Int(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::GreaterIntImm(imm) => {
@@ -1384,8 +1401,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values(">", left, Value::Int(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary(">", left, Value::Int(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::GreaterEqualIntImm(imm) => {
@@ -1396,8 +1412,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.pop().unwrap();
-                    let res = eval_binary_values(">=", left, Value::Int(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary(">=", left, Value::Int(imm), span)?;
                     self.stack.push(res);
                 }
                 Opcode::LocalAddIntImm(slot, imm) => {
@@ -1411,8 +1426,8 @@ impl<'c> Vm<'c> {
                             }
                         }
                         Some(other) => {
-                            let res = eval_binary_values("+", other.clone(), Value::Int(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("+", other.clone(), Value::Int(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for +")),
@@ -1429,8 +1444,8 @@ impl<'c> Vm<'c> {
                             }
                         }
                         Some(other) => {
-                            let res = eval_binary_values("-", other.clone(), Value::Int(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("-", other.clone(), Value::Int(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for -")),
@@ -1447,8 +1462,8 @@ impl<'c> Vm<'c> {
                             }
                         }
                         Some(other) => {
-                            let res = eval_binary_values("*", other.clone(), Value::Int(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("*", other.clone(), Value::Int(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for *")),
@@ -1465,8 +1480,8 @@ impl<'c> Vm<'c> {
                             }
                         }
                         Some(other) => {
-                            let res = eval_binary_values("%", other.clone(), Value::Int(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("%", other.clone(), Value::Int(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for %")),
@@ -1477,8 +1492,8 @@ impl<'c> Vm<'c> {
                     match self.stack.get(idx) {
                         Some(Value::Int(a)) => self.stack.push(Value::Int(*a & imm)),
                         Some(other) => {
-                            let res = eval_binary_values("&", other.clone(), Value::Int(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("&", other.clone(), Value::Int(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for &")),
@@ -1489,8 +1504,8 @@ impl<'c> Vm<'c> {
                     match self.stack.get(idx) {
                         Some(Value::Int(a)) => self.stack.push(Value::Bool(*a == imm)),
                         Some(other) => {
-                            let res = eval_binary_values("==", other.clone(), Value::Int(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("==", other.clone(), Value::Int(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for ==")),
@@ -1501,8 +1516,8 @@ impl<'c> Vm<'c> {
                     match self.stack.get(idx) {
                         Some(Value::Int(a)) => self.stack.push(Value::Bool(*a < imm)),
                         Some(other) => {
-                            let res = eval_binary_values("<", other.clone(), Value::Int(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("<", other.clone(), Value::Int(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for <")),
@@ -1513,8 +1528,8 @@ impl<'c> Vm<'c> {
                     match self.stack.get(idx) {
                         Some(Value::Int(a)) => self.stack.push(Value::Bool(*a <= imm)),
                         Some(other) => {
-                            let res = eval_binary_values("<=", other.clone(), Value::Int(imm))
-                                .map_err(|m| self.error(span, m))?;
+                            let res =
+                                self.eval_binary("<=", other.clone(), Value::Int(imm), span)?;
                             self.stack.push(res);
                         }
                         None => return Err(self.error(span, "Invalid operands for <=")),
@@ -1551,8 +1566,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
-                    let res =
-                        eval_binary_values("+", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("+", left, right, span)?;
                     self.stack[idx] = res.clone();
                     self.stack.push(res);
                 }
@@ -1583,8 +1597,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
-                    let res =
-                        eval_binary_values("+", left, right).map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("+", left, right, span)?;
                     self.stack[idx] = res;
                 }
                 Opcode::AddAssignLocalImm(slot, imm) => {
@@ -1610,8 +1623,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
-                    let res = eval_binary_values("+", left, Value::Number(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("+", left, Value::Number(imm), span)?;
                     self.stack[idx] = res.clone();
                     self.stack.push(res);
                 }
@@ -1635,8 +1647,7 @@ impl<'c> Vm<'c> {
                         _ => {}
                     }
                     let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
-                    let res = eval_binary_values("+", left, Value::Number(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("+", left, Value::Number(imm), span)?;
                     self.stack[idx] = res;
                 }
                 Opcode::AddAssignLocalIntImm(slot, imm) => {
@@ -1649,8 +1660,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
-                    let res = eval_binary_values("+", left, Value::Int(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("+", left, Value::Int(imm), span)?;
                     self.stack[idx] = res.clone();
                     self.stack.push(res);
                 }
@@ -1663,8 +1673,7 @@ impl<'c> Vm<'c> {
                         continue;
                     }
                     let left = self.stack.get(idx).cloned().unwrap_or(Value::Null);
-                    let res = eval_binary_values("+", left, Value::Int(imm))
-                        .map_err(|m| self.error(span, m))?;
+                    let res = self.eval_binary("+", left, Value::Int(imm), span)?;
                     self.stack[idx] = res;
                 }
                 Opcode::Jump(target) => {
@@ -1685,12 +1694,16 @@ impl<'c> Vm<'c> {
                 Opcode::BuildList(count) => {
                     let start = self.stack.len() - count;
                     let items = self.stack.drain(start..).collect();
-                    self.stack.push(Value::List(items));
+                    let value = Value::List(items);
+                    self.charge_produced(&value, span)?;
+                    self.stack.push(value);
                 }
                 Opcode::BuildTuple(count) => {
                     let start = self.stack.len() - count;
                     let items = self.stack.drain(start..).collect();
-                    self.stack.push(Value::Tuple(items));
+                    let value = Value::Tuple(items);
+                    self.charge_produced(&value, span)?;
+                    self.stack.push(value);
                 }
                 Opcode::BuildRecord(count) => {
                     let start = self.stack.len() - (count * 2);
@@ -1704,7 +1717,9 @@ impl<'c> Vm<'c> {
                         pairs.push((key, v));
                     }
                     drop(iter);
-                    self.stack.push(Value::Record(RecordMap::from_iter(pairs)));
+                    let value = Value::Record(RecordMap::from_iter(pairs));
+                    self.charge_produced(&value, span)?;
+                    self.stack.push(value);
                 }
                 Opcode::BuildRecordShape(shape_idx) => {
                     let desc = &self.frames[frame_idx].closure.function.chunk.record_shapes
@@ -1721,10 +1736,9 @@ impl<'c> Vm<'c> {
                     } else {
                         self.stack.split_off(start)
                     };
-                    self.stack
-                        .push(Value::Record(RecordMap::from_shape_and_values(
-                            shape, values,
-                        )));
+                    let value = Value::Record(RecordMap::from_shape_and_values(shape, values));
+                    self.charge_produced(&value, span)?;
+                    self.stack.push(value);
                 }
                 Opcode::IndexGet => {
                     let idx = self.stack.pop().unwrap();
@@ -1844,7 +1858,9 @@ impl<'c> Vm<'c> {
                         format_value_for_display(part, &mut out, 0);
                     }
                     self.stack.truncate(start);
-                    self.stack.push(Value::String(out));
+                    let value = Value::String(out);
+                    self.charge_produced(&value, span)?;
+                    self.stack.push(value);
                 }
                 Opcode::Call(arg_count) => {
                     let callee_idx = self.stack.len() - arg_count - 1;
@@ -2612,7 +2628,7 @@ impl<'c> Vm<'c> {
                             },
                             stages: vec![BytecodeSequenceStage {
                                 callback: callback.clone(),
-                                filter: false,
+                                kind: BytecodeStageKind::Map,
                                 span,
                             }],
                         };
@@ -2622,7 +2638,7 @@ impl<'c> Vm<'c> {
                         let mut stages = seq.stages.clone();
                         stages.push(BytecodeSequenceStage {
                             callback: callback.clone(),
-                            filter: false,
+                            kind: BytecodeStageKind::Map,
                             span,
                         });
                         Ok(Value::BytecodeSequence(Rc::new(BytecodeSequence {
@@ -2632,10 +2648,14 @@ impl<'c> Vm<'c> {
                     }
                     Value::List(items) => {
                         let mut output = Vec::with_capacity(items.len());
+                        let mut cover = Cover::new(&self.memory);
                         for item in items {
                             let res =
                                 self.invoke_callable(callback, std::slice::from_ref(item), span)?;
                             output.push(res);
+                            cover
+                                .cover_vec(&output)
+                                .map_err(|e| self.cover_error(span, e))?;
                         }
                         Ok(Value::List(output))
                     }
@@ -2646,19 +2666,57 @@ impl<'c> Vm<'c> {
                 if args.len() != 2 {
                     return Err(self.error(span, "flat_map requires a list and a callback"));
                 }
-                let (Value::List(items), callback) = (&args[0], &args[1]) else {
-                    return Err(self.error(span, "flat_map requires a list and a callback"));
-                };
-                let mut output = Vec::new();
-                for item in items {
-                    let Value::List(values) =
-                        self.invoke_callable(callback, std::slice::from_ref(item), span)?
-                    else {
-                        return Err(self.error(span, "flat_map callback must return a list"));
-                    };
-                    output.extend(values);
+                let (source, callback) = (&args[0], &args[1]);
+                match source {
+                    Value::Range { start, end, step } => {
+                        let seq = BytecodeSequence {
+                            source: BytecodeSequenceSource::Range {
+                                start: *start,
+                                end: *end,
+                                step: *step,
+                            },
+                            stages: vec![BytecodeSequenceStage {
+                                callback: callback.clone(),
+                                kind: BytecodeStageKind::FlatMap,
+                                span,
+                            }],
+                        };
+                        Ok(Value::BytecodeSequence(Rc::new(seq)))
+                    }
+                    Value::BytecodeSequence(seq) => {
+                        let mut stages = seq.stages.clone();
+                        stages.push(BytecodeSequenceStage {
+                            callback: callback.clone(),
+                            kind: BytecodeStageKind::FlatMap,
+                            span,
+                        });
+                        Ok(Value::BytecodeSequence(Rc::new(BytecodeSequence {
+                            source: seq.source.clone(),
+                            stages,
+                        })))
+                    }
+                    Value::List(items) => {
+                        let mut output = Vec::new();
+                        let mut cover = Cover::new(&self.memory);
+                        for item in items {
+                            let Value::List(values) =
+                                self.invoke_callable(callback, std::slice::from_ref(item), span)?
+                            else {
+                                return Err(
+                                    self.error(span, "flat_map callback must return a list")
+                                );
+                            };
+                            output.extend(values);
+                            cover
+                                .cover_vec(&output)
+                                .map_err(|e| self.cover_error(span, e))?;
+                        }
+                        Ok(Value::List(output))
+                    }
+                    _ => {
+                        Err(self.error(span, "flat_map requires a list or sequence and a callback"))
+                    }
                 }
-                Ok(Value::List(output))
             }
             Builtin::Filter => {
                 if args.len() != 2 {
@@ -2675,7 +2733,7 @@ impl<'c> Vm<'c> {
                             },
                             stages: vec![BytecodeSequenceStage {
                                 callback: callback.clone(),
-                                filter: true,
+                                kind: BytecodeStageKind::Filter,
                                 span,
                             }],
                         };
@@ -2685,7 +2743,7 @@ impl<'c> Vm<'c> {
                         let mut stages = seq.stages.clone();
                         stages.push(BytecodeSequenceStage {
                             callback: callback.clone(),
-                            filter: true,
+                            kind: BytecodeStageKind::Filter,
                             span,
                         });
                         Ok(Value::BytecodeSequence(Rc::new(BytecodeSequence {
@@ -2695,11 +2753,15 @@ impl<'c> Vm<'c> {
                     }
                     Value::List(items) => {
                         let mut output = Vec::new();
+                        let mut cover = Cover::new(&self.memory);
                         for item in items {
                             let res =
                                 self.invoke_callable(callback, std::slice::from_ref(item), span)?;
                             if is_truthy(&res) {
                                 output.push(item.clone());
+                                cover
+                                    .cover_vec(&output)
+                                    .map_err(|e| self.cover_error(span, e))?;
                             }
                         }
                         Ok(Value::List(output))
@@ -2761,13 +2823,19 @@ impl<'c> Vm<'c> {
                     return Err(self.error(span, "zip requires two lists"));
                 };
                 let count = left.len().min(right.len());
-                let items = left
+                let mut items = Vec::with_capacity(count);
+                let mut cover = Cover::new(&self.memory);
+                for (l, r) in left
                     .iter()
                     .take(count)
                     .cloned()
                     .zip(right.iter().take(count).cloned())
-                    .map(|(l, r)| Value::Tuple(vec![l, r]))
-                    .collect();
+                {
+                    items.push(Value::Tuple(vec![l, r]));
+                    cover
+                        .cover_vec(&items)
+                        .map_err(|e| self.cover_error(span, e))?;
+                }
                 Ok(Value::List(items))
             }
             Builtin::GroupBy => {
@@ -2776,19 +2844,25 @@ impl<'c> Vm<'c> {
                         self.error(span, "group_by requires a list and a key selector callback")
                     );
                 };
-                let mut groups: BTreeMap<String, Vec<Value<'static>>> = BTreeMap::new();
+                let mut groups: BTreeMap<String, (Vec<Value<'static>>, Cover)> = BTreeMap::new();
                 for item in items {
                     let Value::String(key) =
                         self.invoke_callable(key_fn, std::slice::from_ref(item), span)?
                     else {
                         return Err(self.error(span, "group_by key selector must return string"));
                     };
-                    groups.entry(key).or_default().push(item.clone());
+                    let (values, cover) = groups
+                        .entry(key)
+                        .or_insert_with(|| (Vec::new(), Cover::new(&self.memory)));
+                    values.push(item.clone());
+                    cover
+                        .cover_vec(values)
+                        .map_err(|e| self.cover_error(span, e))?;
                 }
                 Ok(Value::Record(
                     groups
                         .into_iter()
-                        .map(|(k, v)| (k, Value::List(v)))
+                        .map(|(k, (v, _))| (k, Value::List(v)))
                         .collect(),
                 ))
             }
@@ -2850,6 +2924,7 @@ impl<'c> Vm<'c> {
                     0
                 };
                 let mut values = Vec::with_capacity(cap);
+                let mut cover = Cover::new(&self.memory);
                 let mut current = start;
                 while if step > 0.0 {
                     current < end
@@ -2861,6 +2936,9 @@ impl<'c> Vm<'c> {
                     }
                     self.fuel -= 1;
                     values.push(Value::Number(current));
+                    cover
+                        .cover_vec(&values)
+                        .map_err(|e| self.cover_error(span, e))?;
                     let next = (values.len() as f64).mul_add(step, start);
                     if !next.is_finite() || next == current {
                         return Err(self.error(span, "Range cannot advance finitely"));
@@ -2912,9 +2990,15 @@ impl<'c> Vm<'c> {
                 };
                 let mut iter = BytecodeIterator::new(source, span)?;
                 let mut output = Vec::new();
+                let mut cover = Cover::new(&self.memory);
                 for _ in 0..max_count {
                     match iter.next(self, span)? {
-                        Some(item) => output.push(item),
+                        Some(item) => {
+                            output.push(item);
+                            cover
+                                .cover_vec(&output)
+                                .map_err(|e| self.cover_error(span, e))?;
+                        }
                         None => break,
                     }
                 }

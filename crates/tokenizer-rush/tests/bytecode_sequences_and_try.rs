@@ -137,6 +137,66 @@ fn test_sequence_iter_list_and_repeated_consumption() {
 }
 
 #[test]
+fn test_sequence_flat_map_is_lazy_and_ordered() {
+    let source = "mut calls = 0\nfn expand(x) { calls += 1; return [x, x * 10] }\nlet sequence = range_iter(0, 1000000000000) | flat_map(expand)\nassert(calls == 0)\nlet result = sequence | collect(5)\n(result, calls)";
+    assert_eq!(
+        evaluate_bytecode(source, 500).unwrap(),
+        Value::Tuple(vec![
+            Value::List(vec![
+                Value::Number(0.0),
+                Value::Number(0.0),
+                Value::Number(1.0),
+                Value::Number(10.0),
+                Value::Number(2.0)
+            ]),
+            Value::Number(3.0),
+        ])
+    );
+    // Chained flat_map stages interleave depth-first across other stages.
+    let source = "iter([1, 2]) | flat_map(x => [x, x + 10]) | flat_map(x => [x, x * 100]) | filter(x => x < 1000) | collect(10)";
+    assert_eq!(
+        evaluate_bytecode(source, 500).unwrap(),
+        Value::List(vec![
+            Value::Number(1.0),
+            Value::Number(100.0),
+            Value::Number(11.0),
+            Value::Number(2.0),
+            Value::Number(200.0),
+            Value::Number(12.0),
+        ])
+    );
+}
+
+#[test]
+fn test_sequence_flat_map_budget_and_result_validation() {
+    assert!(
+        evaluate_bytecode(
+            "range_iter(0, 1000000000000) | flat_map(x => [x, x]) | fold(0, (a, b) => a + b)",
+            200
+        )
+        .unwrap_err()
+        .message
+        .contains("limit")
+    );
+    assert!(
+        evaluate_bytecode("iter([1]) | flat_map(x => x) | collect(1)", 100)
+            .unwrap_err()
+            .message
+            .contains("must return a list")
+    );
+    // Lists keep the eager one-shot behaviour.
+    assert_eq!(
+        evaluate_bytecode("[1, 2] | flat_map(x => [x, x])", 100).unwrap(),
+        Value::List(vec![
+            Value::Number(1.0),
+            Value::Number(1.0),
+            Value::Number(2.0),
+            Value::Number(2.0)
+        ])
+    );
+}
+
+#[test]
 fn test_try_option_basic() {
     let source = "fn f(v) { let x = v?; return Some(x + 1) }\n(f(Some(2)), f(None()))";
     assert_eq!(

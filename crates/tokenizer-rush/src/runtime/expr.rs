@@ -31,6 +31,12 @@ impl<'s> Runtime<'_, 's> {
     ) -> Result<Value<'s>> {
         let span = expression.span;
         match &expression.kind {
+            // Statement-position await is suspended by the coroutine machine
+            // before reaching here; any other position is a stage-A boundary.
+            ExprKind::Await(_) => self.error(
+                span,
+                "await is only supported as a statement of an async task at this stage",
+            ),
             ExprKind::Try(value) => match self.expr(value, environment)? {
                 Value::Variant("Some" | "Ok", mut items) if items.len() == 1 => Ok(items.remove(0)),
                 value @ Value::Variant("None" | "Err", _) => {
@@ -207,7 +213,11 @@ impl<'s> Runtime<'_, 's> {
                 }
                 Ok(assigned)
             }
-            ExprKind::Lambda { parameters, body } => {
+            ExprKind::Lambda {
+                parameters,
+                body,
+                is_async,
+            } => {
                 let body = self.shared_body(expression.span, || {
                     FunctionBody::Expression((**body).clone())
                 });
@@ -221,6 +231,7 @@ impl<'s> Runtime<'_, 's> {
                     environment: self.capture(expression.span, environment)?,
                     references: self.current_references.clone(),
                     siblings: Rc::new(Vec::new()),
+                    is_async: *is_async,
                 })))
             }
             ExprKind::Tuple(items) | ExprKind::List(items) => {

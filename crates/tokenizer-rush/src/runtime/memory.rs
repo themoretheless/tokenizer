@@ -55,10 +55,14 @@ struct Ledger {
     limit: Cell<usize>,
     live: Cell<usize>,
     peak: Cell<usize>,
+    /// Cumulative requested bytes over the run (grows only). A work budget,
+    /// not a state budget: it also counts storage already released.
+    allocated: Cell<usize>,
+    allocated_limit: Cell<usize>,
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Budget(Rc<Ledger>);
+pub(crate) struct Budget(Rc<Ledger>);
 
 #[derive(Debug, PartialEq, Eq)]
 struct LimitExceeded;
@@ -72,19 +76,52 @@ pub(super) struct Reservation {
 }
 
 impl Budget {
+    #[cfg(test)]
     pub(super) fn new(limit: usize) -> Self {
+        Self::with_allocated_limit(limit, usize::MAX)
+    }
+
+    pub(crate) fn with_allocated_limit(limit: usize, allocated_limit: usize) -> Self {
         Self(Rc::new(Ledger {
             limit: Cell::new(limit),
             live: Cell::new(0),
             peak: Cell::new(0),
+            allocated: Cell::new(0),
+            allocated_limit: Cell::new(allocated_limit),
         }))
+    }
+
+    pub(crate) fn allocated_bytes(&self) -> usize {
+        self.0.allocated.get()
+    }
+
+    /// Per-call budget refresh: heap and work limits follow the ExecutionLimits
+    /// of the current call/resume, matching how steps and size limits behave.
+    pub(super) fn set_limits(&self, heap: usize, allocated: usize) {
+        self.0.limit.set(heap);
+        self.0.allocated_limit.set(allocated);
+    }
+
+    /// Charges requested bytes against the cumulative work budget. One
+    /// addition and one comparison; the counter never decreases.
+    pub(crate) fn charge_allocated(&self, bytes: usize) -> Result<(), AllocationError> {
+        let next = self
+            .0
+            .allocated
+            .get()
+            .checked_add(bytes)
+            .ok_or(AllocationError::Limit)?;
+        if next > self.0.allocated_limit.get() {
+            return Err(AllocationError::Limit);
+        }
+        self.0.allocated.set(next);
+        Ok(())
     }
 
     #[cfg(test)]
     pub(super) fn live_bytes(&self) -> usize {
         self.0.live.get()
     }
-    #[cfg(test)]
     pub(super) fn peak_bytes(&self) -> usize {
         self.0.peak.get()
     }
@@ -126,6 +163,53 @@ impl Reservation {
     }
 }
 
+/// Which budget rejected a Cover growth: the peak heap reservation or the
+/// cumulative work budget. The distinction selects the error message.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CoverError {
+    Heap,
+    Allocated,
+}
+
+/// Tracks requested bytes of plain `Vec` storage built outside Slots/Buffer
+/// (eager operation results) so a finite budget sees transient peaks. The
+/// cover tops its reservation up when the Vec capacity grows and releases it
+/// when the operation scope ends; the retained result is then accounted by
+/// the instance retained-data budget, not by this ledger.
+pub(crate) struct Cover {
+    reservation: Reservation,
+    covered: usize,
+}
+
+impl Cover {
+    pub(crate) fn new(budget: &Budget) -> Self {
+        Self {
+            reservation: Reservation {
+                ledger: budget.0.clone(),
+                bytes: 0,
+            },
+            covered: 0,
+        }
+    }
+    /// One comparison per element appended; the reservation moves only on
+    /// capacity growth. Covers capacity, matching allocator-visible bytes.
+    /// Growth also charges the cumulative work budget; a run can exceed it
+    /// even when its peak fits.
+    pub(crate) fn cover_vec<T>(&mut self, vec: &Vec<T>) -> Result<(), CoverError> {
+        let bytes = vec.capacity().saturating_mul(std::mem::size_of::<T>());
+        if bytes > self.covered {
+            Budget(self.reservation.ledger.clone())
+                .charge_allocated(bytes - self.covered)
+                .map_err(|_| CoverError::Allocated)?;
+            self.reservation
+                .resize(bytes)
+                .map_err(|_| CoverError::Heap)?;
+            self.covered = bytes;
+        }
+        Ok(())
+    }
+}
+
 impl Drop for Reservation {
     fn drop(&mut self) {
         self.ledger.live.set(self.ledger.live.get() - self.bytes);
@@ -133,7 +217,7 @@ impl Drop for Reservation {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum AllocationError {
+pub(crate) enum AllocationError {
     Limit,
     Capacity,
     Allocator,
@@ -145,6 +229,17 @@ pub(super) enum AllocationError {
     Steps,
     #[cfg(test)]
     Cancelled,
+}
+
+impl AllocationError {
+    /// Limit exhaustion is a user-facing limit error; other variants keep the
+    /// caller's context message for diagnostics of internal failures.
+    pub(super) fn message(&self, context: &str) -> String {
+        match self {
+            Self::Limit => "Heap limit exceeded".into(),
+            other => format!("{context}: {other:?}"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1622,7 +1717,7 @@ fn sequence_stage_copy_failure_preserves_shared_original() {
     let budget = Budget::new(100_000);
     let stage = super::SequenceStage {
         callback: super::Value::Builtin(super::Builtin::Some),
-        filter: false,
+        kind: super::sequence::StageKind::Map,
         span: themoretheless_tokenizer_core::Span { start: 0, end: 0 },
         module: None,
     };
