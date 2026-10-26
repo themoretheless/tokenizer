@@ -93,7 +93,7 @@ pub fn operation_json(
  "designStatePatch"=>s::design_state_patch(arg("design"),v["stateName"].as_str()),
  "matchesType"=>Ok(json!(s::matches_type(arg("value"),v["type"].as_str().unwrap_or(""),arg("enums")))),"validateTypeName"=>{s::validate_type_name(v["type"].as_str().unwrap_or(""),arg("enums"))?;Ok(V::Null)},"validateContract"=>{s::validate_contract(arg("definitions"),arg("values"),arg("enums"),v["label"].as_str().unwrap_or("component"))?;Ok(V::Null)},
  "format"=>Ok(json!(f::format_source(v["source"].as_str().unwrap_or("")).map_err(Diagnostic::from)?)),
- "lint"=>f::lint_document(v["source"].as_str().unwrap_or("")).map_err(Diagnostic::from),
+ "lint"=>{let context=themoretheless_tokenizer_forma::TypeContext::from_json(&v["context"]).map_err(|e|Diagnostic::new("invalid-type-context",e))?;f::lint_document_with_context(v["source"].as_str().unwrap_or(""),&context).map_err(Diagnostic::from)},
  _=>Err(Diagnostic::new("unknown-operation",format!("Unknown Forma operation {operation}")))
  }
     })();
