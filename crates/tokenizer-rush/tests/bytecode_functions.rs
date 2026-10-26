@@ -181,6 +181,33 @@ fn test_closures_in_records() {
 }
 
 #[test]
+fn async_forms_are_rejected_instead_of_running_synchronously() {
+    for (source, expected) in [
+        (
+            "async fn work() -> number { return 1 }; work()",
+            "async functions are not supported in bytecode compilation",
+        ),
+        (
+            "async fn work() { await 1 }; work()",
+            "async functions are not supported in bytecode compilation",
+        ),
+        (
+            "let work = async => await 1; work()",
+            "async closures are not supported in bytecode compilation",
+        ),
+    ] {
+        let ast = evaluate(source, 1000).unwrap();
+        assert!(ast.task_id().is_some(), "{source}: {ast:?}");
+        let error = evaluate_bytecode(source, 1000).unwrap_err();
+        assert!(
+            error.message.contains(expected),
+            "{source}: {}",
+            error.message
+        );
+    }
+}
+
+#[test]
 fn test_cross_engine_interop() {
     use themoretheless_tokenizer_rush::{
         CancellationToken, ExecutionLimits, HostRegistration, Program, ValueType,

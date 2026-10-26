@@ -84,9 +84,9 @@ legacy spellings. `Geometry`, `Row`, `T`, `print`, `where`, `select`, `count`,
   support `await Wait.After(..)` / `await Wait.Event(..)` and `await task`;
   awaiting any other value returns it immediately. Event payloads are delivered
   by `CoroutineScheduler::emit_with_payload`; `emit` supplies `null`. `await`
-  outside an async body is a parse error (`await-outside-async`); bytecode-VM
-  `await` and async closures remain unsupported (see
-  `docs/rush-async-design.md`).
+  outside an async body is a parse error (`await-outside-async`). Bytecode
+  compilation rejects `async fn`, async closures and `await`: the VM has no
+  resumable coroutine frames (see `docs/rush-async-design.md`).
 
 ## Pipelines and match
 

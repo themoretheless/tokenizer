@@ -330,9 +330,15 @@ impl<'s> Compiler<'s> {
                 parameters,
                 result,
                 body,
-                ..
+                is_async,
             } = &stmt.kind
             {
+                if *is_async {
+                    return Err(self.error(
+                        stmt.span,
+                        "async functions are not supported in bytecode compilation",
+                    ));
+                }
                 let (_, fn_idx) = hoisted_fns[fn_cursor];
                 fn_cursor += 1;
                 self.push_state(Some(name.text.to_string()), parameters.len());
