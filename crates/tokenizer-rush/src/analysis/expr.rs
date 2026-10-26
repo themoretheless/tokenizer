@@ -402,7 +402,9 @@ impl<'s> Checker<'s> {
                 self.expr(then_value);
                 self.expr(else_value);
             }
-            ExprKind::Lambda { parameters, body } => {
+            ExprKind::Lambda {
+                parameters, body, ..
+            } => {
                 self.return_types.push(None);
                 self.inferred_returns.push(Vec::new());
                 self.scopes.push(HashMap::new());

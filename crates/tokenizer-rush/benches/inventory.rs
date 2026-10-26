@@ -66,7 +66,7 @@ fn count_expr(expr: &Expr<'_>, nodes: &mut usize) {
             count_expr(then_value, nodes);
             count_expr(else_value, nodes);
         }
-        ExprKind::Lambda { parameters, body } => {
+        ExprKind::Lambda { parameters, body, .. } => {
             for parameter in parameters {
                 count_expr(parameter, nodes);
             }

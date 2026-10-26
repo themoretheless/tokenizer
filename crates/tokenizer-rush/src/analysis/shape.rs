@@ -490,13 +490,28 @@ impl<'s> Checker<'s> {
             ExprKind::Await(inner) => match &inner.kind {
                 // `await make()` yields the async function's annotated result;
                 // a bare handle or a plain value has no further contract.
-                ExprKind::Call { callee, arguments } => self.applied_result_shape(
-                    callee,
-                    &arguments
-                        .iter()
-                        .map(|arg| self.shape(arg))
-                        .collect::<Vec<_>>(),
-                ),
+                ExprKind::Call { callee, arguments } => {
+                    match self.user_constructor(callee) {
+                        Some((name, Some(variant)))
+                            if name.ends_with("Wait") && variant == "Event" =>
+                        {
+                            // emit_with_payload accepts any value; emit supplies null.
+                            Shape::Unknown
+                        }
+                        Some((name, Some(variant)))
+                            if name.ends_with("Wait") && variant == "After" =>
+                        {
+                            Shape::Typed(ValueType::Null)
+                        }
+                        _ => self.applied_result_shape(
+                            callee,
+                            &arguments
+                                .iter()
+                                .map(|arg| self.shape(arg))
+                                .collect::<Vec<_>>(),
+                        ),
+                    }
+                }
                 _ => self.shape(inner),
             },
             ExprKind::Try(value) => match self.shape(value) {

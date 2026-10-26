@@ -401,17 +401,24 @@ impl<'s> Coroutine<'s> {
     }
 }
 impl<'s> Runtime<'_, 's> {
-    /// Stage A async/await: calling an `async fn` registers a task without
-    /// running its body and returns the opaque handle to the caller. The task
-    /// starts when the host resumes it or the scheduler adopts the handle.
+    /// Calling an async function or closure registers a task without running
+    /// its body and returns the opaque handle to the caller. The task starts
+    /// when the host resumes it or the scheduler adopts the handle.
     pub(super) fn spawn_async_task(
         &mut self,
         function: Rc<Closure<'s>>,
         arguments: &[Value<'s>],
         span: Span,
     ) -> Result<Value<'s>> {
-        let FunctionBody::Block(body) = &*function.body else {
-            return self.error(span, "Async task requires a named function body");
+        let statements = match &*function.body {
+            FunctionBody::Block(body) => body.stmts.clone(),
+            FunctionBody::Expression(body) => Rc::new(vec![Stmt {
+                span: body.span,
+                kind: StmtKind::Return(Some(body.clone())),
+            }]),
+            FunctionBody::Constructor { .. } => {
+                return self.error(span, "Async task requires a function body");
+            }
         };
         let mut environment = Environment::child(function.environment.clone());
         for sib in function.siblings.iter() {
@@ -444,7 +451,7 @@ impl<'s> Runtime<'_, 's> {
             self.bind_pattern(parameter, &coerced, &mut environment)?;
         }
         let frames = vec![Frame::Block {
-            statements: body.stmts.clone(),
+            statements,
             next: 0,
             environment,
         }];
@@ -578,8 +585,8 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         let Some(mut task) = self.runtime.coroutines.remove(&id) else {
             return self.runtime.error(self.span, "Coroutine is not active");
         };
-        // Host-driven resume of a task suspended at `await`: deliver null,
-        // matching the scheduler's payload-less timer/event contract.
+        // Host-driven resume without a scheduler-provided wake value delivers
+        // null, matching emit(name) without an explicit event payload.
         if task.expects_wake && task.pending_wake.is_none() {
             task.pending_wake = Some(Value::Null);
         }

@@ -231,7 +231,9 @@ fn exact_keywords_comments_unicode_and_numbers() {
     let upper = themoretheless_tokenizer_rush::lex("RETURN");
     assert_eq!(upper.tokens[0].kind, SyntaxKind::Identifier);
     good("async fn f() {}");
-    bad("let g = async => 1", "unsupported-syntax");
+    good("let g = async => 1");
+    good("let g = async x => x + 1");
+    good("let g = async (x) => await x");
 }
 
 #[test]
@@ -360,7 +362,10 @@ fn deterministic_malformed_inputs_terminate_and_keep_utf8_spans() {
 fn reserved_expressions_and_negative_literal_patterns() {
     bad("let x = await f()", "await-outside-async");
     bad("fn f() { await g() }", "await-outside-async");
-    bad("async fn f() { let g = x => await h() }", "await-outside-async");
+    bad(
+        "async fn f() { let g = x => await h() }",
+        "await-outside-async",
+    );
     let p = good("async fn f() -> number {\n  await Wait.After(0.25)\n  return 1\n}");
     let StmtKind::Function { is_async, body, .. } = &p.module.items[0].kind else {
         panic!()

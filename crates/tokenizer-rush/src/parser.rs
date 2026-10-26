@@ -23,7 +23,9 @@ fn expr_bytes(expr: &Expr<'_>) -> usize {
             then_value,
             else_value,
         } => expr_bytes(condition) + expr_bytes(then_value) + expr_bytes(else_value),
-        ExprKind::Lambda { parameters, body } => {
+        ExprKind::Lambda {
+            parameters, body, ..
+        } => {
             parameters.capacity() * std::mem::size_of::<Expr>()
                 + parameters.iter().map(expr_bytes).sum::<usize>()
                 + expr_bytes(body)
@@ -100,10 +102,7 @@ fn stmt_bytes(stmt: &Stmt<'_>) -> usize {
         StmtKind::Show(expr) | StmtKind::Yield(expr) | StmtKind::Expr(expr) => expr_bytes(expr),
         StmtKind::Struct { fields, .. } => {
             fields.capacity() * std::mem::size_of::<(Name, Type)>()
-                + fields
-                    .iter()
-                    .map(|(_, ty)| type_bytes(ty))
-                    .sum::<usize>()
+                + fields.iter().map(|(_, ty)| type_bytes(ty)).sum::<usize>()
         }
         StmtKind::Enum { variants, .. } => {
             variants.capacity() * std::mem::size_of::<(Name, Vec<Type>)>()
@@ -128,8 +127,7 @@ fn stmt_bytes(stmt: &Stmt<'_>) -> usize {
                 + parameters
                     .iter()
                     .map(|parameter| {
-                        expr_bytes(&parameter.pattern)
-                            + parameter.ty.as_ref().map_or(0, type_bytes)
+                        expr_bytes(&parameter.pattern) + parameter.ty.as_ref().map_or(0, type_bytes)
                     })
                     .sum::<usize>()
                 + result.as_ref().map_or(0, type_bytes)
@@ -252,7 +250,7 @@ struct Parser<'s> {
     limits: InputLimits,
     depth: usize,
     functions: usize,
-    /// Nesting of `async fn` bodies; `await` is legal only inside one.
+    /// Nesting of async function/closure bodies; `await` is legal only inside one.
     async_fns: usize,
     loops: usize,
     roles: Vec<(Span, &'static str)>,
@@ -529,21 +527,9 @@ impl<'s> Parser<'s> {
         let kind = match self.text() {
             "struct" | "enum" => self.user_type(),
             "fn" => self.function(token.indent, false),
-            "async" => {
+            "async" if self.text_at(1) == "fn" => {
                 self.bump();
-                if self.peek().is_some_and(|t| t.raw.kind == SyntaxKind::Keyword)
-                    && self.text() == "fn"
-                {
-                    self.function(token.indent, true)
-                } else {
-                    // Async closures (`async =>`) are not part of stage A.
-                    self.error(
-                        "unsupported-syntax",
-                        "This keyword is reserved but its grammar is not supported yet",
-                    );
-                    self.recover();
-                    StmtKind::Error
-                }
+                self.function(token.indent, true)
             }
             "export" => {
                 self.bump();
@@ -1101,8 +1087,8 @@ impl<'s> Parser<'s> {
                 .get(index)
                 .map(|t| &self.source[t.raw.span.start..t.raw.span.end])
         };
-        let lambda = if text == "(" {
-            let mut cursor = self.pos + 1;
+        let parenthesized_lambda = |open: usize| {
+            let mut cursor = open + 1;
             let mut depth = 1;
             while let Some(token) = spelling(cursor) {
                 match token {
@@ -1118,16 +1104,33 @@ impl<'s> Parser<'s> {
                 cursor += 1;
             }
             depth == 0 && spelling(cursor + 1) == Some("=>")
-        } else {
-            self.peek().is_some_and(|t| {
-                matches!(t.raw.kind, SyntaxKind::Identifier | SyntaxKind::TypeIdent)
-            }) && spelling(self.pos + 1) == Some("=>")
         };
+        let is_async = text == "async"
+            && match spelling(self.pos + 1) {
+                Some("(") => parenthesized_lambda(self.pos + 1),
+                Some("=>") => true,
+                _ => {
+                    self.tokens.get(self.pos + 1).is_some_and(|t| {
+                        matches!(t.raw.kind, SyntaxKind::Identifier | SyntaxKind::TypeIdent)
+                    }) && spelling(self.pos + 2) == Some("=>")
+                }
+            };
+        let lambda = is_async
+            || if text == "(" {
+                parenthesized_lambda(self.pos)
+            } else {
+                self.peek().is_some_and(|t| {
+                    matches!(t.raw.kind, SyntaxKind::Identifier | SyntaxKind::TypeIdent)
+                }) && spelling(self.pos + 1) == Some("=>")
+            };
+        if is_async {
+            self.bump();
+        }
         if lambda {
             let parens = self.eat("(");
             let mut parameters: Vec<Expr<'s>> = Vec::new();
             let mut names = std::collections::HashSet::new();
-            if !parens || !self.at(")") {
+            if !self.at("=>") && (!parens || !self.at(")")) {
                 loop {
                     let pattern = self.match_pattern();
                     self.parameter_names(&pattern, &mut names);
@@ -1141,8 +1144,8 @@ impl<'s> Parser<'s> {
                 self.expect(")");
             }
             self.expect("=>");
-            // A lambda body is not an async fn body: await does not cross it.
-            let outer_async = std::mem::replace(&mut self.async_fns, 0);
+            // Await belongs to the innermost async function or closure body.
+            let outer_async = std::mem::replace(&mut self.async_fns, usize::from(is_async));
             let body = self.required_expr(multiline);
             self.async_fns = outer_async;
             return Expr {
@@ -1150,6 +1153,7 @@ impl<'s> Parser<'s> {
                 kind: ExprKind::Lambda {
                     parameters,
                     body: Box::new(body),
+                    is_async,
                 },
             };
         }
@@ -1746,7 +1750,9 @@ fn offset_expr_spans(expr: &mut Expr<'_>, offset: usize) {
             offset_expr_spans(then_value, offset);
             offset_expr_spans(else_value, offset);
         }
-        ExprKind::Lambda { parameters, body } => {
+        ExprKind::Lambda {
+            parameters, body, ..
+        } => {
             for param in parameters {
                 offset_expr_spans(param, offset);
             }
