@@ -20,6 +20,7 @@ fn main() -> Result<(), themoretheless_tokenizer_rush::RuntimeError> {
                     assert_eq!(scheduler.emit(&name)?, 1);
                 }
                 ScheduledState::Waiting(WakeRequest::After(_)) => {}
+                ScheduledState::Waiting(WakeRequest::Task(_)) => {}
                 ScheduledState::Complete(value) => {
                     assert_eq!(value, Value::Number(3.));
                     assert_eq!(now, Duration::from_millis(750));
