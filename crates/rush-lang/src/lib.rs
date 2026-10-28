@@ -235,6 +235,9 @@ struct PendingFrame {
     words: [u8; MAX_LOOP_WORDS],
     words_len: u16,
     word_offset: u16,
+    /// `true`: `words` holds one `field=value ...` row per line (foreach
+    /// over host rows); `false`: a plain whitespace-separated word list.
+    rows_mode: bool,
 }
 
 impl PendingFrame {
@@ -250,6 +253,7 @@ impl PendingFrame {
             words: [0; MAX_LOOP_WORDS],
             words_len: 0,
             word_offset: 0,
+            rows_mode: false,
         }
     }
     fn text(&self) -> &str {
@@ -437,13 +441,33 @@ impl Interpreter {
     /// Host answer to `source_request`: the whitespace-separated words the
     /// source produced. The body replays once per word, exactly like `for`.
     pub fn provide_source_words(&mut self, words: &str) -> Result<(), RushError> {
+        if words.split_whitespace().next().is_none() {
+            self.foreach = None;
+            return Ok(());
+        }
+        self.provide_source_list(words, false)
+    }
+
+    /// Host answer to `source_request`: one `field=value ...` row per line.
+    /// The body replays once per non-empty row; the loop variable binds to
+    /// the row's first value and each `field` also binds `var.field`.
+    pub fn provide_source_rows(&mut self, rows: &str) -> Result<(), RushError> {
+        if rows.lines().any(|line| !line.trim().is_empty()) {
+            self.provide_source_list(rows, true)
+        } else {
+            self.foreach = None;
+            Ok(())
+        }
+    }
+
+    fn provide_source_list(&mut self, words: &str, rows_mode: bool) -> Result<(), RushError> {
         let Some(each) = self.foreach.take() else {
             return Ok(());
         };
         if words.len() > MAX_LOOP_WORDS {
             return Err(RushError::LoopWordsTooLong);
         }
-        if words.split_whitespace().next().is_none() || each.body_len == 0 {
+        if each.body_len == 0 {
             return Ok(());
         }
         if self.pending_len >= MAX_CALLS {
@@ -464,6 +488,7 @@ impl Interpreter {
         }
         frame.words_len = words.len() as u16;
         frame.word_offset = 0;
+        frame.rows_mode = rows_mode;
         frame.frame_floor = self.depth as u8;
         self.pending_len += 1;
         self.advance_loop_word()
@@ -843,14 +868,33 @@ impl Interpreter {
         while let Some(at) = rest.find('$') {
             let literal = &rest[..at];
             let after = &rest[at + 1..];
-            let name_len = after
+            // A name is alnum/underscore, optionally with `.field` suffixes
+            // (foreach row fields). The name must start alnum/underscore.
+            let mut name_len = after
                 .bytes()
-                .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b == b'.')
                 .count();
-            if name_len == 0 {
+            while name_len > 0 && after.as_bytes()[name_len - 1] == b'.' {
+                name_len -= 1;
+            }
+            if name_len == 0 || after.as_bytes()[0] == b'.' {
                 return Err(RushError::BadAssignment);
             }
-            let expansion = self.get(&after[..name_len]).unwrap_or("");
+            // Longest-prefix lookup: `$f.name` tries `f.name`, then `f`,
+            // leaving the unmatched dotted suffix literal (`$USER.txt`
+            // still expands USER when no `USER.txt` variable exists).
+            let mut used = name_len;
+            let mut found = self.get(&after[..used]);
+            while found.is_none() {
+                match after[..used].rfind('.') {
+                    Some(dot) => {
+                        used = dot;
+                        found = self.get(&after[..used]);
+                    }
+                    None => break,
+                }
+            }
+            let expansion = found.unwrap_or("");
             for chunk in [literal, expansion] {
                 let end = len + chunk.len();
                 let Some(slot) = out.get_mut(len..end) else {
@@ -859,7 +903,7 @@ impl Interpreter {
                 slot.copy_from_slice(chunk.as_bytes());
                 len = end;
             }
-            rest = &after[name_len..];
+            rest = &after[used..];
         }
         let end = len + rest.len();
         let Some(slot) = out.get_mut(len..end) else {
@@ -1139,8 +1183,9 @@ impl Interpreter {
         self.pending_len -= 1;
     }
 
-    /// Advance the top loop frame to its next whitespace-delimited word and bind
-    /// it to its loop variable, or pop the frame if no words remain.
+    /// Advance the top loop frame to its next whitespace-delimited word (or,
+    /// in rows mode, its next `field=value ...` line) and bind it to the
+    /// loop variable, or pop the frame if nothing remains.
     fn advance_loop_word(&mut self) -> Result<(), RushError> {
         if self.pending_len == 0 {
             return Ok(());
@@ -1149,35 +1194,87 @@ impl Interpreter {
         let var_len: usize;
         let mut word_buf = [0u8; MAX_VALUE];
         let word_len: usize;
+        let rows_mode = self.pending[self.pending_len - 1].rows_mode;
         {
             let frame = &mut self.pending[self.pending_len - 1];
             let words = frame.words_text();
             let rest = words.get(usize::from(frame.word_offset)..).unwrap_or("");
-            let trimmed = rest.trim_start();
-            if trimmed.is_empty() {
-                // Word list exhausted: pop with the floor restore, exactly
+            let (skip, item) = if rows_mode {
+                // One iteration per non-empty line.
+                let mut offset = 0usize;
+                loop {
+                    let tail = rest.get(offset..).unwrap_or("");
+                    let nl = tail.find('\n').unwrap_or(tail.len());
+                    let line = tail.get(..nl).unwrap_or("").trim();
+                    let consumed = offset + (nl + 1).min(tail.len());
+                    if !line.is_empty() || consumed >= rest.len() {
+                        break (consumed, line);
+                    }
+                    offset = consumed;
+                }
+            } else {
+                let trimmed = rest.trim_start();
+                let wlen = trimmed
+                    .bytes()
+                    .take_while(|b| !b.is_ascii_whitespace())
+                    .count();
+                (rest.len() - trimmed.len() + wlen, &trimmed[..wlen])
+            };
+            if item.is_empty() {
+                // List exhausted: pop with the floor restore, exactly
                 // like `pop_pending` (inline — `frame` is still borrowed).
                 self.depth = usize::from(frame.frame_floor);
                 self.pending_len -= 1;
                 return Ok(());
             }
-            let skip_ws = rest.len() - trimmed.len();
-            let wlen = trimmed
-                .bytes()
-                .take_while(|b| !b.is_ascii_whitespace())
-                .count();
-            if wlen > MAX_VALUE {
+            if item.len() > MAX_VALUE {
                 return Err(RushError::ValueTooLong);
             }
-            word_len = wlen;
-            word_buf[..wlen].copy_from_slice(&trimmed.as_bytes()[..wlen]);
-            frame.word_offset += (skip_ws + wlen) as u16;
+            word_len = item.len();
+            word_buf[..word_len].copy_from_slice(item.as_bytes());
+            frame.word_offset += skip as u16;
             var_len = usize::from(frame.var_len);
             var_buf[..var_len].copy_from_slice(&frame.var[..var_len]);
         }
         let var = str::from_utf8(&var_buf[..var_len]).unwrap_or("");
         let word = str::from_utf8(&word_buf[..word_len]).unwrap_or("");
-        self.set_var(var, word)
+        if rows_mode {
+            self.bind_row(var, word)
+        } else {
+            self.set_var(var, word)
+        }
+    }
+
+    /// Bind one foreach row: `var` takes the row's first value (the part
+    /// after `=`, or the whole first token without one), and every
+    /// `field=value` token also binds `var.field`.
+    fn bind_row(&mut self, var: &str, row: &str) -> Result<(), RushError> {
+        let mut first = true;
+        for token in row.split_whitespace() {
+            let (field, value) = match token.split_once('=') {
+                Some((field, value)) if !field.is_empty() => (field, value),
+                _ => ("", token),
+            };
+            if first {
+                self.set_var(var, value)?;
+                first = false;
+            }
+            if field.is_empty() {
+                continue;
+            }
+            // Compose `var.field` without allocation.
+            let mut name_buf = [0u8; MAX_NAME];
+            let need = var.len() + 1 + field.len();
+            if need > MAX_NAME {
+                return Err(RushError::NameTooLong);
+            }
+            name_buf[..var.len()].copy_from_slice(var.as_bytes());
+            name_buf[var.len()] = b'.';
+            name_buf[var.len() + 1..need].copy_from_slice(field.as_bytes());
+            let name = str::from_utf8(&name_buf[..need]).unwrap_or("");
+            self.set_var(name, value)?;
+        }
+        Ok(())
     }
 
     /// Pull the next replayable line from the pending stack into `out`.
