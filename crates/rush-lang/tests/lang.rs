@@ -531,3 +531,99 @@ fn break_inside_nested_if_in_a_loop() {
         vec!["echo $n", "echo $n", "echo inner", "echo top"]
     );
 }
+
+
+#[test]
+fn foreach_rows_bind_fields() {
+    // Drive a rows source by hand: one `field=value ...` line per iteration.
+    let mut interp = Interpreter::new();
+    assert_eq!(interp.step("foreach f in ls:"), Ok(Step::Skip));
+    assert_eq!(interp.step("    n = $f.name"), Ok(Step::Skip));
+    assert_eq!(interp.step("    s = $f.size"), Ok(Step::Skip));
+    interp.end_input().unwrap();
+    assert_eq!(interp.source_request(), Some(("f", "ls")));
+    interp
+        .provide_source_rows("name=a.txt size=3\n\nname=b.bin size=5\n")
+        .unwrap();
+    // First row bound immediately; the blank line is skipped.
+    assert_eq!(interp.get("f"), Some("a.txt"));
+    assert_eq!(interp.get("f.name"), Some("a.txt"));
+    assert_eq!(interp.get("f.size"), Some("3"));
+    while interp.busy() {
+        interp.step("").unwrap();
+    }
+    interp.finish().unwrap();
+    // After the loop the last row's bindings remain visible.
+    assert_eq!(interp.get("f.name"), Some("b.bin"));
+    assert_eq!(interp.get("f.size"), Some("5"));
+    assert_eq!(interp.get("n"), Some("b.bin"));
+    assert_eq!(interp.get("s"), Some("5"));
+}
+
+#[test]
+fn foreach_rows_plain_token_binds_var_only() {
+    let mut interp = Interpreter::new();
+    interp.step("foreach f in ls:").unwrap();
+    interp.step("    echo $f").unwrap();
+    interp.end_input().unwrap();
+    interp.provide_source_rows("plain\n").unwrap();
+    assert_eq!(interp.get("f"), Some("plain"));
+    assert_eq!(interp.get("f.plain"), None);
+    while interp.busy() {
+        interp.step("").unwrap();
+    }
+    interp.finish().unwrap();
+}
+
+#[test]
+fn foreach_rows_too_long_is_stable_error() {
+    let mut interp = Interpreter::new();
+    interp.step("foreach f in ls:").unwrap();
+    interp.step("    echo $f").unwrap();
+    interp.end_input().unwrap();
+    let long = format!("name={}\n", "x".repeat(80));
+    assert_eq!(
+        interp.provide_source_rows(&long),
+        Err(RushError::ValueTooLong)
+    );
+}
+
+#[test]
+fn dotted_expansion_falls_back_to_base_name() {
+    let mut interp = Interpreter::new();
+    interp.seed("USER", "admin");
+    // No `USER.txt` variable: the `.txt` suffix stays literal.
+    assert_eq!(interp.step("x = $USER.txt"), Ok(Step::Skip));
+    assert_eq!(interp.get("x"), Some("admin.txt"));
+    // A real dotted variable (bound by a foreach row) wins over the base.
+    interp.step("foreach f in ls:").unwrap();
+    interp.step("    y = $f.name").unwrap();
+    interp.end_input().unwrap();
+    interp.provide_source_rows("name=a.txt\n").unwrap();
+    while interp.busy() {
+        interp.step("").unwrap();
+    }
+    interp.finish().unwrap();
+    assert_eq!(interp.get("y"), Some("a.txt"));
+    // Trailing dot is literal punctuation, not part of the name.
+    assert_eq!(interp.step("z = $USER."), Ok(Step::Skip));
+    assert_eq!(interp.get("z"), Some("admin."));
+}
+
+#[test]
+fn loop_variable_compares_in_condition() {
+    let mut interp = Interpreter::new();
+    for line in [
+        "for n in one two three:",
+        "    if $n = two:",
+        "        hit = yes",
+    ] {
+        assert_eq!(interp.step(line), Ok(Step::Skip));
+    }
+    interp.end_input().unwrap();
+    while interp.busy() {
+        interp.step("").unwrap();
+    }
+    interp.finish().unwrap();
+    assert_eq!(interp.get("hit"), Some("yes"));
+}
