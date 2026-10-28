@@ -1,7 +1,8 @@
 //! Component expression scope and typed contracts, independent of UI rendering.
+use crate::diagnostic::Diagnostic;
 use crate::evaluate;
 use serde_json::{Value as V, json};
-type R<T> = Result<T, String>;
+type R<T> = Result<T, Diagnostic>;
 fn own(v: &V, k: &str) -> bool {
     v.as_object().is_some_and(|o| o.contains_key(k))
 }
@@ -21,7 +22,12 @@ fn read_path<'a>(
         match next {
             Some(v) => value = v,
             None if optional => return Ok(V::Null),
-            None => return Err(format!("Нет значения {path}")),
+            None => {
+                return Err(Diagnostic::new(
+                    "missing-value",
+                    format!("Нет значения {path}"),
+                ));
+            }
         }
     }
     Ok(value.clone())
@@ -35,7 +41,10 @@ pub fn evaluate_value(
     env: &V,
 ) -> R<V> {
     if stack.len() > 128 {
-        return Err("Превышен предел вложенности".into());
+        return Err(Diagnostic::new(
+            "nesting-limit",
+            "Превышен предел вложенности",
+        ));
     }
     if value.get("type").is_some() {
         if !expand {
@@ -57,7 +66,7 @@ pub fn evaluate_value(
         let actual = evaluate_value(subject, props, state, stack, expand, env)?;
         for b in value["branches"]
             .as_array()
-            .ok_or("Некорректные ветки match")?
+            .ok_or_else(|| Diagnostic::new("invalid-match", "Некорректные ветки match"))?
         {
             if pattern(&b["pattern"], &actual, props, state, env)? {
                 if let Some(g) = b.get("guard") {
@@ -69,7 +78,10 @@ pub fn evaluate_value(
                 return evaluate_value(&b["value"], props, state, stack, expand, env);
             }
         }
-        return Err("match: нет подходящей ветки; добавьте _ => …".into());
+        return Err(Diagnostic::new(
+            "no-match-branch",
+            "match: нет подходящей ветки; добавьте _ => …",
+        ));
     }
     if let Some(a) = value.as_array() {
         return Ok(V::Array(
@@ -103,7 +115,10 @@ pub fn evaluate_value(
                 "height" => Ok(json!(220)),
                 "compact" => Ok(V::Bool(true)),
                 _ if optional => Ok(V::Null),
-                _ => Err(format!("Нет значения {raw}")),
+                _ => Err(Diagnostic::new(
+                    "missing-value",
+                    format!("Нет значения {raw}"),
+                )),
             };
         }
         let (head_local, rest_local) = raw.split_once('.').unwrap_or((raw, ""));
@@ -137,12 +152,18 @@ pub fn evaluate_value(
                 if optional {
                     return Ok(V::Null);
                 }
-                return Err(format!("Неизвестное свойство {raw}"));
+                return Err(Diagnostic::new(
+                    "unknown-property",
+                    format!("Неизвестное свойство {raw}"),
+                ));
             };
             if stack.iter().any(|s| s == key) {
                 let mut cycle = stack.to_vec();
                 cycle.push(key.into());
-                return Err(format!("Циклическая ссылка props: {}", cycle.join(" → ")));
+                return Err(Diagnostic::new(
+                    "cyclic-reference",
+                    format!("Циклическая ссылка props: {}", cycle.join(" → ")),
+                ));
             }
             let mut next = Vec::with_capacity(stack.len() + 1);
             next.extend_from_slice(stack);
@@ -196,7 +217,10 @@ pub fn evaluate_value(
             return evaluate_value(&val, props, state, stack, expand, env);
         }
         if raw.starts_with("base.") {
-            return Err(format!("{raw} допустим только внутри override"));
+            return Err(Diagnostic::new(
+                "invalid-override-reference",
+                format!("{raw} допустим только внутри override"),
+            ));
         }
         let (head, rest) = raw.split_once('.').unwrap_or((raw, ""));
         if let Some(variants) = env["enums"].get(head).and_then(V::as_array) {
@@ -204,7 +228,10 @@ pub fn evaluate_value(
                 || rest.contains('.')
                 || !variants.iter().any(|v| v.as_str() == Some(rest))
             {
-                return Err(format!("Неизвестный вариант {raw}"));
+                return Err(Diagnostic::new(
+                    "unknown-variant",
+                    format!("Неизвестный вариант {raw}"),
+                ));
             }
             return Ok(json!(raw));
         }
@@ -222,7 +249,10 @@ pub fn selected_properties(groups: &V, props: &V, state: &V, env: &V) -> R<V> {
         for g in groups {
             let actual = evaluate_value(&g["match"], props, state, &[], false, env)?;
             let mut found = false;
-            for b in g["branches"].as_array().ok_or("Некорректные ветки match")? {
+            for b in g["branches"]
+                .as_array()
+                .ok_or_else(|| Diagnostic::new("invalid-match", "Некорректные ветки match"))?
+            {
                 if pattern(&b["pattern"], &actual, props, state, env)? {
                     if let Some(guard) = b.get("guard") {
                         let cond = evaluate_value(guard, props, state, &[], false, env)?;
@@ -230,12 +260,14 @@ pub fn selected_properties(groups: &V, props: &V, state: &V, env: &V) -> R<V> {
                             continue;
                         }
                     }
-                    for (k, v) in b["props"]
-                        .as_object()
-                        .ok_or("Некорректные свойства match")?
-                    {
+                    for (k, v) in b["props"].as_object().ok_or_else(|| {
+                        Diagnostic::new("invalid-match", "Некорректные свойства match")
+                    })? {
                         if own(&out, k) {
-                            return Err(format!("Несколько групп match задают {k}"));
+                            return Err(Diagnostic::new(
+                                "duplicate-match-property",
+                                format!("Несколько групп match задают {k}"),
+                            ));
                         }
                         out[k] = v.clone()
                     }
@@ -244,7 +276,10 @@ pub fn selected_properties(groups: &V, props: &V, state: &V, env: &V) -> R<V> {
                 }
             }
             if !found {
-                return Err("match: нет подходящей ветки; добавьте _ => …".into());
+                return Err(Diagnostic::new(
+                    "no-match-branch",
+                    "match: нет подходящей ветки; добавьте _ => …",
+                ));
             }
         }
     }
@@ -255,7 +290,10 @@ pub fn selected_sources(groups: &V, props: &V, state: &V, env: &V) -> R<V> {
     if let Some(groups) = groups.as_array() {
         for g in groups {
             let actual = evaluate_value(&g["match"], props, state, &[], false, env)?;
-            for b in g["branches"].as_array().ok_or("Некорректные ветки match")? {
+            for b in g["branches"]
+                .as_array()
+                .ok_or_else(|| Diagnostic::new("invalid-match", "Некорректные ветки match"))?
+            {
                 if pattern(&b["pattern"], &actual, props, state, env)? {
                     if let Some(guard) = b.get("guard") {
                         let cond = evaluate_value(guard, props, state, &[], false, env)?;
@@ -279,9 +317,14 @@ pub fn evaluate_properties(node: &V, props: &V, state: &V, env: &V) -> R<V> {
     let mut values = serde_json::Map::new();
     if let Some(applies) = node["apply"].as_array() {
         for style_val in applies {
-            let style_name = style_val.as_str().ok_or("Некорректный apply")?;
+            let style_name = style_val
+                .as_str()
+                .ok_or_else(|| Diagnostic::new("invalid-apply", "Некорректный apply"))?;
             let Some(style_props) = env["styles"].get(style_name).and_then(V::as_object) else {
-                return Err(format!("Неизвестный стиль {style_name}"));
+                return Err(Diagnostic::new(
+                    "unknown-style",
+                    format!("Неизвестный стиль {style_name}"),
+                ));
             };
             for (k, v) in style_props {
                 values.insert(k.clone(), v.clone());
@@ -290,9 +333,14 @@ pub fn evaluate_properties(node: &V, props: &V, state: &V, env: &V) -> R<V> {
     }
     if let Some(keys) = node["forward"].as_array() {
         for k in keys {
-            let k = k.as_str().ok_or("Некорректный forward")?;
+            let k = k
+                .as_str()
+                .ok_or_else(|| Diagnostic::new("invalid-forward", "Некорректный forward"))?;
             if !own(props, k) {
-                return Err(format!("forward: неизвестное свойство props.{k}"));
+                return Err(Diagnostic::new(
+                    "unknown-property",
+                    format!("forward: неизвестное свойство props.{k}"),
+                ));
             }
             values.insert(k.to_owned(), json!({"expr":format!("props.{k}")}));
         }
@@ -310,8 +358,9 @@ pub fn evaluate_properties(node: &V, props: &V, state: &V, env: &V) -> R<V> {
     if let Some(bindings) = node["bindings"].as_object() {
         for (k, v) in bindings {
             if values.contains_key(k) {
-                return Err(format!(
-                    "Свойство {k} одновременно имеет значение и двустороннюю привязку"
+                return Err(Diagnostic::new(
+                    "binding-conflict",
+                    format!("Свойство {k} одновременно имеет значение и двустороннюю привязку"),
                 ));
             }
             values.insert(k.clone(), json!({"expr":v}));
@@ -366,12 +415,25 @@ pub fn validate_type_name(ty: &str, enums: &V) -> R<()> {
         .and_then(|s| s.strip_suffix('>'))
     {
         let Some(parts) = split_top_level(inner, b',') else {
-            return Err(format!("Неизвестный тип {ty}"));
+            return Err(Diagnostic::new(
+                "unknown-type",
+                format!("Неизвестный тип {ty}"),
+            ));
         };
         if parts.len() != 2 {
-            return Err(format!("Неизвестный тип {ty}"));
+            return Err(Diagnostic::new(
+                "unknown-type",
+                format!("Неизвестный тип {ty}"),
+            ));
         }
-        validate_type_name(parts[0], enums)?;
+        // JSON object keys are always strings, so K is fixed to String.
+        let key = parts[0];
+        if key != "String" {
+            return Err(Diagnostic::new(
+                "unsupported-record-key",
+                format!("Ключи Record — всегда String, получен {key}"),
+            ));
+        }
         return validate_type_name(parts[1], enums);
     }
     if ![
@@ -381,7 +443,10 @@ pub fn validate_type_name(ty: &str, enums: &V) -> R<()> {
     .contains(&name)
         && !own(enums, name)
     {
-        return Err(format!("Неизвестный тип {ty}"));
+        return Err(Diagnostic::new(
+            "unknown-type",
+            format!("Неизвестный тип {ty}"),
+        ));
     }
     Ok(())
 }
@@ -418,6 +483,7 @@ pub fn matches_type(value: &V, ty: &str, enums: &V) -> bool {
             .as_object()
             .is_some_and(|o| o.values().all(|v| matches_type(v, inner, enums)));
     }
+    // K is fixed to String (JSON keys are always strings); only values are matched.
     if let Some(inner) = ty.strip_prefix("Record<").and_then(|s| s.strip_suffix('>')) {
         let Some(parts) = split_top_level(inner, b',') else {
             return false;
@@ -496,22 +562,31 @@ fn check_constraints(val: &V, constraints: &V, path_label: &str) -> R<()> {
         if let (Some(min), Some(max)) = (min_v.as_f64(), max_v.as_f64()) {
             if let Some(n) = val.as_f64() {
                 if n < min || n > max {
-                    return Err(format!(
-                        "{path_label}: значение {n} вне допустимого диапазона {min}..={max}"
+                    return Err(Diagnostic::new(
+                        "out-of-range",
+                        format!(
+                            "{path_label}: значение {n} вне допустимого диапазона {min}..={max}"
+                        ),
                     ));
                 }
             } else if let Some(s) = val.as_str() {
                 let len = s.chars().count() as f64;
                 if len < min || len > max {
-                    return Err(format!(
-                        "{path_label}: длина строки {len} вне допустимого диапазона {min}..={max}"
+                    return Err(Diagnostic::new(
+                        "out-of-range",
+                        format!(
+                            "{path_label}: длина строки {len} вне допустимого диапазона {min}..={max}"
+                        ),
                     ));
                 }
             } else if let Some(a) = val.as_array() {
                 let len = a.len() as f64;
                 if len < min || len > max {
-                    return Err(format!(
-                        "{path_label}: длина списка {len} вне допустимого диапазона {min}..={max}"
+                    return Err(Diagnostic::new(
+                        "out-of-range",
+                        format!(
+                            "{path_label}: длина списка {len} вне допустимого диапазона {min}..={max}"
+                        ),
                     ));
                 }
             }
@@ -519,9 +594,10 @@ fn check_constraints(val: &V, constraints: &V, path_label: &str) -> R<()> {
     }
     if let Some(pat) = constraints["pattern"].as_str() {
         let s = evaluate::text(val)?;
-        if !evaluate::matches_constraint_pattern(&s, pat) {
-            return Err(format!(
-                "{path_label}: значение не соответствует шаблону '{pat}'"
+        if !evaluate::matches_constraint_pattern(&s, pat)? {
+            return Err(Diagnostic::new(
+                "pattern-mismatch",
+                format!("{path_label}: значение не соответствует шаблону '{pat}'"),
             ));
         }
     }
@@ -530,16 +606,24 @@ fn check_constraints(val: &V, constraints: &V, path_label: &str) -> R<()> {
 pub fn validate_contract(defs: &V, values: &V, enums: &V, label: &str) -> R<()> {
     if let Some(o) = defs.as_object() {
         for (name, d) in o {
-            let ty = d["type"].as_str().ok_or("Некорректный тип")?;
+            let ty = d["type"]
+                .as_str()
+                .ok_or_else(|| Diagnostic::new("invalid-type", "Некорректный тип"))?;
             validate_type_name(ty, enums)?;
             if !own(values, name) {
                 if d["required"] == true {
-                    return Err(format!("{label}: обязательное свойство {name} не задано"));
+                    return Err(Diagnostic::new(
+                        "missing-required-property",
+                        format!("{label}: обязательное свойство {name} не задано"),
+                    ));
                 }
                 continue;
             }
             if !matches_type(&values[name], ty, enums) {
-                return Err(format!("{label}.{name}: ожидался {ty}"));
+                return Err(Diagnostic::new(
+                    "type-mismatch",
+                    format!("{label}.{name}: ожидался {ty}"),
+                ));
             }
             if d["constraints"].is_object() {
                 check_constraints(&values[name], &d["constraints"], &format!("{label}.{name}"))?;
@@ -583,7 +667,10 @@ where
     impl<F: FnMut(&V, &V) -> R<V>> Expansion<'_, F> {
         fn walk(&mut self, nodes: &V, env: &V, prefix: &str, depth: usize) -> R<Vec<V>> {
             if depth > 64 {
-                return Err("Превышен предел глубины разметки".into());
+                return Err(Diagnostic::new(
+                    "depth-limit",
+                    "Превышен предел глубины разметки",
+                ));
             }
             let empty_nodes = V::Array(Vec::new());
             let mut out = Vec::new();
@@ -595,16 +682,23 @@ where
             }
             for (index, node) in nodes
                 .as_array()
-                .ok_or("Ожидался список узлов")?
+                .ok_or_else(|| Diagnostic::new("invalid-node", "Ожидался список узлов"))?
                 .iter()
                 .enumerate()
             {
+                // UTF-16 offset of the current node, attached to its diagnostics.
+                let span = node["start"].as_u64().map(|s| s as usize);
                 self.count += 1;
                 if self.count > 16384 {
-                    return Err("Превышен предел размера разметки".into());
+                    return Err(Diagnostic::new(
+                        "size-limit",
+                        "Превышен предел размера разметки",
+                    ));
                 }
                 if node["type"] == "Let" {
-                    let name = node["name"].as_str().ok_or("Некорректный let")?;
+                    let name = node["name"].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-node", "Некорректный let").or_span(span)
+                    })?;
                     let val = evaluate_value(
                         &node["value"],
                         self.props,
@@ -612,7 +706,8 @@ where
                         &[],
                         false,
                         &current_env,
-                    )?;
+                    )
+                    .map_err(|e: Diagnostic| e.or_span(span))?;
                     current_env.to_mut()["locals"][name] = val;
                     continue;
                 }
@@ -624,20 +719,26 @@ where
                         &[],
                         false,
                         &current_env,
-                    )?;
+                    )
+                    .map_err(|e: Diagnostic| e.or_span(span))?;
                     if !c.is_boolean() {
-                        return Err("if ожидает Bool".into());
+                        return Err(
+                            Diagnostic::new("expected-bool", "if ожидает Bool").or_span(span)
+                        );
                     }
-                    out.extend(self.walk(
-                        if c == true {
-                            &node["children"]
-                        } else {
-                            node.get("elseChildren").unwrap_or(&empty_nodes)
-                        },
-                        &current_env,
-                        prefix,
-                        depth + 1,
-                    )?);
+                    out.extend(
+                        self.walk(
+                            if c == true {
+                                &node["children"]
+                            } else {
+                                node.get("elseChildren").unwrap_or(&empty_nodes)
+                            },
+                            &current_env,
+                            prefix,
+                            depth + 1,
+                        )
+                        .map_err(|e: Diagnostic| e.or_span(span))?,
+                    );
                     continue;
                 }
                 if node["type"] == "Match" {
@@ -648,13 +749,15 @@ where
                         &[],
                         false,
                         &current_env,
-                    )?;
+                    )
+                    .map_err(|e: Diagnostic| e.or_span(span))?;
                     let mut found = false;
-                    for b in node["branches"]
-                        .as_array()
-                        .ok_or("Некорректные ветки match")?
-                    {
-                        if pattern(&b["pattern"], &actual, self.props, self.state, &current_env)? {
+                    for b in node["branches"].as_array().ok_or_else(|| {
+                        Diagnostic::new("invalid-match", "Некорректные ветки match")
+                    })? {
+                        if pattern(&b["pattern"], &actual, self.props, self.state, &current_env)
+                            .map_err(|e: Diagnostic| e.or_span(span))?
+                        {
                             if let Some(guard) = b.get("guard") {
                                 let cond = evaluate_value(
                                     guard,
@@ -663,36 +766,54 @@ where
                                     &[],
                                     false,
                                     &current_env,
-                                )?;
+                                )
+                                .map_err(|e: Diagnostic| e.or_span(span))?;
                                 if !evaluate::truth(&cond)? {
                                     continue;
                                 }
                             }
-                            out.extend(self.walk(
-                                b.get("children").unwrap_or(&empty_nodes),
-                                &current_env,
-                                prefix,
-                                depth + 1,
-                            )?);
+                            out.extend(
+                                self.walk(
+                                    b.get("children").unwrap_or(&empty_nodes),
+                                    &current_env,
+                                    prefix,
+                                    depth + 1,
+                                )
+                                .map_err(|e: Diagnostic| e.or_span(span))?,
+                            );
                             found = true;
                             break;
                         }
                     }
                     if !found {
-                        return Err("match: нет подходящей ветки; добавьте _ => …".into());
+                        return Err(Diagnostic::new(
+                            "no-match-branch",
+                            "match: нет подходящей ветки; добавьте _ => …",
+                        )
+                        .or_span(span));
                     }
                     continue;
                 }
                 if node["type"] == "For" {
-                    let item = node["item"].as_str().ok_or("Некорректный for")?;
+                    let item = node["item"].as_str().ok_or_else(|| {
+                        Diagnostic::new("invalid-node", "Некорректный for").or_span(span)
+                    })?;
                     if own(&current_env["locals"], item) {
-                        return Err(format!("Вложенный for повторяет имя {item}"));
+                        return Err(Diagnostic::new(
+                            "duplicate-variable",
+                            format!("Вложенный for повторяет имя {item}"),
+                        )
+                        .or_span(span));
                     }
                     let idx_name = node["index"].as_str();
                     if let Some(idx) = idx_name
                         && own(&current_env["locals"], idx)
                     {
-                        return Err(format!("Вложенный for повторяет имя {idx}"));
+                        return Err(Diagnostic::new(
+                            "duplicate-variable",
+                            format!("Вложенный for повторяет имя {idx}"),
+                        )
+                        .or_span(span));
                     }
                     let collection = evaluate_value(
                         &node["collection"],
@@ -701,8 +822,12 @@ where
                         &[],
                         false,
                         &current_env,
-                    )?;
-                    let collection = collection.as_array().ok_or("for ожидает коллекцию")?;
+                    )
+                    .map_err(|e: Diagnostic| e.or_span(span))?;
+                    let collection = collection.as_array().ok_or_else(|| {
+                        Diagnostic::new("expected-collection", "for ожидает коллекцию")
+                            .or_span(span)
+                    })?;
                     let mut keys = std::collections::HashSet::with_capacity(collection.len());
                     let mut local = current_env.as_ref().clone();
                     if !local["_formaBindings"].is_object() {
@@ -723,7 +848,8 @@ where
                                 &[],
                                 false,
                                 &local,
-                            )?;
+                            )
+                            .map_err(|e: Diagnostic| e.or_span(span))?;
                             if !evaluate::truth(&cond)? {
                                 continue;
                             }
@@ -738,46 +864,68 @@ where
                             &[],
                             false,
                             &local,
-                        )?;
+                        )
+                        .map_err(|e: Diagnostic| e.or_span(span))?;
                         if !key.is_string() && !key.as_f64().is_some_and(f64::is_finite) {
-                            return Err("Ключ for должен быть строкой или конечным числом".into());
+                            return Err(Diagnostic::new(
+                                "invalid-key",
+                                "Ключ for должен быть строкой или конечным числом",
+                            )
+                            .or_span(span));
                         }
                         let identity = if key.is_number() {
-                            evaluate::text(&key)?
+                            evaluate::text(&key).map_err(|e: Diagnostic| e.or_span(span))?
                         } else {
                             key.to_string()
                         };
                         if !keys.insert(identity.clone()) {
-                            return Err(format!("Повторный ключ for: {identity}"));
+                            return Err(Diagnostic::new(
+                                "duplicate-key",
+                                format!("Повторный ключ for: {identity}"),
+                            )
+                            .or_span(span));
                         }
-                        out.extend(self.walk(
-                            &node["children"],
-                            &local,
-                            &format!("{prefix}@{node_start}:{identity}/"),
-                            depth + 1,
-                        )?)
+                        out.extend(
+                            self.walk(
+                                &node["children"],
+                                &local,
+                                &format!("{prefix}@{node_start}:{identity}/"),
+                                depth + 1,
+                            )
+                            .map_err(|e: Diagnostic| e.or_span(span))?,
+                        )
                     }
                     if !matched_any {
-                        out.extend(self.walk(
-                            node.get("emptyChildren").unwrap_or(&empty_nodes),
-                            &current_env,
-                            prefix,
-                            depth + 1,
-                        )?)
+                        out.extend(
+                            self.walk(
+                                node.get("emptyChildren").unwrap_or(&empty_nodes),
+                                &current_env,
+                                prefix,
+                                depth + 1,
+                            )
+                            .map_err(|e: Diagnostic| e.or_span(span))?,
+                        )
                     }
                     continue;
                 }
                 let values = if self.options["evaluateProps"] == false {
                     node["props"].clone()
                 } else {
-                    evaluate_properties(node, self.props, self.state, &current_env)?
+                    evaluate_properties(node, self.props, self.state, &current_env)
+                        .map_err(|e: Diagnostic| e.or_span(span))?
                 };
                 let mut args = json!({});
                 if let Some(o) = node["eventArgs"].as_object() {
                     for (k, a) in o {
                         args[k] = V::Array(
                             a.as_array()
-                                .ok_or("Некорректные аргументы события")?
+                                .ok_or_else(|| {
+                                    Diagnostic::new(
+                                        "invalid-event-args",
+                                        "Некорректные аргументы события",
+                                    )
+                                    .or_span(span)
+                                })?
                                 .iter()
                                 .map(|v| {
                                     evaluate_value(
@@ -789,11 +937,13 @@ where
                                         &current_env,
                                     )
                                 })
-                                .collect::<R<_>>()?,
+                                .collect::<R<_>>()
+                                .map_err(|e: Diagnostic| e.or_span(span))?,
                         )
                     }
                 }
-                let annotation = (self.hook)(node, &current_env)?;
+                let annotation =
+                    (self.hook)(node, &current_env).map_err(|e: Diagnostic| e.or_span(span))?;
                 let is_slider_num = node["type"] == "Slider" && values["value"].is_number();
                 let mut result = if let Some(node_obj) = node.as_object() {
                     let mut map = serde_json::Map::with_capacity(node_obj.len() + 4);
@@ -838,12 +988,15 @@ where
                     if self.options["recursive"] == false || annotation["recursive"] == false {
                         node["children"].clone()
                     } else {
-                        V::Array(self.walk(
-                            node.get("children").unwrap_or(&empty_nodes),
-                            &current_env,
-                            prefix,
-                            depth + 1,
-                        )?)
+                        V::Array(
+                            self.walk(
+                                node.get("children").unwrap_or(&empty_nodes),
+                                &current_env,
+                                prefix,
+                                depth + 1,
+                            )
+                            .map_err(|e: Diagnostic| e.or_span(span))?,
+                        )
                     };
                 out.push(result);
             }
@@ -861,10 +1014,13 @@ where
 }
 pub fn validate_design(component: &V, design: &V) -> R<()> {
     if design["name"] != component["name"] {
-        return Err(format!(
-            "Дизайн {} не соответствует {}",
-            design["name"].as_str().unwrap_or(""),
-            component["name"].as_str().unwrap_or("")
+        return Err(Diagnostic::new(
+            "design-mismatch",
+            format!(
+                "Дизайн {} не соответствует {}",
+                design["name"].as_str().unwrap_or(""),
+                component["name"].as_str().unwrap_or("")
+            ),
         ));
     }
     fn collect(nodes: &V, keys: &mut std::collections::HashMap<String, String>) {
@@ -890,12 +1046,16 @@ pub fn validate_design(component: &V, design: &V) -> R<()> {
         if let Some(o) = d["overrides"].as_object() {
             for key in o.keys() {
                 let Some(ty) = keys.get(key) else {
-                    return Err(format!("Неизвестный дизайн-key {key}"));
+                    return Err(Diagnostic::new(
+                        "unknown-design-key",
+                        format!("Неизвестный дизайн-key {key}"),
+                    ));
                 };
                 let got = d["overrideTypes"][key].as_str().unwrap_or("");
                 if got != ty {
-                    return Err(format!(
-                        "Тип дизайн-key {key}: ожидался {ty}, получен {got}{where_}"
+                    return Err(Diagnostic::new(
+                        "type-mismatch",
+                        format!("Тип дизайн-key {key}: ожидался {ty}, получен {got}{where_}"),
                     ));
                 }
             }
@@ -919,7 +1079,9 @@ pub fn design_state_patch(design: &V, state: Option<&str>) -> R<V> {
         let state = design["states"]
             .as_array()
             .and_then(|a| a.iter().find(|s| s["name"] == name))
-            .ok_or_else(|| format!("Состояние {name} не объявлено"))?;
+            .ok_or_else(|| {
+                Diagnostic::new("unknown-state", format!("Состояние {name} не объявлено"))
+            })?;
         if let Some(o) = state["overrides"].as_object() {
             for (k, props) in o {
                 if !out[k].is_object() {

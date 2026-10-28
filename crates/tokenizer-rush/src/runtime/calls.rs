@@ -1,7 +1,7 @@
 use super::stmt::Flow;
 use super::{
     Builtin, CallFrame, Closure, Environment, FunctionBody, RecordMap, RecordShape, RegionStats,
-    Result, Runtime, RuntimeError, SequenceStage, UserData, Value, ValueType,
+    Result, Runtime, RuntimeError, SequenceStage, StageKind, UserData, Value, ValueType,
     format_value_for_display, json, memory,
 };
 use crate::{Expr, ExprKind, Name};
@@ -191,14 +191,14 @@ impl<'s> Runtime<'_, 's> {
                 }
                 return Ok(Value::List(output));
             }
-            if matches!(builtin, Builtin::Map | Builtin::Filter)
+            if matches!(builtin, Builtin::Map | Builtin::Filter | Builtin::FlatMap)
                 && matches!(
                     arguments.first(),
                     Some(Value::Range { .. } | Value::Sequence(_) | Value::BytecodeSequence(_))
                 )
             {
                 let [source, callback] = arguments.as_ref() else {
-                    return self.error(span, "map/filter require a sequence and callback");
+                    return self.error(span, "map/filter/flat_map require a sequence and callback");
                 };
                 if !matches!(
                     callback,
@@ -218,7 +218,11 @@ impl<'s> Runtime<'_, 's> {
                         &self.memory,
                         SequenceStage {
                             callback: callback.clone(),
-                            filter: builtin == Builtin::Filter,
+                            kind: match builtin {
+                                Builtin::Filter => StageKind::Filter,
+                                Builtin::FlatMap => StageKind::FlatMap,
+                                _ => StageKind::Map,
+                            },
                             span,
                             module: self.module,
                         },

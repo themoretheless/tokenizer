@@ -52,7 +52,9 @@ use env::{Binding, CaptureReference, CellId, Environment};
 pub(crate) use ops::{exact_remainder, format_value_for_display};
 use regions::RegionFrame;
 #[allow(unused_imports)]
-use sequence::{HostSource, SequenceCursor, SequenceSource, SequenceStage, SequenceStages};
+use sequence::{
+    HostSource, SequenceCursor, SequenceSource, SequenceStage, SequenceStages, StageKind,
+};
 use stmt::Flow;
 use types::{ContextualHostCallback, FunctionBody};
 pub(crate) use types::{
