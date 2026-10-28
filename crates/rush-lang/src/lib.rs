@@ -1192,7 +1192,7 @@ impl Interpreter {
         }
         let mut var_buf = [0u8; MAX_NAME];
         let var_len: usize;
-        let mut word_buf = [0u8; MAX_VALUE];
+        let mut word_buf = [0u8; MAX_BODY_LINE];
         let word_len: usize;
         let rows_mode = self.pending[self.pending_len - 1].rows_mode;
         {
@@ -1227,7 +1227,10 @@ impl Interpreter {
                 self.pending_len -= 1;
                 return Ok(());
             }
-            if item.len() > MAX_VALUE {
+            // A row carries several `field=value` tokens, so it gets the
+            // body-line budget; a plain word stays a single value.
+            let cap = if rows_mode { MAX_BODY_LINE } else { MAX_VALUE };
+            if item.len() > cap {
                 return Err(RushError::ValueTooLong);
             }
             word_len = item.len();
