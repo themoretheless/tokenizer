@@ -628,6 +628,7 @@ impl<'s> Program<'s> {
             cell_regions: Vec::new(),
             next_region: 0,
             skip_call_region: false,
+            persistent_regions: Vec::new(),
             region_stats: Vec::new(),
             cancellation,
             contextual: contextual
@@ -753,6 +754,10 @@ struct Runtime<'a, 's> {
     /// One-shot: the next `call_user` runs without an implicit call region
     /// because `arena_run` already supplied the region for it.
     skip_call_region: bool,
+    /// Persistent arenas parked between `arena_run` calls: surviving cells
+    /// keep the arena's stamp instead of promoting out, so the frame (and its
+    /// budget accounting) lives until `arena_reset` or program end.
+    persistent_regions: Vec<(String, RegionFrame)>,
     /// Aggregated per-name metrics; frames reference entries by index.
     /// Lookups are linear — the number of distinct region names is tiny.
     region_stats: Vec<RegionStats>,

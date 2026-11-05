@@ -824,3 +824,74 @@ fn arena_errors_are_clear() {
         Value::Number(5.0)
     );
 }
+
+#[test]
+fn persistent_arena_keeps_survivors_between_runs() {
+    // Cells captured by escaping closures stay stamped to the persistent
+    // arena and keep their values across separate runs.
+    assert_eq!(
+        evaluate(
+            "const a = arena(\"cache\", null, true)\nmut get = () => 0\nmut bump = () => 0\nfn first() { mut n = 40\nget = () => n\nbump = () => n += 2 }\narena_run(a, first)\nfn second() { return bump() }\narena_run(a, second)\nget()",
+            2000
+        )
+        .unwrap(),
+        Value::Number(42.0)
+    );
+    // Stats expose the parked live count and the accumulated runs.
+    assert_eq!(
+        evaluate(
+            "const a = arena(\"cache\", null, true)\nmut saved = () => 0\nfn first() { mut n = 1\nsaved = () => n }\narena_run(a, first)\nfn scratch() { mut t = 9\nreturn t }\narena_run(a, scratch)\nconst s = arena_stats(a)\ns.entries * 100 + s.live",
+            2000
+        )
+        .unwrap(),
+        Value::Number(201.0)
+    );
+}
+
+#[test]
+fn persistent_arena_budget_spans_runs() {
+    // One survivor per run; the budget covers the total parked live cells.
+    assert!(
+        evaluate(
+            "const a = arena(\"cache\", 1, true)\nmut saved = [() => 0, () => 0]\nfn first() { mut n = 1\nsaved[0] = () => n }\narena_run(a, first)\nfn second() { mut m = 2\nsaved[1] = () => m }\narena_run(a, second)",
+            2000
+        )
+        .is_err()
+    );
+    // Scratch dying inside a run never counts against the budget.
+    assert_eq!(
+        evaluate(
+            "const a = arena(\"cache\", 2, true)\nfn work() { mut t = 5\nmut u = 6\nreturn t + u }\narena_run(a, work)\narena_run(a, work)",
+            2000
+        )
+        .unwrap(),
+        Value::Number(11.0)
+    );
+}
+
+#[test]
+fn arena_reset_empties_surviving_cells() {
+    // After reset, holders of arena cells observe null (like move), and the
+    // arena is usable again from scratch.
+    assert_eq!(
+        evaluate(
+            "const a = arena(\"cache\", null, true)\nmut saved = () => 0\nfn first() { mut n = 7\nsaved = () => n }\narena_run(a, first)\narena_reset(a)\nsaved()",
+            2000
+        )
+        .unwrap(),
+        Value::Null
+    );
+    assert_eq!(
+        evaluate(
+            "const a = arena(\"cache\", null, true)\nmut saved = () => 0\nfn first() { mut n = 7\nsaved = () => n }\narena_run(a, first)\narena_reset(a)\nconst s = arena_stats(a)\ns.live",
+            2000
+        )
+        .unwrap(),
+        Value::Number(0.0)
+    );
+    // Resetting a scratch arena (no parked frame) is a no-op.
+    assert_eq!(
+        evaluate("const a = arena(\"scratch\")\narena_reset(a)\n1", 200).unwrap(),
+        Value::Number(1.0)
+    );
+}

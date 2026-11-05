@@ -384,14 +384,14 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
                 }
             };
             steps.push(ScheduledStep { id, state });
-            if let Some(step) = steps.last() {
-                if matches!(
+            if let Some(step) = steps.last()
+                && matches!(
                     step.state,
                     ScheduledState::Complete(_) | ScheduledState::Failed(_)
-                ) {
-                    let state = step.state.clone();
-                    self.settle_waiters(id, &state, &mut steps);
-                }
+                )
+            {
+                let state = step.state.clone();
+                self.settle_waiters(id, &state, &mut steps);
             }
             if self.instance.runtime.cancellation.is_cancelled() {
                 self.cancel_all();

@@ -222,14 +222,21 @@ impl<'s> Runtime<'_, 's> {
                 break;
             };
             let region = self.cell_regions[index];
-            if region != 0
-                && let Some(frame) = self
+            if region != 0 {
+                let frame = self
                     .region_stack
                     .iter_mut()
                     .rev()
                     .find(|frame| frame.id == region)
-            {
-                frame.live = frame.live.saturating_sub(1);
+                    .or_else(|| {
+                        self.persistent_regions
+                            .iter_mut()
+                            .map(|(_, frame)| frame)
+                            .find(|frame| frame.id == region)
+                    });
+                if let Some(frame) = frame {
+                    frame.live = frame.live.saturating_sub(1);
+                }
             }
             self.cells[index] = (Value::Null, None);
             self.free_cells

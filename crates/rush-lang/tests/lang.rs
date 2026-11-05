@@ -377,21 +377,18 @@ fn break_exits_for_and_foreach_loops() {
     assert_eq!(executed, vec!["echo $f", "echo after"]);
 
     // A `break` in a dead branch does not fire.
-    let executed =
-        ok("for n in a b:\n    if 1 = 2:\n        break\n    echo $n\necho done\n");
+    let executed = ok("for n in a b:\n    if 1 = 2:\n        break\n    echo $n\necho done\n");
     assert_eq!(executed, vec!["echo $n", "echo $n", "echo done"]);
 }
 
 #[test]
 fn continue_skips_to_the_next_iteration() {
-    let executed = ok(
-        "for n in a b c:\n    if $n = b:\n        continue\n    echo $n\necho done\n",
-    );
+    let executed =
+        ok("for n in a b c:\n    if $n = b:\n        continue\n    echo $n\necho done\n");
     assert_eq!(executed, vec!["echo $n", "echo $n", "echo done"]);
 
     // `continue` skips the rest of the body, not just one line.
-    let executed =
-        ok("for n in a b:\n    echo one-$n\n    continue\n    echo two-$n\necho done\n");
+    let executed = ok("for n in a b:\n    echo one-$n\n    continue\n    echo two-$n\necho done\n");
     assert_eq!(executed, vec!["echo one-$n", "echo one-$n", "echo done"]);
 
     // Same for `foreach`.
@@ -407,10 +404,7 @@ fn continue_skips_to_the_next_iteration() {
 #[test]
 fn loop_control_outside_a_loop_is_an_error() {
     let mut interp = Interpreter::new();
-    assert_eq!(
-        interp.step("break"),
-        Err(RushError::LoopControlOutsideLoop)
-    );
+    assert_eq!(interp.step("break"), Err(RushError::LoopControlOutsideLoop));
     let mut interp = Interpreter::new();
     assert_eq!(
         interp.step("continue"),
@@ -429,7 +423,10 @@ fn loop_control_does_not_cross_the_fn_boundary() {
     // control. `break`/`continue` inside a function called from a loop
     // body errors (`LoopControlOutsideLoop`) instead of punching through
     // to the caller's loop — the callee's replay frame is not a loop.
-    let (_, outcome) = run("fn stop:\n    break\nfor n in a b:\n    stop\necho after\n", &[]);
+    let (_, outcome) = run(
+        "fn stop:\n    break\nfor n in a b:\n    stop\necho after\n",
+        &[],
+    );
     assert_eq!(outcome, Err(RushError::LoopControlOutsideLoop));
 
     let (_, outcome) = run("fn skip:\n    continue\nfor n in a b:\n    skip\n", &[]);
@@ -437,10 +434,7 @@ fn loop_control_does_not_cross_the_fn_boundary() {
 
     // Calls from a loop still work when the callee uses no loop control.
     let executed = ok("fn say word:\n    echo $word\nfor n in a b:\n    say $n\necho done\n");
-    assert_eq!(
-        executed,
-        vec!["echo $word", "echo $word", "echo done"]
-    );
+    assert_eq!(executed, vec!["echo $word", "echo $word", "echo done"]);
 }
 
 #[test]
@@ -455,13 +449,11 @@ fn else_if_chains_pick_the_first_taken_branch() {
     assert_eq!(executed, vec!["echo a"]);
 
     // Nothing taken: `else` runs.
-    let executed =
-        ok("if 1 = 2:\n    echo a\nelse if 3 = 4:\n    echo b\nelse:\n    echo c\n");
+    let executed = ok("if 1 = 2:\n    echo a\nelse if 3 = 4:\n    echo b\nelse:\n    echo c\n");
     assert_eq!(executed, vec!["echo c"]);
 
     // Chain without `else`: nothing runs, no error.
-    let executed =
-        ok("if 1 = 2:\n    echo a\nelse if 3 = 4:\n    echo b\necho after\n");
+    let executed = ok("if 1 = 2:\n    echo a\nelse if 3 = 4:\n    echo b\necho after\n");
     assert_eq!(executed, vec!["echo after"]);
 
     // Longer chain: first matching rung wins.
@@ -480,10 +472,7 @@ fn else_if_chains_pick_the_first_taken_branch() {
 fn else_if_errors_are_stable() {
     // `else if` without a matching open `if`.
     let mut interp = Interpreter::new();
-    assert_eq!(
-        interp.step("else if 1:"),
-        Err(RushError::ElseWithoutIf)
-    );
+    assert_eq!(interp.step("else if 1:"), Err(RushError::ElseWithoutIf));
 
     // Malformed condition.
     let mut interp = Interpreter::new();
@@ -497,10 +486,7 @@ fn else_if_errors_are_stable() {
     let mut interp = Interpreter::new();
     assert_eq!(interp.step("if 1:"), Ok(Step::Skip));
     assert_eq!(interp.step("else:"), Ok(Step::Skip));
-    assert_eq!(
-        interp.step("else if 1:"),
-        Err(RushError::ElseWithoutIf)
-    );
+    assert_eq!(interp.step("else if 1:"), Err(RushError::ElseWithoutIf));
 }
 
 #[test]
@@ -531,7 +517,6 @@ fn break_inside_nested_if_in_a_loop() {
         vec!["echo $n", "echo $n", "echo inner", "echo top"]
     );
 }
-
 
 #[test]
 fn foreach_rows_bind_fields() {

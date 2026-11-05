@@ -68,15 +68,12 @@ fn parse_hex_color(v: &V) -> R<(u8, u8, u8, u8)> {
         owned = text(v)?;
         &owned
     };
-    let s = raw
-        .trim()
-        .strip_prefix('#')
-        .ok_or_else(|| {
-            Diagnostic::new(
-                "invalid-color",
-                "Функция цвета ожидает hex-цвет (#rgb, #rrggbb или #rrggbbaa)",
-            )
-        })?;
+    let s = raw.trim().strip_prefix('#').ok_or_else(|| {
+        Diagnostic::new(
+            "invalid-color",
+            "Функция цвета ожидает hex-цвет (#rgb, #rrggbb или #rrggbbaa)",
+        )
+    })?;
     let hex = |slice: &str| {
         u8::from_str_radix(slice, 16)
             .map_err(|_| Diagnostic::new("invalid-color", "Некорректный hex-цвет"))

@@ -552,13 +552,22 @@ impl<'s> Runtime<'_, 's> {
                         return self.error(span, "arena budget must be a non-negative integer");
                     }
                 };
-                self.collection_growth(0, 2, span)?;
+                let persistent = match arguments.next() {
+                    None | Some(Value::Null) => false,
+                    Some(Value::Bool(value)) => value,
+                    _ => return self.error(span, "arena persistent flag must be a boolean"),
+                };
+                self.collection_growth(0, 3, span)?;
                 return Ok(Value::Record(RecordMap::from([
                     ("name".into(), Value::String(name)),
                     ("budget".into(), budget),
+                    ("persistent".into(), Value::Bool(persistent)),
                 ])));
             }
-            if matches!(builtin, Builtin::ArenaRun | Builtin::ArenaStats) {
+            if matches!(
+                builtin,
+                Builtin::ArenaRun | Builtin::ArenaStats | Builtin::ArenaReset
+            ) {
                 let mut arguments = arguments.into_owned().into_iter();
                 let descriptor = arguments.next().unwrap();
                 let Value::Record(fields) = &descriptor else {
@@ -575,7 +584,12 @@ impl<'s> Runtime<'_, 's> {
                     let metric = |pick: fn(&RegionStats) -> u64| {
                         stats.map_or(0.0, |entry| pick(entry) as f64)
                     };
-                    self.collection_growth(0, 7, span)?;
+                    let live = self
+                        .persistent_regions
+                        .iter()
+                        .find(|(n, _)| n == name)
+                        .map_or(0.0, |(_, frame)| frame.live as f64);
+                    self.collection_growth(0, 8, span)?;
                     return Ok(Value::Record(RecordMap::from([
                         ("name".into(), Value::String(name.clone())),
                         ("entries".into(), Value::Number(metric(|s| s.entries))),
@@ -593,7 +607,29 @@ impl<'s> Runtime<'_, 's> {
                             "suggested_budget".into(),
                             Value::Number(stats.map_or(0.0, |s| s.suggested_budget() as f64)),
                         ),
+                        ("live".into(), Value::Number(live)),
                     ])));
+                }
+                if builtin == Builtin::ArenaReset {
+                    // Retire the parked persistent frame: every surviving cell
+                    // is emptied in place, so holders observe `null` exactly
+                    // like after a move(). Scratch arenas have no parked
+                    // frame, so reset on them is a no-op.
+                    if let Some(index) = self
+                        .persistent_regions
+                        .iter()
+                        .position(|(n, _)| n == name)
+                    {
+                        let (_, frame) = self.persistent_regions.swap_remove(index);
+                        for cell in frame.cells {
+                            if self.cell_regions.get(cell).copied() == Some(frame.id)
+                                && self.cell_ids[cell].upgrade().is_some()
+                            {
+                                self.cells[cell] = (Value::Null, None);
+                            }
+                        }
+                    }
+                    return Ok(Value::Null);
                 }
                 let callback = arguments.next().unwrap();
                 if !matches!(
@@ -611,6 +647,48 @@ impl<'s> Runtime<'_, 's> {
                         }
                     },
                 };
+                if matches!(fields.get("persistent"), Some(Value::Bool(true))) {
+                    // Persistent arena: reuse the parked frame (stable region
+                    // id) or mint one. Survivors keep the arena's stamp across
+                    // runs instead of promoting to the caller.
+                    let mut frame = match self
+                        .persistent_regions
+                        .iter()
+                        .position(|(n, _)| n == name)
+                    {
+                        Some(index) => {
+                            let frame = self.persistent_regions.swap_remove(index).1;
+                            // Minting counts one entry; a reused frame must
+                            // count each rerun explicitly.
+                            self.region_stats[frame.stats].entries += 1;
+                            frame
+                        }
+                        None => self.mint_region_frame(budget, Some(name)),
+                    };
+                    frame.budget = budget;
+                    let region = frame.id;
+                    self.region_stack.push(frame);
+                    self.skip_call_region = true;
+                    let result = self.call(callback.clone(), Cow::Borrowed(&[]), span);
+                    self.skip_call_region = false;
+                    // Reclaim while the frame is still on the stack so its
+                    // dead cells are accounted, then keep only survivors.
+                    self.reclaim_cells();
+                    let mut frame = self.region_stack.pop().expect("region frame");
+                    debug_assert_eq!(frame.id, region);
+                    frame.cells.retain(|&index| {
+                        self.cell_regions.get(index).copied() == Some(region)
+                            && self.cell_ids[index].upgrade().is_some()
+                    });
+                    frame.live = frame.cells.len();
+                    let overflow =
+                        frame.budget.is_some_and(|budget| frame.live > budget);
+                    self.persistent_regions.push((name.clone(), frame));
+                    if overflow {
+                        return self.error(span, "Region cell budget exceeded");
+                    }
+                    return result;
+                }
                 let region = self.enter_region(budget, Some(name));
                 // The callback's own implicit call region would intercept its
                 // scratch cells before the arena sees them; the arena frame

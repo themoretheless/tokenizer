@@ -56,7 +56,7 @@ fn depth_limit_is_per_run_and_shared_with_modules() {
                     max_collection_items: usize::MAX,
                     max_string_bytes: usize::MAX,
                     max_heap_bytes: usize::MAX,
-                max_allocated_bytes: usize::MAX,
+                    max_allocated_bytes: usize::MAX,
                 },
                 &cancellation,
                 &[],
@@ -90,7 +90,7 @@ fn zero_limits_stop_before_host_callbacks_and_cancellation_stays_sticky() {
             max_collection_items: usize::MAX,
             max_string_bytes: usize::MAX,
             max_heap_bytes: usize::MAX,
-                max_allocated_bytes: usize::MAX,
+            max_allocated_bytes: usize::MAX,
         },
     ] {
         assert!(
@@ -481,7 +481,10 @@ fn dense_source(statements: usize, nesting: usize) -> String {
 fn ast_byte_limit_rejects_inflated_parse_output() {
     // One `let v0 = ---1` line is ~12 source bytes but several boxed Expr nodes.
     let source = dense_source(50, 16);
-    let generous = parse_with(&source, InputLimits::conservative().max_ast_bytes(1_000_000));
+    let generous = parse_with(
+        &source,
+        InputLimits::conservative().max_ast_bytes(1_000_000),
+    );
     assert!(generous.is_valid());
     let tight = parse_with(&source, InputLimits::conservative().max_ast_bytes(1024));
     assert!(!tight.is_valid());
@@ -496,7 +499,10 @@ fn ast_byte_limit_rejects_inflated_parse_output() {
     // The limit stops the parse early instead of building the whole tree.
     assert!(tight.module.items.len() < 50);
     // usize::MAX opts out, matching the "zero is never unlimited" convention.
-    let disabled = parse_with(&source, InputLimits::conservative().max_ast_bytes(usize::MAX));
+    let disabled = parse_with(
+        &source,
+        InputLimits::conservative().max_ast_bytes(usize::MAX),
+    );
     assert!(disabled.is_valid());
 }
 
@@ -520,7 +526,10 @@ fn ast_byte_limit_scales_with_input_bytes_and_holds_at_one_megabyte() {
     assert!(parsed.is_valid(), "{:?}", parsed.diagnostics);
     // An explicit budget below the output size rejects the same source;
     // an explicit budget above it accepts.
-    let tight = parse_with(&source, InputLimits::conservative().max_ast_bytes(source.len()));
+    let tight = parse_with(
+        &source,
+        InputLimits::conservative().max_ast_bytes(source.len()),
+    );
     assert!(!tight.is_valid());
     assert!(tight.diagnostics.iter().any(|d| d.code == "ast-limit"));
     let exact_style = parse_with(
@@ -535,7 +544,9 @@ fn ast_byte_limit_respects_the_diagnostic_budget() {
     let source = dense_source(50, 16);
     let silent = parse_with(
         &source,
-        InputLimits::conservative().max_ast_bytes(1024).max_diagnostics(0),
+        InputLimits::conservative()
+            .max_ast_bytes(1024)
+            .max_diagnostics(0),
     );
     assert!(!silent.is_valid());
     assert!(silent.diagnostics.is_empty());
@@ -554,7 +565,10 @@ fn heap_limit_bounds_eager_peaks_at_a_reproducible_boundary() {
         .instantiate(ExecutionLimits::new(steps), &token, &[], &[], &[], &[])
         .unwrap();
     let peak = script.peak_heap_bytes();
-    assert!(peak > 1_000_000, "eager peak should be ledger-visible: {peak}");
+    assert!(
+        peak > 1_000_000,
+        "eager peak should be ledger-visible: {peak}"
+    );
     drop(script);
     // The boundary is reproducible: exactly peak succeeds, peak - 1 fails.
     let script = program
@@ -640,10 +654,7 @@ fn heap_limit_stops_lazy_materialization_mid_iteration_without_side_effects() {
     let error = script.call("collect_many", &[], limits).unwrap_err();
     assert_eq!(error.message, "Heap limit exceeded");
     // No stale reservations: the same instance still runs within the budget.
-    assert_eq!(
-        script.call("tick", &[], limits).unwrap(),
-        Value::Number(1.)
-    );
+    assert_eq!(script.call("tick", &[], limits).unwrap(), Value::Number(1.));
     assert_eq!(
         script.call("collect_few", &[], limits).unwrap(),
         Value::Number(1000.)
@@ -699,8 +710,8 @@ fn heap_limit_and_retained_data_limit_are_independent() {
 fn allocation_limit_bounds_cumulative_work_at_a_reproducible_boundary() {
     // Quadratic concatenation from the inventory (section 5): 1000 iterations
     // allocate ~2.5 MB cumulatively for a 1000-byte live result.
-    let program = Program::compile("mut s = ''; for i in range_iter(0,1000) { s = s + 'x' }; s")
-        .unwrap();
+    let program =
+        Program::compile("mut s = ''; for i in range_iter(0,1000) { s = s + 'x' }; s").unwrap();
     let token = CancellationToken::default();
     let steps = 2 * 1000 * 1000 + 1_000_000;
     // Off by default: the run succeeds and reports its cumulative work.
@@ -708,7 +719,10 @@ fn allocation_limit_bounds_cumulative_work_at_a_reproducible_boundary() {
         .instantiate(ExecutionLimits::new(steps), &token, &[], &[], &[], &[])
         .unwrap();
     let allocated = script.allocated_bytes();
-    assert!(allocated >= 1000 * 1000 / 2, "quadratic work visible: {allocated}");
+    assert!(
+        allocated >= 1000 * 1000 / 2,
+        "quadratic work visible: {allocated}"
+    );
     drop(script);
     // The boundary is deterministic: exactly the measured total passes,
     // one byte less fails with the allocation limit error.
@@ -748,8 +762,8 @@ fn allocation_limit_bounds_cumulative_work_at_a_reproducible_boundary() {
 fn allocation_limit_catches_low_peak_high_volume_work_that_heap_limit_misses() {
     // The concatenation loop keeps a small live string and a ~24 KB peak, but
     // its cumulative work is quadratic: only the work budget sees it.
-    let program = Program::compile("mut s = ''; for i in range_iter(0,1000) { s = s + 'x' }; s")
-        .unwrap();
+    let program =
+        Program::compile("mut s = ''; for i in range_iter(0,1000) { s = s + 'x' }; s").unwrap();
     let token = CancellationToken::default();
     let steps = 2 * 1000 * 1000 + 1_000_000;
     let limits = ExecutionLimits {
@@ -796,7 +810,10 @@ fn allocation_limit_coexists_with_retained_budget_and_cancellation() {
     let error = script.call("churn", &[], work).unwrap_err();
     assert_eq!(error.message, "Allocation limit exceeded");
     // The instance remains consistent: a call within the work budget runs.
-    assert_eq!(script.call("churn", &[], steps).unwrap(), Value::Number(1000.));
+    assert_eq!(
+        script.call("churn", &[], steps).unwrap(),
+        Value::Number(1000.)
+    );
     // Cancellation wins on a cancelled token regardless of the work budget.
     let cancelled = CancellationToken::default();
     cancelled.cancel();

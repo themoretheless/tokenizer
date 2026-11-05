@@ -2,7 +2,7 @@ use super::{
     Binding, Closure, Environment, FunctionBody, RecordMap, Result, Runtime, RuntimeError, Value,
     ValueType, memory,
 };
-use crate::{Name, Expr, ExprKind, Stmt, StmtKind};
+use crate::{Expr, ExprKind, Name, Stmt, StmtKind};
 use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
 

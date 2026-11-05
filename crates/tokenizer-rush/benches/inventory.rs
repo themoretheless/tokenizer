@@ -4,7 +4,9 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
-use themoretheless_tokenizer_rush::{CancellationToken, Expr, ExprKind, InterpolationPart, Module, Program, Stmt, StmtKind, Value};
+use themoretheless_tokenizer_rush::{
+    CancellationToken, Expr, ExprKind, InterpolationPart, Module, Program, Stmt, StmtKind, Value,
+};
 
 struct CountingAllocator;
 static LIVE: AtomicUsize = AtomicUsize::new(0);
@@ -66,14 +68,17 @@ fn count_expr(expr: &Expr<'_>, nodes: &mut usize) {
             count_expr(then_value, nodes);
             count_expr(else_value, nodes);
         }
-        ExprKind::Lambda { parameters, body, .. } => {
+        ExprKind::Lambda {
+            parameters, body, ..
+        } => {
             for parameter in parameters {
                 count_expr(parameter, nodes);
             }
             count_expr(body, nodes);
         }
         ExprKind::Unary { value, .. } => count_expr(value, nodes),
-        ExprKind::Binary { left, right, .. } | ExprKind::Assign {
+        ExprKind::Binary { left, right, .. }
+        | ExprKind::Assign {
             target: left,
             value: right,
             ..
@@ -152,11 +157,8 @@ fn count_stmt(stmt: &Stmt<'_>, nodes: &mut usize) {
             }
         }
         StmtKind::Declaration { value, .. } => count_expr(value, nodes),
-        StmtKind::Return(value) => {
-            if let Some(value) = value {
-                count_expr(value, nodes);
-            }
-        }
+        StmtKind::Return(Some(value)) => count_expr(value, nodes),
+        StmtKind::Return(None) => {}
         StmtKind::If {
             condition,
             then_block,
@@ -178,9 +180,7 @@ fn count_stmt(stmt: &Stmt<'_>, nodes: &mut usize) {
                 count_stmt(statement, nodes);
             }
         }
-        StmtKind::For {
-            iterable, body, ..
-        } => {
+        StmtKind::For { iterable, body, .. } => {
             count_expr(iterable, nodes);
             for statement in body.stmts.iter() {
                 count_stmt(statement, nodes);
@@ -208,7 +208,9 @@ fn count_nodes(module: &Module<'_>) -> usize {
 
 fn ast_probe() {
     println!("# AST probe: retained parse output vs source size");
-    println!("file\tsource_bytes\ttokens\tast_nodes\tretained_parse_bytes\tpeak_extra_bytes\tallocation_calls\tretained_per_source_byte\tnodes_per_100_source_bytes");
+    println!(
+        "file\tsource_bytes\ttokens\tast_nodes\tretained_parse_bytes\tpeak_extra_bytes\tallocation_calls\tretained_per_source_byte\tnodes_per_100_source_bytes"
+    );
     let mut generated = String::from("fn f(x) { return x * 2 + 1 }\n");
     for index in 0..2000_usize {
         generated.push_str(&format!(
@@ -242,17 +244,21 @@ fn ast_probe() {
             nodes as f64 * 100.0 / source.len() as f64,
         );
         drop(black_box(parsed));
-        assert_eq!(LIVE.load(Relaxed), baseline, "Parse retained heap after drop");
+        assert_eq!(
+            LIVE.load(Relaxed),
+            baseline,
+            "Parse retained heap after drop"
+        );
     }
 }
 
 fn concat_probe() {
     println!("# String concatenation probe: quadratic transient work, 1000-byte live result");
-    println!("workload\titerations\trun\tpeak_extra_bytes\tcumulative_alloc_bytes\tlive_result_bytes\tallocation_calls");
+    println!(
+        "workload\titerations\trun\tpeak_extra_bytes\tcumulative_alloc_bytes\tlive_result_bytes\tallocation_calls"
+    );
     for items in [100_usize, 1000, 10_000] {
-        let source = format!(
-            "mut s = ''; for i in range_iter(0,{items}) {{ s = s + 'x' }}; s"
-        );
+        let source = format!("mut s = ''; for i in range_iter(0,{items}) {{ s = s + 'x' }}; s");
         let program = Program::compile(&source).unwrap();
         let cancellation = CancellationToken::default();
         for run in 1..=3 {

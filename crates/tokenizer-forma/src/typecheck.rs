@@ -347,15 +347,15 @@ fn root_span(table: &SpanTable, value: &V, range: Option<Span>) -> Option<Span> 
         evaluate::equal(&entry.value, value)
             && range.is_none_or(|span| entry.from >= span.from && entry.to <= span.to)
     });
-    if let Some(range) = range {
-        if let Some(exact) = table.entries.iter().find(|entry| {
+    if let Some(range) = range
+        && let Some(exact) = table.entries.iter().find(|entry| {
             entry.from == range.from && entry.to == range.to && evaluate::equal(&entry.value, value)
-        }) {
-            return Some(Span {
-                from: exact.from,
-                to: exact.to,
-            });
-        }
+        })
+    {
+        return Some(Span {
+            from: exact.from,
+            to: exact.to,
+        });
     }
     let best = candidates.max_by_key(|entry| entry.to - entry.from)?;
     Some(Span {
@@ -593,10 +593,10 @@ impl<'a> Analyzer<'a> {
         let mut parts = raw.split('.');
         let head = parts.next().unwrap_or("");
         let tail = parts.collect::<Vec<_>>();
-        if tail.is_empty() {
-            if let Some(ty) = self.locals.get(head) {
-                return ty.clone();
-            }
+        if tail.is_empty()
+            && let Some(ty) = self.locals.get(head)
+        {
+            return ty.clone();
         }
         match head {
             "props" => {
@@ -650,12 +650,13 @@ impl<'a> Analyzer<'a> {
                 _ => Ty::Unknown,
             },
             _ => {
-                if tail.len() == 1 && self.doc["enums"].get(head).is_some() {
-                    if self.doc["enums"][head].as_array().is_some_and(|variants| {
+                if tail.len() == 1
+                    && self.doc["enums"].get(head).is_some()
+                    && self.doc["enums"][head].as_array().is_some_and(|variants| {
                         variants.iter().any(|v| v.as_str() == Some(tail[0]))
-                    }) {
-                        return Ty::Named(head.into());
-                    }
+                    })
+                {
+                    return Ty::Named(head.into());
                 }
                 if let Some(ty) = self.locals.get(head) {
                     return self.member_path(ty.clone(), &tail);
@@ -1093,110 +1094,110 @@ impl<'a> Analyzer<'a> {
                 Ty::Angle,
             ])
         };
-        let result = (|| match name {
+        let result = match name {
             "String" => {
                 if let Some(actual) = args.first()
                     && !self.is_scalar(actual)
                 {
                     requirements.push(expected(0, scalar()));
                 }
-                return Ty::String;
+                Ty::String
             }
             "Number" => {
                 requirements.push(expected(0, union([Ty::Number, Ty::String])));
-                return Ty::Number;
+                Ty::Number
             }
             "Bool" => {
                 requirements.push(expected(0, Ty::Bool));
-                return Ty::Bool;
+                Ty::Bool
             }
             "len" => {
                 requirements.push(expected(0, union([Ty::String, list_any(), object()])));
-                return Ty::Int;
+                Ty::Int
             }
-            "isEmpty" => return Ty::Bool,
+            "isEmpty" => Ty::Bool,
             "count" => {
                 requirements.push(expected(0, list_any()));
-                return Ty::Int;
+                Ty::Int
             }
             "any" | "all" => {
                 requirements.push(expected(0, Ty::List(Box::new(Ty::Bool))));
-                return Ty::Bool;
+                Ty::Bool
             }
             "pluck" | "groupBy" => {
                 requirements.extend([expected(0, list_any()), expected(1, Ty::String)]);
-                return list_any();
+                list_any()
             }
             "sortBy" | "unique" => {
                 requirements.push(expected(0, list_any()));
                 if args.len() > 1 {
                     requirements.push(expected(1, Ty::String));
                 }
-                return args.first().cloned().unwrap_or(Ty::Unknown);
+                args.first().cloned().unwrap_or(Ty::Unknown)
             }
             "alpha" | "lighten" | "darken" | "saturate" | "desaturate" => {
                 requirements.extend([expected(0, Ty::Color), expected(1, Ty::Number)]);
-                return Ty::Color;
+                Ty::Color
             }
             "invert" => {
                 requirements.push(expected(0, Ty::Color));
-                return Ty::Color;
+                Ty::Color
             }
             "contrast" => {
                 requirements.extend([expected(0, Ty::Color), expected(1, Ty::Color)]);
-                return Ty::Number;
+                Ty::Number
             }
             "mix" => {
                 requirements.extend([expected(0, Ty::Color), expected(1, Ty::Color)]);
                 if args.len() > 2 {
                     requirements.push(expected(2, Ty::Number));
                 }
-                return Ty::Color;
+                Ty::Color
             }
             "min" | "max" => {
                 for index in 0..args.len() {
                     requirements.push(expected(index, Ty::Number));
                 }
-                return Ty::Number;
+                Ty::Number
             }
             "clamp" | "lerp" => {
                 for index in 0..3 {
                     requirements.push(expected(index, Ty::Number));
                 }
-                return Ty::Number;
+                Ty::Number
             }
             "remap" => {
                 for index in 0..5 {
                     requirements.push(expected(index, Ty::Number));
                 }
-                return Ty::Number;
+                Ty::Number
             }
             "pow" => {
                 requirements.extend([expected(0, Ty::Number), expected(1, Ty::Number)]);
-                return Ty::Number;
+                Ty::Number
             }
             "sqrt" | "sign" | "abs" | "round" | "floor" | "ceil" => {
                 requirements.push(expected(0, Ty::Number));
-                return Ty::Number;
+                Ty::Number
             }
             "avg" | "sum" => {
                 requirements.push(expected(0, Ty::List(Box::new(Ty::Number))));
-                return Ty::Number;
+                Ty::Number
             }
             "trim" | "upper" | "lower" | "capitalize" => {
                 requirements.push(expected(0, Ty::String));
-                return Ty::String;
+                Ty::String
             }
             "padStart" | "padEnd" | "truncate" => {
                 requirements.extend([expected(0, Ty::String), expected(1, Ty::Number)]);
                 if args.len() > 2 {
                     requirements.push(expected(2, Ty::String));
                 }
-                return Ty::String;
+                Ty::String
             }
             "repeat" => {
                 requirements.extend([expected(0, Ty::String), expected(1, Ty::Number)]);
-                return Ty::String;
+                Ty::String
             }
             "contains" | "includes" | "indexOf" => {
                 if let Some(actual) = args.first() {
@@ -1206,21 +1207,21 @@ impl<'a> Analyzer<'a> {
                         requirements.push(expected(0, union([Ty::String, list_any()])));
                     }
                 }
-                return if name == "indexOf" { Ty::Int } else { Ty::Bool };
+                if name == "indexOf" { Ty::Int } else { Ty::Bool }
             }
             "startsWith" | "endsWith" | "split" => {
                 requirements.extend([expected(0, Ty::String), expected(1, Ty::String)]);
-                return if name == "split" {
+                if name == "split" {
                     Ty::List(Box::new(Ty::String))
                 } else {
                     Ty::Bool
-                };
+                }
             }
             "replace" => {
                 for index in 0..3 {
                     requirements.push(expected(index, Ty::String));
                 }
-                return Ty::String;
+                Ty::String
             }
             "slice" => {
                 requirements.push(expected(0, union([Ty::String, list_any()])));
@@ -1228,104 +1229,104 @@ impl<'a> Analyzer<'a> {
                 if args.len() > 2 {
                     requirements.push(expected(2, Ty::Number));
                 }
-                return args.first().cloned().unwrap_or(Ty::Unknown);
+                args.first().cloned().unwrap_or(Ty::Unknown)
             }
             "join" => {
                 requirements.push(expected(0, list_any()));
                 if args.len() > 1 {
                     requirements.push(expected(1, Ty::String));
                 }
-                return Ty::String;
+                Ty::String
             }
             "reverse" => {
                 requirements.push(expected(0, union([Ty::String, list_any()])));
-                return args.first().cloned().unwrap_or(Ty::Unknown);
+                args.first().cloned().unwrap_or(Ty::Unknown)
             }
             "take" | "skip" => {
                 requirements.extend([expected(0, list_any()), expected(1, Ty::Number)]);
-                return args.first().cloned().unwrap_or(Ty::Unknown);
+                args.first().cloned().unwrap_or(Ty::Unknown)
             }
             "range" => {
                 requirements.extend([expected(0, Ty::Number), expected(1, Ty::Number)]);
-                return Ty::List(Box::new(Ty::Number));
+                Ty::List(Box::new(Ty::Number))
             }
             "formatNumber" => {
                 requirements.push(expected(0, Ty::Number));
                 if args.len() > 1 {
                     requirements.push(expected(1, Ty::Number));
                 }
-                return Ty::String;
+                Ty::String
             }
             "find" => {
                 requirements.extend([expected(0, list_any()), expected(1, Ty::String)]);
-                return match args.first() {
+                match args.first() {
                     Some(Ty::List(item)) => union([(**item).clone(), Ty::Null]),
                     _ => Ty::Unknown,
-                };
+                }
             }
             "compact" | "flatten" => {
                 requirements.push(expected(0, list_any()));
-                return list_any();
+                list_any()
             }
             "chunk" => {
                 requirements.extend([expected(0, list_any()), expected(1, Ty::Number)]);
-                return match args.first() {
+                match args.first() {
                     Some(Ty::List(item)) => Ty::List(Box::new(Ty::List(item.clone()))),
                     _ => Ty::Unknown,
-                };
+                }
             }
             "zip" => {
                 requirements.extend([expected(0, list_any()), expected(1, list_any())]);
-                return list_any();
+                list_any()
             }
             "first" | "last" => {
                 requirements.push(expected(0, list_any()));
-                return match args.first() {
+                match args.first() {
                     Some(Ty::List(item)) => union([(**item).clone(), Ty::Null]),
                     _ => Ty::Unknown,
-                };
+                }
             }
             "keys" => {
                 requirements.push(expected(0, object()));
-                return Ty::List(Box::new(Ty::String));
+                Ty::List(Box::new(Ty::String))
             }
             "values" => {
                 requirements.push(expected(0, object()));
-                return match args.first() {
+                match args.first() {
                     Some(Ty::Map(item) | Ty::Record(item)) => Ty::List(item.clone()),
                     _ => list_any(),
-                };
+                }
             }
             "entries" => {
                 requirements.push(expected(0, object()));
-                return list_any();
+                list_any()
             }
             "fromEntries" => {
                 requirements.push(expected(0, list_any()));
-                return Ty::Record(Box::new(Ty::Unknown));
+                Ty::Record(Box::new(Ty::Unknown))
             }
             "merge" => {
                 for index in 0..args.len() {
                     requirements.push(expected(index, object()));
                 }
-                return Ty::Record(Box::new(Ty::Unknown));
+                Ty::Record(Box::new(Ty::Unknown))
             }
             "pick" | "omit" => {
                 requirements.extend([
                     expected(0, object()),
                     expected(1, Ty::List(Box::new(Ty::String))),
                 ]);
-                return Ty::Record(Box::new(Ty::Unknown));
+                Ty::Record(Box::new(Ty::Unknown))
             }
-            "coalesce" => return union(args.iter().cloned().map(non_null)),
+            "coalesce" => union(args.iter().cloned().map(non_null)),
             "plural" => {
                 requirements.push(expected(0, Ty::Number));
-                for index in 1..args.len() {
-                    if !self.is_scalar(&args[index]) {
+                for (index, arg) in args.iter().enumerate().skip(1) {
+                    if !self.is_scalar(arg) {
                         requirements.push(expected(index, scalar()));
                     }
                 }
-                return Ty::String;
+                Ty::String
             }
             "isValid" => {
                 if args.len() == 2 {
@@ -1333,10 +1334,10 @@ impl<'a> Analyzer<'a> {
                 } else {
                     requirements.extend([expected(1, Ty::Number), expected(2, Ty::Number)]);
                 }
-                return Ty::Bool;
+                Ty::Bool
             }
-            _ => return Ty::Unknown,
-        })();
+            _ => Ty::Unknown,
+        };
         for (index, expected) in requirements.into_iter().flatten() {
             if let Some(actual) = args.get(index) {
                 self.check(
@@ -1351,13 +1352,12 @@ impl<'a> Analyzer<'a> {
         result
     }
     fn property_type(&self, node: &str, name: &str) -> Option<Ty> {
-        if node == self.doc["name"].as_str().unwrap_or("") {
-            if let Some(ty) = self.doc["propDefinitions"]
+        if node == self.doc["name"].as_str().unwrap_or("")
+            && let Some(ty) = self.doc["propDefinitions"]
                 .get(name)
                 .and_then(|d| d["type"].as_str())
-            {
-                return Some(parse_type(ty));
-            }
+        {
+            return Some(parse_type(ty));
         }
         self.context.property_type(node, name).map(parse_type)
     }

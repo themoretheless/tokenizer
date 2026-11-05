@@ -49,7 +49,10 @@ fn main() {
         .unwrap_or(usize::MAX);
     let allocated_bytes = std::env::var("RUSH_BENCH_ALLOCATED_BYTES")
         .ok()
-        .map(|s| s.parse::<usize>().expect("integer RUSH_BENCH_ALLOCATED_BYTES"))
+        .map(|s| {
+            s.parse::<usize>()
+                .expect("integer RUSH_BENCH_ALLOCATED_BYTES")
+        })
         .unwrap_or(usize::MAX);
     if let Some(operation) = &operation {
         assert!(
