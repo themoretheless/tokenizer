@@ -1981,8 +1981,26 @@ pub fn parse_with_options(source: &str, fragment: bool) -> R<V> {
 pub(crate) fn parse_with_span_table(source: &str) -> R<(V, SpanTable)> {
     let mut parser = Parser::new_spanned(source, 0)?;
     let document = parser.document(false)?;
-    let entries = parser.spans.take().unwrap_or_default();
+    let mut entries = parser.spans.take().unwrap_or_default();
+    entries.sort_by_key(|e| (e.from, e.to));
     Ok((document, SpanTable { entries }))
+}
+fn parse_for_lint(source: &str) -> R<(V, SpanTable, Vec<DictDecl>)> {
+    let mut parser = Parser::new_spanned(source, 0)?;
+    let document = parser.document(false)?;
+    let has_body = !document["designBody"].is_null()
+        || nonempty(&document["nodes"])
+        || nonempty(&document["defaults"])
+        || nonempty(&document["propDefinitions"])
+        || nonempty(&document["stateDefinitions"]);
+    let dict_decls = if has_body {
+        dict_declarations_from_tokens(&parser.tokens)
+    } else {
+        Vec::new()
+    };
+    let mut entries = parser.spans.take().unwrap_or_default();
+    entries.sort_by_key(|e| (e.from, e.to));
+    Ok((document, SpanTable { entries }, dict_decls))
 }
 pub fn parse_expression(source: &str) -> R<V> {
     let mut p = Parser::new(source)?;
@@ -2094,6 +2112,17 @@ fn parse_string(s: &str, string_base: usize, spans: &mut Option<Vec<ExpressionSp
     Ok(json!({"interpolation":parts}))
 }
 fn unit_literal(s: &str) -> bool {
+    if !s
+        .as_bytes()
+        .last()
+        .is_some_and(|b| *b == b'%' || b.is_ascii_alphabetic())
+        || !s
+            .as_bytes()
+            .first()
+            .is_some_and(|b| b.is_ascii_digit() || matches!(*b, b'-' | b'+' | b'.'))
+    {
+        return false;
+    }
     [
         "turn", "rem", "deg", "rad", "px", "ms", "em", "vw", "vh", "ch", "fr", "s", "%",
     ]
@@ -2103,33 +2132,63 @@ fn unit_literal(s: &str) -> bool {
             .is_some_and(|v| v.parse::<f64>().is_ok())
     })
 }
+fn push_escaped(out: &mut String, s: &str) {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut start = 0;
+    while i < bytes.len() {
+        let esc = match bytes[i] {
+            b'\\' => Some("\\\\"),
+            b'\'' => Some("\\'"),
+            b'\n' => Some("\\n"),
+            b'\r' => Some("\\r"),
+            b'\t' => Some("\\t"),
+            b'$' if bytes.get(i + 1) == Some(&b'{') => {
+                out.push_str(&s[start..i]);
+                out.push_str("\\${");
+                i += 2;
+                start = i;
+                continue;
+            }
+            _ => None,
+        };
+        if let Some(rep) = esc {
+            out.push_str(&s[start..i]);
+            out.push_str(rep);
+            i += 1;
+            start = i;
+        } else {
+            i += 1;
+        }
+    }
+    if start < s.len() {
+        out.push_str(&s[start..]);
+    }
+}
 fn quote(s: &str) -> String {
-    format!(
-        "'{}'",
-        s.replace('\\', "\\\\")
-            .replace('\'', "\\'")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('\t', "\\t")
-            .replace("${", "\\${")
-    )
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    push_escaped(&mut out, s);
+    out.push('\'');
+    out
 }
 pub fn serialize_value(v: &V) -> String {
     if let Some(s) = v["expr"].as_str() {
         return s.into();
     }
     if let Some(a) = v["interpolation"].as_array() {
-        return format!(
-            "'{}'",
-            a.iter()
-                .map(|v| if let Some(s) = v.as_str() {
-                    let q = quote(s);
-                    q[1..q.len() - 1].into()
-                } else {
-                    format!("${{{}}}", serialize_value(v))
-                })
-                .collect::<String>()
-        );
+        let mut out = String::from("'");
+        for item in a {
+            if let Some(s) = item.as_str() {
+                push_escaped(&mut out, s);
+            } else {
+                out.push_str("${");
+                out.push_str(&serialize_value(item));
+                out.push('}');
+            }
+        }
+        out.push('\'');
+        return out;
     }
     let e = &v["expression"];
     if let Some(k) = e["kind"].as_str() {
@@ -2477,8 +2536,7 @@ struct DictDecl {
     start: usize,
     end: usize,
 }
-fn dict_declarations(source: &str) -> R<Vec<DictDecl>> {
-    let (tokens, _, _) = tokenize_borrowed(source)?;
+fn dict_declarations_from_tokens(tokens: &[BorrowedToken<'_>]) -> Vec<DictDecl> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
@@ -2541,7 +2599,7 @@ fn dict_declarations(source: &str) -> R<Vec<DictDecl>> {
         }
         i += 1;
     }
-    Ok(out)
+    out
 }
 /// Does the `tokens.`/`i18n.` reference tail `r` keep the declared key `k`
 /// alive? Covers exact full paths (`tokens.color.brand`), group heads
@@ -2559,7 +2617,7 @@ pub fn lint_document(source: &str) -> R<V> {
     lint_document_with_context(source, &crate::typecheck::TypeContext::default())
 }
 pub fn lint_document_with_context(source: &str, context: &crate::typecheck::TypeContext) -> R<V> {
-    let (doc, expression_spans) = parse_with_span_table(source)?;
+    let (doc, expression_spans, dict_decls) = parse_for_lint(source)?;
     let mut warnings = Vec::new();
     let mut usage = Usage::default();
 
@@ -2683,40 +2741,33 @@ pub fn lint_document_with_context(source: &str, context: &crate::typecheck::Type
 
     // Dead token/i18n keys. Keys of a shared module file (no component or
     // design body) are its public API, so the lints only fire with a body.
-    let has_body = !doc["designBody"].is_null()
-        || nonempty(&doc["nodes"])
-        || nonempty(&doc["defaults"])
-        || nonempty(&doc["propDefinitions"])
-        || nonempty(&doc["stateDefinitions"]);
-    if has_body {
-        for decl in dict_declarations(source)? {
-            let used = if decl.i18n {
-                &usage.i18n
-            } else {
-                &usage.tokens
-            };
-            if used.iter().any(|r| dict_key_used(r, &decl.key)) {
-                continue;
-            }
-            let (code, message) = if decl.i18n {
-                (
-                    "unused-i18n-key",
-                    format!("Неиспользуемый ключ i18n {}", decl.key),
-                )
-            } else {
-                (
-                    "unused-token",
-                    format!("Неиспользуемый токен tokens {}", decl.key),
-                )
-            };
-            warnings.push(json!({
-                "code": code,
-                "name": decl.key,
-                "from": decl.start,
-                "to": decl.end,
-                "message": message
-            }));
+    for decl in dict_decls {
+        let used = if decl.i18n {
+            &usage.i18n
+        } else {
+            &usage.tokens
+        };
+        if used.iter().any(|r| dict_key_used(r, &decl.key)) {
+            continue;
         }
+        let (code, message) = if decl.i18n {
+            (
+                "unused-i18n-key",
+                format!("Неиспользуемый ключ i18n {}", decl.key),
+            )
+        } else {
+            (
+                "unused-token",
+                format!("Неиспользуемый токен tokens {}", decl.key),
+            )
+        };
+        warnings.push(json!({
+            "code": code,
+            "name": decl.key,
+            "from": decl.start,
+            "to": decl.end,
+            "message": message
+        }));
     }
 
     if let Some(shortcuts) = doc["shortcuts"].as_array() {

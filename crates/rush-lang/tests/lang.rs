@@ -612,3 +612,64 @@ fn loop_variable_compares_in_condition() {
     interp.finish().unwrap();
     assert_eq!(interp.get("hit"), Some("yes"));
 }
+
+#[test]
+fn for_loop_after_foreach_rows_resets_rows_mode() {
+    let mut interp = Interpreter::new();
+    interp.step("foreach f in ls:").unwrap();
+    interp.step("    seen = $f.name").unwrap();
+    interp.end_input().unwrap();
+    interp.provide_source_rows("name=first.txt\n").unwrap();
+    while interp.busy() {
+        interp.step("").unwrap();
+    }
+    assert_eq!(interp.get("seen"), Some("first.txt"));
+
+    // Subsequent `for` reuses pending[0] and must split words, not rows.
+    let mut words = Vec::new();
+    for line in ["for x in a b c:", "    cur = $x", "    echo $x"] {
+        interp.step(line).unwrap();
+    }
+    interp.end_input().unwrap();
+    while interp.busy() {
+        if let Step::Run(_) = interp.step("").unwrap() {
+            words.push(interp.get("cur").unwrap_or("").to_string());
+            interp.note_status(true);
+        }
+    }
+    interp.finish().unwrap();
+    assert_eq!(words, vec!["a", "b", "c"]);
+}
+
+#[test]
+fn foreach_sparse_rows_clear_missing_fields_and_preserve_suffix_fallback() {
+    let mut interp = Interpreter::new();
+    for line in [
+        "foreach f in ls:",
+        "    if $f.target:",
+        "        last_link = $f.target",
+        "    else:",
+        "        last_plain = $f.bak",
+    ] {
+        interp.step(line).unwrap();
+    }
+    interp.end_input().unwrap();
+    interp
+        .provide_source_rows("name=a.lnk target=/etc/hosts\nname=b.txt\n")
+        .unwrap();
+    while interp.busy() {
+        interp.step("").unwrap();
+    }
+    interp.finish().unwrap();
+    assert_eq!(interp.get("last_link"), Some("/etc/hosts"));
+    assert_eq!(interp.get("last_plain"), Some("b.txt.bak"));
+    assert_eq!(interp.get("f.target"), Some(""));
+}
+
+#[test]
+fn condition_expands_dotted_suffix_and_composite_operands() {
+    let executed = ok(
+        "if $USER.txt = admin.txt:\n    echo dotted-ok\nfor n in one two:\n    if pre-$n = pre-two:\n        echo comp-ok\n",
+    );
+    assert_eq!(executed, vec!["echo dotted-ok", "echo comp-ok"]);
+}

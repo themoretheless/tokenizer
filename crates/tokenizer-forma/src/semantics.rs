@@ -46,7 +46,18 @@ pub fn evaluate_value(
             "Превышен предел вложенности",
         ));
     }
-    if value.get("type").is_some() {
+    let o = match value {
+        V::Null | V::Bool(_) | V::Number(_) | V::String(_) => return Ok(value.clone()),
+        V::Array(a) => {
+            return Ok(V::Array(
+                a.iter()
+                    .map(|v| evaluate_value(v, props, state, stack, expand, env))
+                    .collect::<R<_>>()?,
+            ));
+        }
+        V::Object(o) => o,
+    };
+    if o.contains_key("type") {
         if !expand {
             return Ok(value.clone());
         }
@@ -62,10 +73,13 @@ pub fn evaluate_value(
         );
         return Ok(out);
     }
-    if let Some(subject) = value.get("match") {
+    if o.len() != 1
+        && let Some(subject) = o.get("match")
+    {
         let actual = evaluate_value(subject, props, state, stack, expand, env)?;
-        for b in value["branches"]
-            .as_array()
+        for b in o
+            .get("branches")
+            .and_then(V::as_array)
             .ok_or_else(|| Diagnostic::new("invalid-match", "Некорректные ветки match"))?
         {
             if pattern(&b["pattern"], &actual, props, state, env)? {
@@ -83,18 +97,14 @@ pub fn evaluate_value(
             "match: нет подходящей ветки; добавьте _ => …",
         ));
     }
-    if let Some(a) = value.as_array() {
-        return Ok(V::Array(
-            a.iter()
-                .map(|v| evaluate_value(v, props, state, stack, expand, env))
-                .collect::<R<_>>()?,
-        ));
-    }
-    if let Some(o) = value.as_object()
-        && !own(value, "expr")
-        && !own(value, "expression")
-        && !own(value, "interpolation")
-    {
+    let is_ast_leaf = if o.len() == 1 {
+        o.keys()
+            .next()
+            .is_some_and(|k| matches!(k.as_str(), "expr" | "expression" | "interpolation"))
+    } else {
+        o.contains_key("expr") || o.contains_key("expression") || o.contains_key("interpolation")
+    };
+    if !is_ast_leaf {
         let mut out = serde_json::Map::with_capacity(o.len());
         for (k, v) in o {
             out.insert(
@@ -878,21 +888,18 @@ where
                         } else {
                             key.to_string()
                         };
-                        if !keys.insert(identity.clone()) {
+                        if keys.contains(&identity) {
                             return Err(Diagnostic::new(
                                 "duplicate-key",
                                 format!("Повторный ключ for: {identity}"),
                             )
                             .or_span(span));
                         }
+                        let step_prefix = format!("{prefix}@{node_start}:{identity}/");
+                        keys.insert(identity);
                         out.extend(
-                            self.walk(
-                                &node["children"],
-                                &local,
-                                &format!("{prefix}@{node_start}:{identity}/"),
-                                depth + 1,
-                            )
-                            .map_err(|e: Diagnostic| e.or_span(span))?,
+                            self.walk(&node["children"], &local, &step_prefix, depth + 1)
+                                .map_err(|e: Diagnostic| e.or_span(span))?,
                         )
                     }
                     if !matched_any {
