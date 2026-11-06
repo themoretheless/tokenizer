@@ -615,10 +615,7 @@ impl<'s> Runtime<'_, 's> {
                     // is emptied in place, so holders observe `null` exactly
                     // like after a move(). Scratch arenas have no parked
                     // frame, so reset on them is a no-op.
-                    if let Some(index) = self
-                        .persistent_regions
-                        .iter()
-                        .position(|(n, _)| n == name)
+                    if let Some(index) = self.persistent_regions.iter().position(|(n, _)| n == name)
                     {
                         let (_, frame) = self.persistent_regions.swap_remove(index);
                         for cell in frame.cells {
@@ -651,20 +648,17 @@ impl<'s> Runtime<'_, 's> {
                     // Persistent arena: reuse the parked frame (stable region
                     // id) or mint one. Survivors keep the arena's stamp across
                     // runs instead of promoting to the caller.
-                    let mut frame = match self
-                        .persistent_regions
-                        .iter()
-                        .position(|(n, _)| n == name)
-                    {
-                        Some(index) => {
-                            let frame = self.persistent_regions.swap_remove(index).1;
-                            // Minting counts one entry; a reused frame must
-                            // count each rerun explicitly.
-                            self.region_stats[frame.stats].entries += 1;
-                            frame
-                        }
-                        None => self.mint_region_frame(budget, Some(name)),
-                    };
+                    let mut frame =
+                        match self.persistent_regions.iter().position(|(n, _)| n == name) {
+                            Some(index) => {
+                                let frame = self.persistent_regions.swap_remove(index).1;
+                                // Minting counts one entry; a reused frame must
+                                // count each rerun explicitly.
+                                self.region_stats[frame.stats].entries += 1;
+                                frame
+                            }
+                            None => self.mint_region_frame(budget, Some(name)),
+                        };
                     frame.budget = budget;
                     let region = frame.id;
                     self.region_stack.push(frame);
@@ -681,8 +675,7 @@ impl<'s> Runtime<'_, 's> {
                             && self.cell_ids[index].upgrade().is_some()
                     });
                     frame.live = frame.cells.len();
-                    let overflow =
-                        frame.budget.is_some_and(|budget| frame.live > budget);
+                    let overflow = frame.budget.is_some_and(|budget| frame.live > budget);
                     self.persistent_regions.push((name.clone(), frame));
                     if overflow {
                         return self.error(span, "Region cell budget exceeded");
