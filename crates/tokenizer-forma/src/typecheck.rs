@@ -175,26 +175,37 @@ impl Ty {
         !matches!(self, Self::Unknown | Self::Any)
     }
 }
+fn push_unique(out: &mut Vec<Ty>, ty: Ty) {
+    if !out.contains(&ty) {
+        out.push(ty);
+    }
+}
 fn union(types: impl IntoIterator<Item = Ty>) -> Ty {
     let mut out = Vec::new();
     for ty in types {
         if ty == Ty::Unknown {
             return Ty::Unknown;
         }
-        let alternatives = match ty {
-            Ty::Union(ts) => ts,
-            other => vec![other],
-        };
-        for ty in alternatives {
-            if !out.contains(&ty) {
-                out.push(ty);
+        match ty {
+            Ty::Union(ts) => {
+                for t in ts {
+                    push_unique(&mut out, t);
+                }
             }
+            other => push_unique(&mut out, other),
         }
     }
     match out.len() {
         0 => Ty::Unknown,
         1 => out.pop().unwrap(),
         _ => Ty::Union(out),
+    }
+}
+fn unwrap_list_once(ty: &Ty) -> Ty {
+    match ty {
+        Ty::List(inner) => (**inner).clone(),
+        Ty::Union(items) => union(items.iter().map(unwrap_list_once)),
+        other => other.clone(),
     }
 }
 fn non_null(ty: Ty) -> Ty {
@@ -224,6 +235,23 @@ fn split_top_level(s: &str, separator: char) -> Vec<&str> {
 }
 fn parse_type(raw: &str) -> Ty {
     let raw = raw.trim();
+    match raw {
+        "Unknown" | "" => return Ty::Unknown,
+        "Any" => return Ty::Any,
+        "Bool" | "Boolean" => return Ty::Bool,
+        "Number" | "Float" => return Ty::Number,
+        "Int" => return Ty::Int,
+        "String" | "Asset" => return Ty::String,
+        "Color" => return Ty::Color,
+        "Length" => return Ty::Length,
+        "Duration" => return Ty::Duration,
+        "Angle" => return Ty::Angle,
+        "List" => return Ty::List(Box::new(Ty::Any)),
+        "Map" => return Ty::Map(Box::new(Ty::Any)),
+        "Object" => return Ty::Object,
+        _ if !raw.contains(['|', '?', '<']) => return Ty::Named(raw.into()),
+        _ => {}
+    }
     let alternatives = split_top_level(raw, '|');
     if alternatives.len() > 1 {
         return union(alternatives.into_iter().map(parse_type));
@@ -246,22 +274,7 @@ fn parse_type(raw: &str) -> Ty {
         }
         return Ty::Unknown;
     }
-    match raw {
-        "Unknown" | "" => Ty::Unknown,
-        "Any" => Ty::Any,
-        "Bool" | "Boolean" => Ty::Bool,
-        "Number" | "Float" => Ty::Number,
-        "Int" => Ty::Int,
-        "String" | "Asset" => Ty::String,
-        "Color" => Ty::Color,
-        "Length" => Ty::Length,
-        "Duration" => Ty::Duration,
-        "Angle" => Ty::Angle,
-        "List" => Ty::List(Box::new(Ty::Any)),
-        "Map" => Ty::Map(Box::new(Ty::Any)),
-        "Object" => Ty::Object,
-        name => Ty::Named(name.into()),
-    }
+    Ty::Named(raw.into())
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Compatible {
@@ -343,25 +356,48 @@ fn node_range(value: &V) -> Option<Span> {
     })
 }
 fn root_span(table: &SpanTable, value: &V, range: Option<Span>) -> Option<Span> {
-    let candidates = table.entries.iter().filter(|entry| {
-        evaluate::equal(&entry.value, value)
-            && range.is_none_or(|span| entry.from >= span.from && entry.to <= span.to)
-    });
-    if let Some(range) = range
-        && let Some(exact) = table.entries.iter().find(|entry| {
-            entry.from == range.from && entry.to == range.to && evaluate::equal(&entry.value, value)
-        })
-    {
-        return Some(Span {
-            from: exact.from,
-            to: exact.to,
-        });
+    if let Some(range) = range {
+        let start = table.entries.partition_point(|e| e.from < range.from);
+        let mut best: Option<Span> = None;
+        for entry in &table.entries[start..] {
+            if entry.from > range.to {
+                break;
+            }
+            if entry.to > range.to {
+                continue;
+            }
+            let len = entry.to - entry.from;
+            let is_exact = entry.from == range.from && entry.to == range.to;
+            if !is_exact && best.is_some_and(|b| len < b.to - b.from) {
+                continue;
+            }
+            if evaluate::equal(&entry.value, value) {
+                let candidate = Span {
+                    from: entry.from,
+                    to: entry.to,
+                };
+                if is_exact {
+                    return Some(candidate);
+                }
+                best = Some(candidate);
+            }
+        }
+        return best;
     }
-    let best = candidates.max_by_key(|entry| entry.to - entry.from)?;
-    Some(Span {
-        from: best.from,
-        to: best.to,
-    })
+    let mut best: Option<Span> = None;
+    for entry in &table.entries {
+        let len = entry.to - entry.from;
+        if best.is_some_and(|b| len < b.to - b.from) {
+            continue;
+        }
+        if evaluate::equal(&entry.value, value) {
+            best = Some(Span {
+                from: entry.from,
+                to: entry.to,
+            });
+        }
+    }
+    best
 }
 fn child_span(table: &SpanTable, value: &V, parent: Option<Span>) -> Option<Span> {
     child_span_after(table, value, parent, None)
@@ -373,20 +409,36 @@ fn child_span_after(
     after: Option<Span>,
 ) -> Option<Span> {
     let parent = parent?;
-    table
-        .entries
-        .iter()
-        .filter(|entry| {
-            evaluate::equal(&entry.value, value)
-                && entry.from >= parent.from
-                && entry.to <= parent.to
-                && after.is_none_or(|span| entry.from > span.from)
-        })
-        .min_by_key(|entry| (entry.to - entry.from, entry.from))
-        .map(|entry| Span {
-            from: entry.from,
-            to: entry.to,
-        })
+    let min_from = after
+        .map_or(parent.from, |span| span.from.saturating_add(1))
+        .max(parent.from);
+    if min_from > parent.to {
+        return None;
+    }
+    let start = table.entries.partition_point(|e| e.from < min_from);
+    let mut best: Option<((usize, usize), Span)> = None;
+    for entry in &table.entries[start..] {
+        if entry.from > parent.to {
+            break;
+        }
+        if entry.to > parent.to {
+            continue;
+        }
+        let key = (entry.to - entry.from, entry.from);
+        if best.is_some_and(|(bk, _)| key >= bk) {
+            continue;
+        }
+        if evaluate::equal(&entry.value, value) {
+            best = Some((
+                key,
+                Span {
+                    from: entry.from,
+                    to: entry.to,
+                },
+            ));
+        }
+    }
+    best.map(|(_, span)| span)
 }
 
 #[derive(Debug)]
@@ -406,7 +458,74 @@ struct Analyzer<'a> {
     let_cache: HashMap<String, Ty>,
     dictionary_cache: HashMap<String, Ty>,
     visiting: HashSet<String>,
-    expected: Vec<Ty>,
+    expected: Option<Ty>,
+}
+fn contextual_list_element(expected: Option<&Ty>) -> Option<Ty> {
+    match expected? {
+        Ty::List(elem) => Some((**elem).clone()),
+        Ty::Union(ts) => {
+            let mut found = None;
+            for t in ts {
+                if *t == Ty::Null {
+                    continue;
+                }
+                if let Ty::List(elem) = t
+                    && found.is_none()
+                {
+                    found = Some((**elem).clone());
+                } else {
+                    return None;
+                }
+            }
+            found
+        }
+        _ => None,
+    }
+}
+fn contextual_record_value(expected: Option<&Ty>) -> Option<Ty> {
+    match expected? {
+        Ty::Map(v) | Ty::Record(v) => Some((**v).clone()),
+        Ty::Union(ts) => {
+            let mut found = None;
+            for t in ts {
+                if *t == Ty::Null {
+                    continue;
+                }
+                if let Ty::Map(v) | Ty::Record(v) = t
+                    && found.is_none()
+                {
+                    found = Some((**v).clone());
+                } else {
+                    return None;
+                }
+            }
+            found
+        }
+        _ => None,
+    }
+}
+fn contextual_struct_name<'a>(doc: &'a V, expected: Option<&'a Ty>) -> Option<&'a str> {
+    match expected? {
+        Ty::Named(name) if doc["structs"].get(name.as_str()).is_some() => Some(name.as_str()),
+        Ty::Union(ts) => {
+            let mut found = None;
+            for t in ts {
+                if *t == Ty::Null {
+                    continue;
+                }
+                if let Ty::Named(name) = t
+                    && doc["structs"].get(name.as_str()).is_some()
+                    && found.is_none()
+                {
+                    found = Some(name.as_str());
+                } else {
+                    return None;
+                }
+            }
+            found
+        }
+        _ => None,
+    }
 }
 impl<'a> Analyzer<'a> {
     fn new(doc: &'a V, spans: &'a SpanTable, context: &'a TypeContext) -> Self {
@@ -421,7 +540,7 @@ impl<'a> Analyzer<'a> {
             let_cache: HashMap::new(),
             dictionary_cache: HashMap::new(),
             visiting: HashSet::new(),
-            expected: Vec::new(),
+            expected: None,
         }
     }
     fn emit(
@@ -450,10 +569,11 @@ impl<'a> Analyzer<'a> {
         expected: &Ty,
         code: &str,
         span: Option<Span>,
-        context: &str,
+        context: std::fmt::Arguments<'_>,
     ) -> bool {
         if compatible(actual, expected) == Compatible::No {
-            self.emit(code, expected.display(), actual.display(), span, context);
+            let ctx = context.to_string();
+            self.emit(code, expected.display(), actual.display(), span, &ctx);
             false
         } else {
             true
@@ -467,9 +587,9 @@ impl<'a> Analyzer<'a> {
         self.infer(value, span)
     }
     fn infer_expected(&mut self, value: &V, expected: Ty, range: Option<Span>) -> Ty {
-        self.expected.push(expected);
+        let prev = self.expected.replace(expected);
         let ty = self.infer_root(value, range);
-        self.expected.pop();
+        self.expected = prev;
         ty
     }
     fn infer(&mut self, value: &V, span: Option<Span>) -> Ty {
@@ -481,6 +601,7 @@ impl<'a> Analyzer<'a> {
         ty
     }
     fn infer_inner(&mut self, value: &V, span: Option<Span>) -> Ty {
+        let contextual = self.expected.take();
         if value.is_null() {
             return Ty::Null;
         }
@@ -498,13 +619,16 @@ impl<'a> Analyzer<'a> {
             return Ty::String;
         }
         if let Some(items) = value.as_array() {
+            let elem_expected = contextual_list_element(contextual.as_ref());
             let types = items
                 .iter()
                 .map(|item| {
                     let child = self.child(item, span);
+                    self.expected = elem_expected.clone();
                     self.infer(item, child)
                 })
                 .collect::<Vec<_>>();
+            self.expected = None;
             return Ty::List(Box::new(union(types)));
         }
         if let Some(raw) = value["expr"].as_str() {
@@ -530,19 +654,54 @@ impl<'a> Analyzer<'a> {
             return Ty::String;
         }
         if value.get("match").is_some() {
-            return self.infer_match_value(value, span);
+            return self.infer_match_value(value, span, contextual);
         }
         if let Some(expression) = value.get("expression") {
-            return self.infer_expression(expression, value, span);
+            return self.infer_expression(expression, value, span, contextual);
         }
         if let Some(object) = value.as_object() {
+            let doc = self.doc;
+            if let Some(struct_name) = contextual_struct_name(doc, contextual.as_ref())
+                && let Some(fields) = doc["structs"][struct_name].as_object()
+            {
+                let missing_required = fields.iter().any(|(fname, fty)| {
+                    !fty.as_str().unwrap_or("").trim().ends_with('?') && !object.contains_key(fname)
+                });
+                if !missing_required {
+                    let mut valid = true;
+                    for (key, item) in object {
+                        let child = self.child(item, span);
+                        let field_expected = fields.get(key).and_then(V::as_str).map(parse_type);
+                        self.expected = field_expected.clone();
+                        let actual = self.infer(item, child);
+                        if let Some(expected_ty) = &field_expected {
+                            valid &= self.check(
+                                &actual,
+                                expected_ty,
+                                "incompatible-binding",
+                                child,
+                                format_args!("Поле {struct_name}.{key}"),
+                            );
+                        }
+                    }
+                    self.expected = None;
+                    return if valid {
+                        Ty::Named(struct_name.into())
+                    } else {
+                        Ty::Unknown
+                    };
+                }
+            }
+            let val_expected = contextual_record_value(contextual.as_ref());
             let types = object
                 .values()
                 .map(|item| {
                     let child = self.child(item, span);
+                    self.expected = val_expected.clone();
                     self.infer(item, child)
                 })
                 .collect::<Vec<_>>();
+            self.expected = None;
             return Ty::Record(Box::new(union(types)));
         }
         Ty::Unknown
@@ -564,7 +723,7 @@ impl<'a> Analyzer<'a> {
                 &Ty::Bool,
                 "incompatible-operand",
                 span,
-                "Оператор !",
+                format_args!("Оператор !"),
             );
             return if actual == Ty::Unknown {
                 Ty::Unknown
@@ -590,28 +749,39 @@ impl<'a> Analyzer<'a> {
         self.infer_reference(raw)
     }
     fn infer_reference(&mut self, raw: &str) -> Ty {
-        let mut parts = raw.split('.');
-        let head = parts.next().unwrap_or("");
-        let tail = parts.collect::<Vec<_>>();
-        if tail.is_empty()
-            && let Some(ty) = self.locals.get(head)
-        {
-            return ty.clone();
+        let (head, rest) = raw.split_once('.').unwrap_or((raw, ""));
+        if rest.is_empty() {
+            if let Some(ty) = self.locals.get(head) {
+                return ty.clone();
+            }
+            if matches!(head, "props" | "state" | "tokens" | "i18n" | "viewport") {
+                return Ty::Unknown;
+            }
+            if let Some(ty) = self.doc["stateDefinitions"]
+                .get(head)
+                .and_then(|d| d["type"].as_str())
+            {
+                return parse_type(ty);
+            }
+            if let Some(ty) = self.doc["propDefinitions"]
+                .get(head)
+                .and_then(|d| d["type"].as_str())
+            {
+                return parse_type(ty);
+            }
+            if self.doc["lets"].get(head).is_some() {
+                return self.infer_let(head);
+            }
+            return Ty::Unknown;
         }
         match head {
             "props" => {
-                if tail.is_empty() {
-                    return Ty::Unknown;
-                }
-                let name = if tail[0] == "font" && tail.get(1) == Some(&"size") {
-                    "fontSize"
+                let (name, sub_rest) = if rest == "font.size" {
+                    ("fontSize", "")
+                } else if let Some(after) = rest.strip_prefix("font.size.") {
+                    ("fontSize", after)
                 } else {
-                    tail[0]
-                };
-                let skip = if name == "fontSize" && tail[0] == "font" {
-                    2
-                } else {
-                    1
+                    rest.split_once('.').unwrap_or((rest, ""))
                 };
                 let base = self.doc["propDefinitions"]
                     .get(name)
@@ -624,59 +794,52 @@ impl<'a> Analyzer<'a> {
                             None
                         }
                     });
-                base.map_or(Ty::Unknown, |ty| self.member_path(ty, &tail[skip..]))
+                base.map_or(Ty::Unknown, |ty| {
+                    if sub_rest.is_empty() {
+                        ty
+                    } else {
+                        self.member_path_iter(ty, sub_rest.split('.'))
+                    }
+                })
             }
             "state" => {
-                if tail.is_empty() {
-                    return Ty::Unknown;
-                }
+                let (prop_name, sub_rest) = rest.split_once('.').unwrap_or((rest, ""));
                 self.doc["stateDefinitions"]
-                    .get(tail[0])
+                    .get(prop_name)
                     .and_then(|d| d["type"].as_str())
                     .map(parse_type)
-                    .map_or(Ty::Unknown, |ty| self.member_path(ty, &tail[1..]))
+                    .map_or(Ty::Unknown, |ty| {
+                        if sub_rest.is_empty() {
+                            ty
+                        } else {
+                            self.member_path_iter(ty, sub_rest.split('.'))
+                        }
+                    })
             }
-            "tokens" | "i18n" => {
-                let key = tail.join(".");
-                if key.is_empty() {
-                    return Ty::Unknown;
-                }
-                let cache_key = format!("{head}.{key}");
-                self.infer_dictionary(head, &key, &cache_key)
-            }
-            "viewport" if tail.len() == 1 => match tail[0] {
+            "tokens" | "i18n" => self.infer_dictionary(head, rest, raw),
+            "viewport" => match rest {
                 "width" | "height" => Ty::Number,
                 "compact" => Ty::Bool,
                 _ => Ty::Unknown,
             },
             _ => {
-                if tail.len() == 1
-                    && self.doc["enums"].get(head).is_some()
-                    && self.doc["enums"][head].as_array().is_some_and(|variants| {
-                        variants.iter().any(|v| v.as_str() == Some(tail[0]))
-                    })
+                if !rest.contains('.')
+                    && self.doc["enums"]
+                        .get(head)
+                        .and_then(V::as_array)
+                        .is_some_and(|variants| variants.iter().any(|v| v.as_str() == Some(rest)))
                 {
                     return Ty::Named(head.into());
                 }
-                if let Some(ty) = self.locals.get(head) {
-                    return self.member_path(ty.clone(), &tail);
-                }
-                if tail.is_empty() {
-                    if self.doc["stateDefinitions"].get(head).is_some() {
-                        return self.infer_reference(&format!("state.{head}"));
-                    }
-                    if self.doc["propDefinitions"].get(head).is_some()
-                        || self.doc["lets"].get(head).is_some()
-                    {
-                        return self.infer_reference(&format!("props.{head}"));
-                    }
+                if let Some(ty) = self.locals.get(head).cloned() {
+                    return self.member_path_iter(ty, rest.split('.'));
                 }
                 Ty::Unknown
             }
         }
     }
-    fn member_path(&self, base: Ty, path: &[&str]) -> Ty {
-        path.iter()
+    fn member_path_iter<'b>(&self, base: Ty, path: impl IntoIterator<Item = &'b str>) -> Ty {
+        path.into_iter()
             .fold(base, |ty, part| self.member_type(&ty, part))
     }
     fn member_type(&self, base: &Ty, property: &str) -> Ty {
@@ -706,11 +869,12 @@ impl<'a> Analyzer<'a> {
         if !self.visiting.insert(key.clone()) {
             return Ty::Unknown;
         }
-        let value = self.doc["lets"][name].clone();
+        let doc = self.doc;
+        let value = &doc["lets"][name];
         let ty = if value.is_null() {
             Ty::Null
         } else {
-            self.infer_root(&value, ast_range(&self.doc["propertyRanges"][name]))
+            self.infer_root(value, ast_range(&doc["propertyRanges"][name]))
         };
         self.visiting.remove(&key);
         self.let_cache.insert(name.into(), ty.clone());
@@ -723,17 +887,24 @@ impl<'a> Analyzer<'a> {
         if !self.visiting.insert(cache_key.into()) {
             return Ty::Unknown;
         }
-        let value = self.doc[section][key].clone();
+        let doc = self.doc;
+        let value = &doc[section][key];
         let ty = if value.is_null() {
             Ty::Unknown
         } else {
-            self.infer_root(&value, None)
+            self.infer_root(value, None)
         };
         self.visiting.remove(cache_key);
         self.dictionary_cache.insert(cache_key.into(), ty.clone());
         ty
     }
-    fn infer_expression(&mut self, expression: &V, whole: &V, span: Option<Span>) -> Ty {
+    fn infer_expression(
+        &mut self,
+        expression: &V,
+        whole: &V,
+        span: Option<Span>,
+        expected: Option<Ty>,
+    ) -> Ty {
         match expression["kind"].as_str().unwrap_or("") {
             "conditional" => {
                 let condition = &expression["condition"];
@@ -744,13 +915,13 @@ impl<'a> Analyzer<'a> {
                     &Ty::Bool,
                     "incompatible-condition",
                     condition_span,
-                    "Условный оператор",
+                    format_args!("Условный оператор"),
                 );
-                let expected = self.expected.last().cloned();
                 let mut valid = true;
                 let types = ["then", "else"].map(|key| {
                     let value = &expression[key];
                     let child = self.child(value, span);
+                    self.expected = expected.clone();
                     let ty = self.infer(value, child);
                     if let Some(expected) = &expected {
                         valid &= self.check(
@@ -758,11 +929,12 @@ impl<'a> Analyzer<'a> {
                             expected,
                             "incompatible-binding",
                             child,
-                            "Ветвь условного оператора",
+                            format_args!("Ветвь условного оператора"),
                         );
                     }
                     ty
                 });
+                self.expected = None;
                 if valid { union(types) } else { Ty::Unknown }
             }
             "unary" => {
@@ -780,7 +952,7 @@ impl<'a> Analyzer<'a> {
                     &expected,
                     "incompatible-operand",
                     child,
-                    &format!("Оператор {operator}"),
+                    format_args!("Оператор {operator}"),
                 );
                 if actual == Ty::Unknown {
                     Ty::Unknown
@@ -794,10 +966,7 @@ impl<'a> Analyzer<'a> {
                 let object = &expression["object"];
                 let object_span = self.child(object, span);
                 let base = self.infer(object, object_span);
-                let property = expression["property"].as_str().map(str::to_owned);
-                let property = if let Some(property) = property {
-                    property
-                } else {
+                let Some(property) = expression["property"].as_str() else {
                     let dynamic = &expression["property"];
                     let dynamic_span = self.child(dynamic, span);
                     let key = self.infer(dynamic, dynamic_span);
@@ -806,7 +975,7 @@ impl<'a> Analyzer<'a> {
                         &union([Ty::String, Ty::Number]),
                         "incompatible-operand",
                         dynamic_span,
-                        "Вычисляемое свойство",
+                        format_args!("Вычисляемое свойство"),
                     );
                     return Ty::Unknown;
                 };
@@ -818,11 +987,11 @@ impl<'a> Analyzer<'a> {
                     && !object.contains_key("expression")
                 {
                     object
-                        .get(&property)
+                        .get(property)
                         .map(|v| self.infer(v, self.child(v, object_span)))
                         .unwrap_or(Ty::Unknown)
                 } else {
-                    self.member_type(&base, &property)
+                    self.member_type(&base, property)
                 };
                 if expression["optional"] == true {
                     result = union([result, Ty::Null]);
@@ -831,15 +1000,15 @@ impl<'a> Analyzer<'a> {
             }
             "call" => {
                 let name = expression["name"].as_str().unwrap_or("");
-                let args = expression["args"].as_array().cloned().unwrap_or_default();
+                let args = expression["args"].as_array().map_or(&[][..], Vec::as_slice);
                 let mut types = Vec::with_capacity(args.len());
                 let mut spans = Vec::with_capacity(args.len());
-                for arg in &args {
+                for arg in args {
                     let child = self.child(arg, span);
                     spans.push(child);
                     types.push(self.infer(arg, child));
                 }
-                self.infer_call(name, &types, &spans)
+                self.infer_call(name, args, &types, &spans)
             }
             "binary" => self.infer_binary(expression, span),
             _ => {
@@ -869,14 +1038,14 @@ impl<'a> Analyzer<'a> {
                     &Ty::Bool,
                     "incompatible-operand",
                     left_span,
-                    &format!("Оператор {operator}"),
+                    format_args!("Оператор {operator}"),
                 );
                 self.check(
                     &b,
                     &Ty::Bool,
                     "incompatible-operand",
                     right_span,
-                    &format!("Оператор {operator}"),
+                    format_args!("Оператор {operator}"),
                 );
                 if a == Ty::Unknown || b == Ty::Unknown {
                     Ty::Unknown
@@ -907,14 +1076,14 @@ impl<'a> Analyzer<'a> {
                     &Ty::Number,
                     "incompatible-operand",
                     left_span,
-                    "Диапазон",
+                    format_args!("Диапазон"),
                 );
                 self.check(
                     &b,
                     &Ty::Number,
                     "incompatible-operand",
                     right_span,
-                    "Диапазон",
+                    format_args!("Диапазон"),
                 );
                 Ty::List(Box::new(Ty::Number))
             }
@@ -942,14 +1111,14 @@ impl<'a> Analyzer<'a> {
                     &Ty::Number,
                     "incompatible-operand",
                     left_span,
-                    &format!("Оператор {operator}"),
+                    format_args!("Оператор {operator}"),
                 );
                 self.check(
                     &b,
                     &Ty::Number,
                     "incompatible-operand",
                     right_span,
-                    &format!("Оператор {operator}"),
+                    format_args!("Оператор {operator}"),
                 );
                 if a == Ty::Unknown || b == Ty::Unknown {
                     Ty::Unknown
@@ -960,11 +1129,10 @@ impl<'a> Analyzer<'a> {
             _ => Ty::Unknown,
         }
     }
-    fn infer_match_value(&mut self, value: &V, span: Option<Span>) -> Ty {
+    fn infer_match_value(&mut self, value: &V, span: Option<Span>, expected: Option<Ty>) -> Ty {
         let subject = &value["match"];
         let subject_span = self.child(subject, span);
         let subject_ty = self.infer(subject, subject_span);
-        let expected = self.expected.last().cloned();
         let mut branch_types = Vec::new();
         let mut valid = true;
         for branch in value["branches"].as_array().into_iter().flatten() {
@@ -977,11 +1145,12 @@ impl<'a> Analyzer<'a> {
                     &Ty::Bool,
                     "incompatible-condition",
                     guard_span,
-                    "Guard match",
+                    format_args!("Guard match"),
                 );
             }
             let result = &branch["value"];
             let result_span = self.child(result, span);
+            self.expected = expected.clone();
             let ty = self.infer(result, result_span);
             if let Some(expected) = &expected {
                 valid &= self.check(
@@ -989,11 +1158,12 @@ impl<'a> Analyzer<'a> {
                     expected,
                     "incompatible-match-branch",
                     result_span,
-                    "Ветвь match",
+                    format_args!("Ветвь match"),
                 );
             }
             branch_types.push(ty);
         }
+        self.expected = None;
         if valid {
             union(branch_types)
         } else {
@@ -1039,7 +1209,7 @@ impl<'a> Analyzer<'a> {
                 &Ty::Number,
                 "incompatible-match-pattern",
                 range_span,
-                "Диапазон в match",
+                format_args!("Диапазон в match"),
             );
             return;
         }
@@ -1053,14 +1223,16 @@ impl<'a> Analyzer<'a> {
         if matches!(subject, Ty::Unknown | Ty::Any) || matches!(actual, Ty::Unknown | Ty::Any) {
             return;
         }
-        let alternatives: Vec<&Ty> = match subject {
-            Ty::Union(types) => types.iter().collect(),
-            other => vec![other],
+        let possible = match subject {
+            Ty::Union(types) => types.iter().any(|expected| {
+                compatible(&actual, expected) == Compatible::Yes
+                    || compatible(expected, &actual) == Compatible::Yes
+            }),
+            expected => {
+                compatible(&actual, expected) == Compatible::Yes
+                    || compatible(expected, &actual) == Compatible::Yes
+            }
         };
-        let possible = alternatives.into_iter().any(|expected| {
-            compatible(&actual, expected) == Compatible::Yes
-                || compatible(expected, &actual) == Compatible::Yes
-        });
         if !possible {
             self.emit(
                 "incompatible-match-pattern",
@@ -1071,7 +1243,13 @@ impl<'a> Analyzer<'a> {
             );
         }
     }
-    fn infer_call(&mut self, name: &str, args: &[Ty], spans: &[Option<Span>]) -> Ty {
+    fn infer_call(
+        &mut self,
+        name: &str,
+        raw_args: &[V],
+        args: &[Ty],
+        spans: &[Option<Span>],
+    ) -> Ty {
         let expected = |index: usize, ty: Ty| Some((index, ty));
         let mut requirements = Vec::new();
         let list_any = || Ty::List(Box::new(Ty::Any));
@@ -1124,9 +1302,27 @@ impl<'a> Analyzer<'a> {
                 requirements.push(expected(0, Ty::List(Box::new(Ty::Bool))));
                 Ty::Bool
             }
-            "pluck" | "groupBy" => {
+            "pluck" => {
                 requirements.extend([expected(0, list_any()), expected(1, Ty::String)]);
-                list_any()
+                if let (Some(Ty::List(item)), Some(field)) =
+                    (args.first(), raw_args.get(1).and_then(V::as_str))
+                {
+                    let field_ty = match item.as_ref() {
+                        Ty::Map(v) | Ty::Record(v) => union([(**v).clone(), Ty::Null]),
+                        other => self.member_type(other, field),
+                    };
+                    if field_ty == Ty::Unknown {
+                        list_any()
+                    } else {
+                        Ty::List(Box::new(field_ty))
+                    }
+                } else {
+                    list_any()
+                }
+            }
+            "groupBy" => {
+                requirements.extend([expected(0, list_any()), expected(1, Ty::String)]);
+                Ty::List(Box::new(Ty::Object))
             }
             "sortBy" | "unique" => {
                 requirements.push(expected(0, list_any()));
@@ -1264,9 +1460,19 @@ impl<'a> Analyzer<'a> {
                     _ => Ty::Unknown,
                 }
             }
-            "compact" | "flatten" => {
+            "compact" => {
                 requirements.push(expected(0, list_any()));
-                list_any()
+                match args.first() {
+                    Some(Ty::List(item)) => Ty::List(Box::new(non_null((**item).clone()))),
+                    _ => list_any(),
+                }
+            }
+            "flatten" => {
+                requirements.push(expected(0, list_any()));
+                match args.first() {
+                    Some(Ty::List(item)) => Ty::List(Box::new(unwrap_list_once(item))),
+                    _ => list_any(),
+                }
             }
             "chunk" => {
                 requirements.extend([expected(0, list_any()), expected(1, Ty::Number)]);
@@ -1309,14 +1515,47 @@ impl<'a> Analyzer<'a> {
                 for index in 0..args.len() {
                     requirements.push(expected(index, object()));
                 }
-                Ty::Record(Box::new(Ty::Unknown))
+                let mut val_types = Vec::new();
+                let mut all_typed = !args.is_empty();
+                for arg in args {
+                    match arg {
+                        Ty::Map(v) | Ty::Record(v) => val_types.push((**v).clone()),
+                        _ => {
+                            all_typed = false;
+                            break;
+                        }
+                    }
+                }
+                if all_typed {
+                    Ty::Record(Box::new(union(val_types)))
+                } else {
+                    Ty::Record(Box::new(Ty::Unknown))
+                }
             }
             "pick" | "omit" => {
                 requirements.extend([
                     expected(0, object()),
                     expected(1, Ty::List(Box::new(Ty::String))),
                 ]);
-                Ty::Record(Box::new(Ty::Unknown))
+                match args.first() {
+                    Some(Ty::Map(v) | Ty::Record(v)) => Ty::Record(v.clone()),
+                    Some(Ty::Named(struct_name)) if name == "pick" => {
+                        if let Some(keys) = raw_args.get(1).and_then(V::as_array)
+                            && !keys.is_empty()
+                            && keys.iter().all(V::is_string)
+                        {
+                            let base = Ty::Named(struct_name.clone());
+                            let picked = keys
+                                .iter()
+                                .filter_map(V::as_str)
+                                .map(|k| self.member_type(&base, k));
+                            Ty::Record(Box::new(union(picked)))
+                        } else {
+                            Ty::Record(Box::new(Ty::Unknown))
+                        }
+                    }
+                    _ => Ty::Record(Box::new(Ty::Unknown)),
+                }
             }
             "coalesce" => union(args.iter().cloned().map(non_null)),
             "plural" => {
@@ -1345,7 +1584,7 @@ impl<'a> Analyzer<'a> {
                     &expected,
                     "incompatible-argument",
                     spans.get(index).copied().flatten(),
-                    &format!("{name}: аргумент {}", index + 1),
+                    format_args!("{name}: аргумент {}", index + 1),
                 );
             }
         }
@@ -1362,24 +1601,12 @@ impl<'a> Analyzer<'a> {
         self.context.property_type(node, name).map(parse_type)
     }
     fn walk_props(&mut self, node: &V, node_type: &str) {
-        if let Some(props) = node["props"].as_object() {
-            for (name, value) in props {
-                let range = ast_range(&node["propertyRanges"][name])
-                    .or_else(|| ast_range(&node["statementRanges"][name]));
-                if let Some(expected) = self.property_type(node_type, name) {
-                    let actual = self.infer_expected(value, expected.clone(), range);
-                    self.check(
-                        &actual,
-                        &expected,
-                        "incompatible-binding",
-                        root_span(self.spans, value, range).or(range),
-                        &format!("Свойство {node_type}.{name}"),
-                    );
-                } else {
-                    self.infer_root(value, range);
-                }
-            }
-        }
+        self.walk_props_fields(
+            &node["props"],
+            &node["propertyRanges"],
+            &node["statementRanges"],
+            node_type,
+        );
         if let Some(bindings) = node["bindings"].as_object() {
             for (name, path) in bindings {
                 let Some(path) = path.as_str() else { continue };
@@ -1407,9 +1634,8 @@ impl<'a> Analyzer<'a> {
                 };
                 let args = node["eventArgs"][event]
                     .as_array()
-                    .cloned()
-                    .unwrap_or_default();
-                self.walk_action(action, &args, ast_range(&node["statementRanges"][event]));
+                    .map_or(&[][..], Vec::as_slice);
+                self.walk_action(action, args, ast_range(&node["statementRanges"][event]));
             }
         }
         if let Some(args) = node["slotArgs"].as_array() {
@@ -1427,7 +1653,7 @@ impl<'a> Analyzer<'a> {
     fn walk_slot_value(&mut self, value: &V, range: Option<Span>) {
         if value.get("propertyOverride").is_some() || value.get("fileOverride").is_some() {
             if !value["patch"].is_null() {
-                self.walk_nodes(&json!([value["patch"].clone()]));
+                self.walk_node(&value["patch"]);
             }
         } else if value.get("match").is_some() {
             self.infer_root(&value["match"], range);
@@ -1435,7 +1661,7 @@ impl<'a> Analyzer<'a> {
                 self.walk_slot_value(&branch["value"], range);
             }
         } else if value["type"].is_string() {
-            self.walk_nodes(&json!([value.clone()]));
+            self.walk_node(value);
         } else {
             self.infer_root(value, range);
         }
@@ -1472,7 +1698,7 @@ impl<'a> Analyzer<'a> {
                     &expected,
                     "incompatible-argument",
                     span,
-                    &format!("{action}: аргумент {}", index + 1),
+                    format_args!("{action}: аргумент {}", index + 1),
                 );
             }
         }
@@ -1494,23 +1720,28 @@ impl<'a> Analyzer<'a> {
                         &Ty::Bool,
                         "incompatible-condition",
                         root_span(self.spans, guard, None),
-                        "Guard match",
+                        format_args!("Guard match"),
                     );
                 }
-                let patch = json!({
-                    "props": branch["props"],
-                    "propertyRanges": branch["propertyRanges"],
-                    "statementRanges": branch["statementRanges"],
-                });
-                self.walk_props_only(&patch, node_type);
+                self.walk_props_fields(
+                    &branch["props"],
+                    &branch["propertyRanges"],
+                    &branch["statementRanges"],
+                    node_type,
+                );
             }
         }
     }
-    fn walk_props_only(&mut self, node: &V, node_type: &str) {
-        if let Some(props) = node["props"].as_object() {
+    fn walk_props_fields(
+        &mut self,
+        props_val: &V,
+        prop_ranges: &V,
+        stmt_ranges: &V,
+        node_type: &str,
+    ) {
+        if let Some(props) = props_val.as_object() {
             for (name, value) in props {
-                let range = ast_range(&node["propertyRanges"][name])
-                    .or_else(|| ast_range(&node["statementRanges"][name]));
+                let range = ast_range(&prop_ranges[name]).or_else(|| ast_range(&stmt_ranges[name]));
                 if let Some(expected) = self.property_type(node_type, name) {
                     let actual = self.infer_expected(value, expected.clone(), range);
                     self.check(
@@ -1518,7 +1749,7 @@ impl<'a> Analyzer<'a> {
                         &expected,
                         "incompatible-binding",
                         root_span(self.spans, value, range).or(range),
-                        &format!("Свойство {node_type}.{name}"),
+                        format_args!("Свойство {node_type}.{name}"),
                     );
                 } else {
                     self.infer_root(value, range);
@@ -1526,119 +1757,129 @@ impl<'a> Analyzer<'a> {
             }
         }
     }
-    fn walk_nodes(&mut self, nodes: &V) {
-        for node in nodes.as_array().into_iter().flatten() {
-            match node["type"].as_str().unwrap_or("") {
-                "Let" => {
-                    let ty = self.infer_root(&node["value"], node_range(node));
-                    if let Some(name) = node["name"].as_str() {
-                        self.locals.insert(name.into(), ty);
-                    }
+    fn walk_node(&mut self, node: &V) {
+        match node["type"].as_str().unwrap_or("") {
+            "Let" => {
+                let ty = self.infer_root(&node["value"], node_range(node));
+                if let Some(name) = node["name"].as_str() {
+                    self.locals.insert(name.into(), ty);
                 }
-                "If" => {
-                    let condition = &node["condition"];
+            }
+            "If" => {
+                let condition = &node["condition"];
+                let span = root_span(self.spans, condition, node_range(node));
+                let ty = self.infer(condition, span);
+                self.check(
+                    &ty,
+                    &Ty::Bool,
+                    "incompatible-condition",
+                    span,
+                    format_args!("Условие if"),
+                );
+                self.walk_nodes(&node["children"]);
+                self.walk_nodes(&node["elseChildren"]);
+            }
+            "For" => {
+                let collection = &node["collection"];
+                let span = root_span(self.spans, collection, node_range(node));
+                let ty = self.infer(collection, span);
+                self.check(
+                    &ty,
+                    &Ty::List(Box::new(Ty::Any)),
+                    "incompatible-binding",
+                    span,
+                    format_args!("Коллекция for"),
+                );
+                let saved = self.locals.clone();
+                if let Some(name) = node["item"].as_str() {
+                    let item = match ty {
+                        Ty::List(item) => *item,
+                        _ => Ty::Unknown,
+                    };
+                    self.locals.insert(name.into(), item);
+                }
+                if let Some(index) = node["index"].as_str() {
+                    self.locals.insert(index.into(), Ty::Int);
+                }
+                if let Some(condition) = node.get("where") {
                     let span = root_span(self.spans, condition, node_range(node));
-                    let ty = self.infer(condition, span);
-                    self.check(&ty, &Ty::Bool, "incompatible-condition", span, "Условие if");
-                    self.walk_nodes(&node["children"]);
-                    self.walk_nodes(&node["elseChildren"]);
-                }
-                "For" => {
-                    let collection = &node["collection"];
-                    let span = root_span(self.spans, collection, node_range(node));
-                    let ty = self.infer(collection, span);
+                    let actual = self.infer(condition, span);
                     self.check(
-                        &ty,
-                        &Ty::List(Box::new(Ty::Any)),
-                        "incompatible-binding",
+                        &actual,
+                        &Ty::Bool,
+                        "incompatible-condition",
                         span,
-                        "Коллекция for",
+                        format_args!("Условие where"),
                     );
-                    let saved = self.locals.clone();
-                    if let Some(name) = node["item"].as_str() {
-                        let item = match ty {
-                            Ty::List(item) => *item,
-                            _ => Ty::Unknown,
-                        };
-                        self.locals.insert(name.into(), item);
-                    }
-                    if let Some(index) = node["index"].as_str() {
-                        self.locals.insert(index.into(), Ty::Int);
-                    }
-                    if let Some(condition) = node.get("where") {
-                        let span = root_span(self.spans, condition, node_range(node));
-                        let actual = self.infer(condition, span);
+                }
+                let key = &node["key"];
+                let key_span = root_span(self.spans, key, node_range(node));
+                let key_ty = self.infer(key, key_span);
+                self.check(
+                    &key_ty,
+                    &union([Ty::String, Ty::Number]),
+                    "incompatible-binding",
+                    key_span,
+                    format_args!("Ключ for"),
+                );
+                self.walk_nodes(&node["children"]);
+                self.locals = saved;
+                self.walk_nodes(&node["emptyChildren"]);
+            }
+            "Match" => {
+                let subject = &node["match"];
+                let subject_span = root_span(self.spans, subject, node_range(node));
+                let subject_ty = self.infer(subject, subject_span);
+                for branch in node["branches"].as_array().into_iter().flatten() {
+                    self.check_pattern(&branch["pattern"], &subject_ty, subject_span);
+                    if let Some(guard) = branch.get("guard") {
+                        let span = root_span(self.spans, guard, node_range(node));
+                        let ty = self.infer(guard, span);
                         self.check(
-                            &actual,
+                            &ty,
                             &Ty::Bool,
                             "incompatible-condition",
                             span,
-                            "Условие where",
+                            format_args!("Guard match"),
                         );
                     }
-                    let key = &node["key"];
-                    let key_span = root_span(self.spans, key, node_range(node));
-                    let key_ty = self.infer(key, key_span);
-                    self.check(
-                        &key_ty,
-                        &union([Ty::String, Ty::Number]),
-                        "incompatible-binding",
-                        key_span,
-                        "Ключ for",
-                    );
-                    self.walk_nodes(&node["children"]);
-                    self.locals = saved;
-                    self.walk_nodes(&node["emptyChildren"]);
+                    self.walk_nodes(&branch["children"]);
                 }
-                "Match" => {
-                    let subject = &node["match"];
-                    let subject_span = root_span(self.spans, subject, node_range(node));
-                    let subject_ty = self.infer(subject, subject_span);
-                    for branch in node["branches"].as_array().into_iter().flatten() {
-                        self.check_pattern(&branch["pattern"], &subject_ty, subject_span);
-                        if let Some(guard) = branch.get("guard") {
-                            let span = root_span(self.spans, guard, node_range(node));
-                            let ty = self.infer(guard, span);
-                            self.check(
-                                &ty,
-                                &Ty::Bool,
-                                "incompatible-condition",
-                                span,
-                                "Guard match",
-                            );
-                        }
-                        self.walk_nodes(&branch["children"]);
-                    }
-                }
-                node_type => {
-                    self.walk_props(node, node_type);
-                    self.walk_nodes(&node["children"]);
-                }
+            }
+            node_type => {
+                self.walk_props(node, node_type);
+                self.walk_nodes(&node["children"]);
             }
         }
     }
+    fn walk_nodes(&mut self, nodes: &V) {
+        for node in nodes.as_array().into_iter().flatten() {
+            self.walk_node(node);
+        }
+    }
     fn infer_declarations(&mut self) {
-        if let Some(defaults) = self.doc["defaults"].as_object() {
-            let node_type = self.doc["name"].as_str().unwrap_or("").to_owned();
+        let doc = self.doc;
+        if let Some(defaults) = doc["defaults"].as_object() {
+            let node_type = doc["name"].as_str().unwrap_or("");
             for (name, value) in defaults {
-                let range = ast_range(&self.doc["defaultRanges"][name]);
-                if let Some(expected) = self.property_type(&node_type, name) {
+                let range = ast_range(&doc["defaultRanges"][name]);
+                if let Some(expected) = self.property_type(node_type, name) {
                     let actual = self.infer_expected(value, expected.clone(), range);
                     self.check(
                         &actual,
                         &expected,
                         "incompatible-binding",
                         root_span(self.spans, value, range).or(range),
-                        &format!("Default {node_type}.{name}"),
+                        format_args!("Default {node_type}.{name}"),
                     );
                 } else {
                     self.infer_root(value, range);
                 }
             }
         }
-        if let Some(definitions) = self.doc["stateDefinitions"].as_object() {
+        if let Some(definitions) = doc["stateDefinitions"].as_object() {
             for (name, definition) in definitions {
-                let range = ast_range(&self.doc["defaultRanges"][name]);
+                let range = ast_range(&doc["defaultRanges"][name]);
                 let expected = parse_type(definition["type"].as_str().unwrap_or(""));
                 let value = &definition["default"];
                 let actual = self.infer_expected(value, expected.clone(), range);
@@ -1647,52 +1888,66 @@ impl<'a> Analyzer<'a> {
                     &expected,
                     "incompatible-binding",
                     root_span(self.spans, value, range).or(range),
-                    &format!("Default state.{name}"),
+                    format_args!("Default state.{name}"),
                 );
             }
         }
         for section in ["lets", "tokens", "i18n"] {
-            if let Some(values) = self.doc[section].as_object() {
+            if let Some(values) = doc[section].as_object() {
                 for value in values.values() {
                     self.infer_root(value, None);
                 }
             }
         }
-        if let Some(styles) = self.doc["styles"].as_object() {
+        if let Some(styles) = doc["styles"].as_object() {
             for style in styles.values() {
-                self.walk_props_only(style, "*");
+                self.walk_props_fields(
+                    &style["props"],
+                    &style["propertyRanges"],
+                    &style["statementRanges"],
+                    "*",
+                );
             }
         }
     }
     fn run(&mut self) {
+        let doc = self.doc;
         self.infer_declarations();
-        self.walk_nodes(&self.doc["nodes"]);
-        self.walk_groups(
-            &self.doc["matches"],
-            self.doc["name"].as_str().unwrap_or(""),
-        );
+        self.walk_nodes(&doc["nodes"]);
+        self.walk_groups(&doc["matches"], doc["name"].as_str().unwrap_or(""));
         for section in ["slots", "slotDefinitions"] {
-            if let Some(values) = self.doc[section].as_object() {
+            if let Some(values) = doc[section].as_object() {
                 for value in values.values() {
-                    self.walk_nodes(&json!([value]));
+                    self.walk_node(value);
                 }
             }
         }
-        for shortcut in self.doc["shortcuts"].as_array().into_iter().flatten() {
-            let args = shortcut["args"].as_array().cloned().unwrap_or_default();
+        for shortcut in doc["shortcuts"].as_array().into_iter().flatten() {
+            let args = shortcut["args"].as_array().map_or(&[][..], Vec::as_slice);
             self.walk_action(
                 shortcut["action"].as_str().unwrap_or(""),
-                &args,
+                args,
                 ast_range(shortcut),
             );
         }
-        self.walk_nodes(&self.doc["entries"]);
-        for state in self.doc["states"].as_array().into_iter().flatten() {
+        self.walk_nodes(&doc["entries"]);
+        for state in doc["states"].as_array().into_iter().flatten() {
             self.walk_nodes(&state["nodes"]);
         }
     }
 }
 fn unit_type(raw: &str) -> Option<Ty> {
+    if !raw
+        .as_bytes()
+        .last()
+        .is_some_and(|b| *b == b'%' || b.is_ascii_alphabetic())
+        || !raw
+            .as_bytes()
+            .first()
+            .is_some_and(|b| b.is_ascii_digit() || matches!(*b, b'-' | b'+' | b'.'))
+    {
+        return None;
+    }
     for (suffixes, ty) in [
         (
             &["px", "%", "rem", "em", "vw", "vh", "ch", "fr"][..],

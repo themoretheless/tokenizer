@@ -460,17 +460,27 @@ where
         ));
     }
     let next = depth + 1;
-    if let Some(a) = v.as_array() {
-        return a
-            .iter()
-            .map(|v| run(v, false, next, resolver))
-            .collect::<R<Vec<_>>>()
-            .map(V::Array);
-    }
-    if !v.is_object() {
-        return Ok(v.clone());
-    }
-    if let Some(path) = v["expr"].as_str() {
+    let map = match v {
+        V::Null | V::Bool(_) | V::Number(_) | V::String(_) => return Ok(v.clone()),
+        V::Array(a) => {
+            return a
+                .iter()
+                .map(|v| run(v, false, next, resolver))
+                .collect::<R<Vec<_>>>()
+                .map(V::Array);
+        }
+        V::Object(m) => m,
+    };
+    let single = if map.len() == 1 {
+        map.iter().next()
+    } else {
+        None
+    };
+    if let Some(path) = match single {
+        Some((k, val)) if k == "expr" => val.as_str(),
+        Some(_) => None,
+        None => map.get("expr").and_then(V::as_str),
+    } {
         let neg = path.starts_with('!');
         let value = resolver(if neg { &path[1..] } else { path }, optional)?;
         return if neg {
@@ -479,21 +489,28 @@ where
             Ok(value)
         };
     }
-    if let Some(parts) = v["interpolation"].as_array() {
+    if let Some(parts) = match single {
+        Some((k, val)) if k == "interpolation" => val.as_array(),
+        Some(_) => None,
+        None => map.get("interpolation").and_then(V::as_array),
+    } {
         let mut out = String::new();
         for p in parts {
-            out.push_str(&if let Some(s) = p.as_str() {
-                s.into()
+            if let Some(s) = p.as_str() {
+                out.push_str(s);
             } else {
-                text(&run(p, false, next, resolver)?)?
-            })
+                out.push_str(&text(&run(p, false, next, resolver)?)?);
+            }
         }
         return Ok(json!(out));
     }
-    if let Some(subject) = v.get("match") {
+    if single.is_none()
+        && let Some(subject) = map.get("match")
+    {
         let actual = run(subject, false, next, resolver)?;
-        for branch in v["branches"]
-            .as_array()
+        for branch in map
+            .get("branches")
+            .and_then(V::as_array)
             .ok_or_else(|| Diagnostic::new("invalid-match", "Некорректные ветки match"))?
         {
             if matches_pattern(&branch["pattern"], &actual, &mut |p| {
@@ -512,9 +529,14 @@ where
             "match: нет подходящей ветки; добавьте _ => …",
         ));
     }
-    let Some(e) = v.get("expression") else {
-        let mut o = serde_json::Map::new();
-        for (k, v) in v.as_object().unwrap() {
+    let expr_val = match single {
+        Some((k, val)) if k == "expression" => Some(val),
+        Some(_) => None,
+        None => map.get("expression"),
+    };
+    let Some(e) = expr_val else {
+        let mut o = serde_json::Map::with_capacity(map.len());
+        for (k, v) in map {
             o.insert(k.clone(), run(v, false, next, resolver)?);
         }
         return Ok(V::Object(o));
@@ -861,13 +883,16 @@ where
                     ))
                 }
                 "min" | "max" => {
-                    let numbers = args.iter().map(number).collect::<R<Vec<_>>>()?;
-                    numeric(
-                        numbers
-                            .into_iter()
-                            .reduce(if name == "min" { f64::min } else { f64::max })
-                            .unwrap(),
-                    )
+                    let mut acc = number(&args[0])?;
+                    for arg in &args[1..] {
+                        let n = number(arg)?;
+                        acc = if name == "min" {
+                            acc.min(n)
+                        } else {
+                            acc.max(n)
+                        };
+                    }
+                    numeric(acc)
                 }
                 "clamp" => {
                     let a = number(&args[0])?;
@@ -1220,7 +1245,11 @@ where
                         let dec = (number(&args[1])?.max(0.) as usize).min(12);
                         Ok(json!(format!("{n:.dec$}")))
                     } else {
-                        text(&json!(n)).map(|s| json!(s))
+                        Ok(json!(if n == 0.0 {
+                            String::from("0")
+                        } else {
+                            n.to_string()
+                        }))
                     }
                 }
                 "unique" => {
@@ -1579,31 +1608,34 @@ where
 }
 pub fn references(v: &V) -> Vec<String> {
     fn walk<'a>(v: &'a V, seen: &mut std::collections::HashSet<&'a str>, out: &mut Vec<String>) {
-        if let Some(s) = v["expr"].as_str() {
-            let s = s.strip_prefix('!').unwrap_or(s);
-            if s.contains('.')
-                && s.split('.').all(|s| {
-                    let mut cs = s.chars();
-                    cs.next()
-                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                        && cs.all(|c| c.is_ascii_alphanumeric() || c == '_')
-                })
-                && seen.insert(s)
-            {
-                out.push(s.into())
-            }
-        }
-        if let Some(o) = v.as_object() {
-            for (k, v) in o {
-                if k != "expr" {
-                    walk(v, seen, out)
+        match v {
+            V::Object(o) => {
+                if let Some(s) = o.get("expr").and_then(V::as_str) {
+                    let s = s.strip_prefix('!').unwrap_or(s);
+                    if s.contains('.')
+                        && s.split('.').all(|s| {
+                            let mut cs = s.chars();
+                            cs.next()
+                                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                                && cs.all(|c| c.is_ascii_alphanumeric() || c == '_')
+                        })
+                        && seen.insert(s)
+                    {
+                        out.push(s.into());
+                    }
+                }
+                for (k, v) in o {
+                    if k != "expr" {
+                        walk(v, seen, out);
+                    }
                 }
             }
-        }
-        if let Some(a) = v.as_array() {
-            for v in a {
-                walk(v, seen, out)
+            V::Array(a) => {
+                for v in a {
+                    walk(v, seen, out);
+                }
             }
+            _ => {}
         }
     }
     let mut out = Vec::new();

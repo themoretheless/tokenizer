@@ -215,3 +215,89 @@ fn corpus_has_no_unreviewed_type_diagnostics_and_has_real_coverage() {
         "Reviewed corpus coverage baseline"
     );
 }
+
+#[test]
+fn stdlib_collection_and_record_calls_preserve_element_types() {
+    let valid = r#"
+        struct Item {
+            price: Number;
+            label: String;
+        }
+        component Cart {
+            prop nums: List<Number?> = [1, null, 2];
+            prop grid: List<List<Number>> = [[1, 2], [3]];
+            prop items: List<Item> = [];
+            prop scores: Record<String, Number> = {};
+            prop bonus: Record<String, Int> = {};
+            prop firstItem: Item = { price: 10, label: 'ok' };
+            Text {
+                width: sum(compact(props.nums))
+                    + sum(flatten(props.grid))
+                    + sum(pluck(props.items, 'price'))
+                    + sum(values(pick(props.scores, ['a'])))
+                    + sum(values(omit(props.scores, ['b'])))
+                    + sum(values(merge(props.scores, props.bonus)))
+                    + sum(values(pick(props.firstItem, ['price'])));
+            }
+        }
+    "#;
+    let valid_report = report(valid);
+    assert!(
+        valid_report.diagnostics.is_empty(),
+        "{:#?}",
+        valid_report.diagnostics
+    );
+
+    let d1 = assert_range(
+        "component A { prop tags: List<String?> = ['a', null]; Text { width: sum(compact(props.tags)); } }",
+        "incompatible-argument",
+        "compact(props.tags)",
+    );
+    assert_eq!(d1["actual"], "List<String>");
+
+    let d2 = assert_range(
+        "component A { prop rows: List<List<String>> = [['a']]; Text { width: sum(flatten(props.rows)); } }",
+        "incompatible-argument",
+        "flatten(props.rows)",
+    );
+    assert_eq!(d2["actual"], "List<String>");
+
+    let d3 = assert_range(
+        "struct Item { label: String; } component A { prop items: List<Item> = []; Text { width: sum(pluck(props.items, 'label')); } }",
+        "incompatible-argument",
+        "pluck(props.items, 'label')",
+    );
+    assert_eq!(d3["actual"], "List<String>");
+
+    let d4 = assert_range(
+        "struct Item { label: String; } component A { prop item: Item = { label: 'x' }; Text { width: sum(values(pick(props.item, ['label']))); } }",
+        "incompatible-argument",
+        "values(pick(props.item, ['label']))",
+    );
+    assert_eq!(d4["actual"], "List<String>");
+
+    // Structural checking on struct literals (including nested in List<Item>)
+    // and match expressions inside ternary conditions:
+    let nested_ok = r#"
+        struct Item { price: Number; label: String; tag: String?; }
+        component A {
+            state x: Int = 1;
+            prop items: List<Item> = [{ price: 5, label: 'ok' }];
+            Text {
+                width: (match state.x { 1 => true; _ => false; }) ? 10px : 20px;
+            }
+        }
+    "#;
+    assert!(report(nested_ok).diagnostics.is_empty());
+
+    assert_range(
+        "struct Item { price: Number; label: String; } component A { prop items: List<Item> = [{ price: 'bad', label: 'ok' }]; }",
+        "incompatible-binding",
+        "'bad'",
+    );
+    assert_range(
+        "struct Item { price: Number; label: String; } component A { prop item: Item = { price: 10 }; }",
+        "incompatible-binding",
+        "{ price: 10 }",
+    );
+}
