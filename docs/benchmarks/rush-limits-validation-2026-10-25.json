@@ -1,0 +1,979 @@
+{
+  "date": "2026-10-25",
+  "rustc": "rustc 1.101.0-nightly (4ebd25825 2026-10-15)",
+  "comparisons": {
+    "cells-limits-on": {
+      "platform": "macOS-26.7.2-arm64-arm-64bit",
+      "case": "cells",
+      "method": "Alternating process pairs; each verifies the result, warms up 10 times, then measures 7 samples of 200 prepared runs. No profiler or counting allocator. No builds, tests or profilers run during the series.",
+      "environment": {
+        "RUSH_BENCH_CASE": "cells",
+        "RUSH_BENCH_ITEMS": "1000",
+        "RUSH_BENCH_ITERS": "200",
+        "RUSH_BENCH_OPERATION": "prepared_run"
+      },
+      "variant_env": {
+        "before": {},
+        "after": {
+          "RUSH_BENCH_HEAP_BYTES": "1073741824",
+          "RUSH_BENCH_ALLOCATED_BYTES": "1073741824"
+        }
+      },
+      "binaries": {
+        "before": {
+          "path": "/private/tmp/runtime-after-limits",
+          "sha256": "d835f5caf68831f84424d4f5079ba16afe5d1b30af28b840341998b690e48883"
+        },
+        "after": {
+          "path": "/private/tmp/runtime-after-limits",
+          "sha256": "d835f5caf68831f84424d4f5079ba16afe5d1b30af28b840341998b690e48883"
+        }
+      },
+      "runs": [
+        {
+          "pair": 0,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t235.150\t239.054\t242.306\n",
+          "stderr": "",
+          "min_us": 235.15,
+          "median_us": 239.054,
+          "max_us": 242.306
+        },
+        {
+          "pair": 0,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t213.394\t215.460\t222.113\n",
+          "stderr": "",
+          "min_us": 213.394,
+          "median_us": 215.46,
+          "max_us": 222.113
+        },
+        {
+          "pair": 1,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t229.931\t233.533\t238.038\n",
+          "stderr": "",
+          "min_us": 229.931,
+          "median_us": 233.533,
+          "max_us": 238.038
+        },
+        {
+          "pair": 1,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t226.889\t231.019\t234.518\n",
+          "stderr": "",
+          "min_us": 226.889,
+          "median_us": 231.019,
+          "max_us": 234.518
+        },
+        {
+          "pair": 2,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t228.672\t230.394\t232.068\n",
+          "stderr": "",
+          "min_us": 228.672,
+          "median_us": 230.394,
+          "max_us": 232.068
+        },
+        {
+          "pair": 2,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t217.019\t221.732\t225.363\n",
+          "stderr": "",
+          "min_us": 217.019,
+          "median_us": 221.732,
+          "max_us": 225.363
+        },
+        {
+          "pair": 3,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t225.118\t228.486\t232.275\n",
+          "stderr": "",
+          "min_us": 225.118,
+          "median_us": 228.486,
+          "max_us": 232.275
+        },
+        {
+          "pair": 3,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t227.243\t232.781\t238.907\n",
+          "stderr": "",
+          "min_us": 227.243,
+          "median_us": 232.781,
+          "max_us": 238.907
+        }
+      ],
+      "summary": {
+        "before": {
+          "median_of_medians_us": 231.9,
+          "medians": [
+            239.054,
+            231.019,
+            230.394,
+            232.781
+          ]
+        },
+        "after": {
+          "median_of_medians_us": 225.10899999999998,
+          "medians": [
+            215.46,
+            233.533,
+            221.732,
+            228.486
+          ]
+        }
+      },
+      "ratio_after_over_before": 0.970715825786977
+    },
+    "cells": {
+      "platform": "macOS-26.7.2-arm64-arm-64bit",
+      "case": "cells",
+      "method": "Alternating process pairs; each verifies the result, warms up 10 times, then measures 7 samples of 200 prepared runs. No profiler or counting allocator. No builds, tests or profilers run during the series.",
+      "environment": {
+        "RUSH_BENCH_CASE": "cells",
+        "RUSH_BENCH_ITEMS": "1000",
+        "RUSH_BENCH_ITERS": "200",
+        "RUSH_BENCH_OPERATION": "prepared_run"
+      },
+      "variant_env": {
+        "before": {},
+        "after": {}
+      },
+      "binaries": {
+        "before": {
+          "path": "/private/tmp/runtime-before-limits",
+          "sha256": "c3b41fbdb296a1bd9fb27cd60e223d8ba92e2ef6efe8d0c7ca9077d5756031d6"
+        },
+        "after": {
+          "path": "/private/tmp/runtime-after-limits",
+          "sha256": "d835f5caf68831f84424d4f5079ba16afe5d1b30af28b840341998b690e48883"
+        }
+      },
+      "runs": [
+        {
+          "pair": 0,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t237.476\t239.193\t241.901\n",
+          "stderr": "",
+          "min_us": 237.476,
+          "median_us": 239.193,
+          "max_us": 241.901
+        },
+        {
+          "pair": 0,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t230.929\t236.512\t249.172\n",
+          "stderr": "",
+          "min_us": 230.929,
+          "median_us": 236.512,
+          "max_us": 249.172
+        },
+        {
+          "pair": 1,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t219.380\t224.911\t233.461\n",
+          "stderr": "",
+          "min_us": 219.38,
+          "median_us": 224.911,
+          "max_us": 233.461
+        },
+        {
+          "pair": 1,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t270.146\t274.337\t281.600\n",
+          "stderr": "",
+          "min_us": 270.146,
+          "median_us": 274.337,
+          "max_us": 281.6
+        },
+        {
+          "pair": 2,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t244.869\t245.818\t251.468\n",
+          "stderr": "",
+          "min_us": 244.869,
+          "median_us": 245.818,
+          "max_us": 251.468
+        },
+        {
+          "pair": 2,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t230.892\t232.855\t238.068\n",
+          "stderr": "",
+          "min_us": 230.892,
+          "median_us": 232.855,
+          "max_us": 238.068
+        },
+        {
+          "pair": 3,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t228.190\t230.760\t231.875\n",
+          "stderr": "",
+          "min_us": 228.19,
+          "median_us": 230.76,
+          "max_us": 231.875
+        },
+        {
+          "pair": 3,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncells\tprepared_run\t200\t235.860\t238.852\t242.682\n",
+          "stderr": "",
+          "min_us": 235.86,
+          "median_us": 238.852,
+          "max_us": 242.682
+        }
+      ],
+      "summary": {
+        "before": {
+          "median_of_medians_us": 242.5055,
+          "medians": [
+            239.193,
+            274.337,
+            245.818,
+            238.852
+          ]
+        },
+        "after": {
+          "median_of_medians_us": 231.8075,
+          "medians": [
+            236.512,
+            224.911,
+            232.855,
+            230.76
+          ]
+        }
+      },
+      "ratio_after_over_before": 0.9558855366166953
+    },
+    "closure-limits-on": {
+      "platform": "macOS-26.7.2-arm64-arm-64bit",
+      "case": "closure",
+      "method": "Alternating process pairs; each verifies the result, warms up 10 times, then measures 7 samples of 200 prepared runs. No profiler or counting allocator. No builds, tests or profilers run during the series.",
+      "environment": {
+        "RUSH_BENCH_CASE": "closure",
+        "RUSH_BENCH_ITEMS": "1000",
+        "RUSH_BENCH_ITERS": "200",
+        "RUSH_BENCH_OPERATION": "prepared_run"
+      },
+      "variant_env": {
+        "before": {},
+        "after": {
+          "RUSH_BENCH_HEAP_BYTES": "1073741824",
+          "RUSH_BENCH_ALLOCATED_BYTES": "1073741824"
+        }
+      },
+      "binaries": {
+        "before": {
+          "path": "/private/tmp/runtime-after-limits",
+          "sha256": "d835f5caf68831f84424d4f5079ba16afe5d1b30af28b840341998b690e48883"
+        },
+        "after": {
+          "path": "/private/tmp/runtime-after-limits",
+          "sha256": "d835f5caf68831f84424d4f5079ba16afe5d1b30af28b840341998b690e48883"
+        }
+      },
+      "runs": [
+        {
+          "pair": 0,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.152\t6.170\t6.253\n",
+          "stderr": "",
+          "min_us": 6.152,
+          "median_us": 6.17,
+          "max_us": 6.253
+        },
+        {
+          "pair": 0,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.143\t6.188\t6.246\n",
+          "stderr": "",
+          "min_us": 6.143,
+          "median_us": 6.188,
+          "max_us": 6.246
+        },
+        {
+          "pair": 1,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.141\t6.173\t6.223\n",
+          "stderr": "",
+          "min_us": 6.141,
+          "median_us": 6.173,
+          "max_us": 6.223
+        },
+        {
+          "pair": 1,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.189\t6.212\t6.344\n",
+          "stderr": "",
+          "min_us": 6.189,
+          "median_us": 6.212,
+          "max_us": 6.344
+        },
+        {
+          "pair": 2,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.171\t6.192\t6.237\n",
+          "stderr": "",
+          "min_us": 6.171,
+          "median_us": 6.192,
+          "max_us": 6.237
+        },
+        {
+          "pair": 2,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.225\t6.278\t6.413\n",
+          "stderr": "",
+          "min_us": 6.225,
+          "median_us": 6.278,
+          "max_us": 6.413
+        },
+        {
+          "pair": 3,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.189\t6.200\t6.232\n",
+          "stderr": "",
+          "min_us": 6.189,
+          "median_us": 6.2,
+          "max_us": 6.232
+        },
+        {
+          "pair": 3,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.179\t6.191\t6.472\n",
+          "stderr": "",
+          "min_us": 6.179,
+          "median_us": 6.191,
+          "max_us": 6.472
+        }
+      ],
+      "summary": {
+        "before": {
+          "median_of_medians_us": 6.1915,
+          "medians": [
+            6.17,
+            6.212,
+            6.192,
+            6.191
+          ]
+        },
+        "after": {
+          "median_of_medians_us": 6.194,
+          "medians": [
+            6.188,
+            6.173,
+            6.278,
+            6.2
+          ]
+        }
+      },
+      "ratio_after_over_before": 1.0004037793749496
+    },
+    "closure": {
+      "platform": "macOS-26.7.2-arm64-arm-64bit",
+      "case": "closure",
+      "method": "Alternating process pairs; each verifies the result, warms up 10 times, then measures 7 samples of 200 prepared runs. No profiler or counting allocator. No builds, tests or profilers run during the series.",
+      "environment": {
+        "RUSH_BENCH_CASE": "closure",
+        "RUSH_BENCH_ITEMS": "1000",
+        "RUSH_BENCH_ITERS": "200",
+        "RUSH_BENCH_OPERATION": "prepared_run"
+      },
+      "variant_env": {
+        "before": {},
+        "after": {}
+      },
+      "binaries": {
+        "before": {
+          "path": "/private/tmp/runtime-before-limits",
+          "sha256": "c3b41fbdb296a1bd9fb27cd60e223d8ba92e2ef6efe8d0c7ca9077d5756031d6"
+        },
+        "after": {
+          "path": "/private/tmp/runtime-after-limits",
+          "sha256": "d835f5caf68831f84424d4f5079ba16afe5d1b30af28b840341998b690e48883"
+        }
+      },
+      "runs": [
+        {
+          "pair": 0,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.255\t6.264\t6.327\n",
+          "stderr": "",
+          "min_us": 6.255,
+          "median_us": 6.264,
+          "max_us": 6.327
+        },
+        {
+          "pair": 0,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.343\t6.497\t7.496\n",
+          "stderr": "",
+          "min_us": 6.343,
+          "median_us": 6.497,
+          "max_us": 7.496
+        },
+        {
+          "pair": 1,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.274\t6.319\t6.418\n",
+          "stderr": "",
+          "min_us": 6.274,
+          "median_us": 6.319,
+          "max_us": 6.418
+        },
+        {
+          "pair": 1,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.314\t6.346\t6.443\n",
+          "stderr": "",
+          "min_us": 6.314,
+          "median_us": 6.346,
+          "max_us": 6.443
+        },
+        {
+          "pair": 2,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.330\t6.331\t6.444\n",
+          "stderr": "",
+          "min_us": 6.33,
+          "median_us": 6.331,
+          "max_us": 6.444
+        },
+        {
+          "pair": 2,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.420\t6.435\t6.556\n",
+          "stderr": "",
+          "min_us": 6.42,
+          "median_us": 6.435,
+          "max_us": 6.556
+        },
+        {
+          "pair": 3,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.255\t6.287\t6.518\n",
+          "stderr": "",
+          "min_us": 6.255,
+          "median_us": 6.287,
+          "max_us": 6.518
+        },
+        {
+          "pair": 3,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\nclosure\tprepared_run\t200\t6.160\t6.247\t6.444\n",
+          "stderr": "",
+          "min_us": 6.16,
+          "median_us": 6.247,
+          "max_us": 6.444
+        }
+      ],
+      "summary": {
+        "before": {
+          "median_of_medians_us": 6.2975,
+          "medians": [
+            6.264,
+            6.346,
+            6.331,
+            6.247
+          ]
+        },
+        "after": {
+          "median_of_medians_us": 6.377,
+          "medians": [
+            6.497,
+            6.319,
+            6.435,
+            6.287
+          ]
+        }
+      },
+      "ratio_after_over_before": 1.0126240571655418
+    },
+    "collections-limits-on": {
+      "platform": "macOS-26.7.2-arm64-arm-64bit",
+      "case": "collections",
+      "method": "Alternating process pairs; each verifies the result, warms up 10 times, then measures 7 samples of 200 prepared runs. No profiler or counting allocator. No builds, tests or profilers run during the series.",
+      "environment": {
+        "RUSH_BENCH_CASE": "collections",
+        "RUSH_BENCH_ITEMS": "1000",
+        "RUSH_BENCH_ITERS": "200",
+        "RUSH_BENCH_OPERATION": "prepared_run"
+      },
+      "variant_env": {
+        "before": {},
+        "after": {
+          "RUSH_BENCH_HEAP_BYTES": "1073741824",
+          "RUSH_BENCH_ALLOCATED_BYTES": "1073741824"
+        }
+      },
+      "binaries": {
+        "before": {
+          "path": "/private/tmp/runtime-after-limits",
+          "sha256": "d835f5caf68831f84424d4f5079ba16afe5d1b30af28b840341998b690e48883"
+        },
+        "after": {
+          "path": "/private/tmp/runtime-after-limits",
+          "sha256": "d835f5caf68831f84424d4f5079ba16afe5d1b30af28b840341998b690e48883"
+        }
+      },
+      "runs": [
+        {
+          "pair": 0,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t261.586\t263.173\t274.529\n",
+          "stderr": "",
+          "min_us": 261.586,
+          "median_us": 263.173,
+          "max_us": 274.529
+        },
+        {
+          "pair": 0,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t253.468\t255.607\t259.665\n",
+          "stderr": "",
+          "min_us": 253.468,
+          "median_us": 255.607,
+          "max_us": 259.665
+        },
+        {
+          "pair": 1,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t263.626\t264.064\t265.084\n",
+          "stderr": "",
+          "min_us": 263.626,
+          "median_us": 264.064,
+          "max_us": 265.084
+        },
+        {
+          "pair": 1,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t252.635\t252.935\t253.512\n",
+          "stderr": "",
+          "min_us": 252.635,
+          "median_us": 252.935,
+          "max_us": 253.512
+        },
+        {
+          "pair": 2,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t254.267\t257.394\t258.095\n",
+          "stderr": "",
+          "min_us": 254.267,
+          "median_us": 257.394,
+          "max_us": 258.095
+        },
+        {
+          "pair": 2,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t252.792\t253.619\t258.192\n",
+          "stderr": "",
+          "min_us": 252.792,
+          "median_us": 253.619,
+          "max_us": 258.192
+        },
+        {
+          "pair": 3,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t255.152\t261.249\t266.186\n",
+          "stderr": "",
+          "min_us": 255.152,
+          "median_us": 261.249,
+          "max_us": 266.186
+        },
+        {
+          "pair": 3,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t251.566\t252.729\t255.702\n",
+          "stderr": "",
+          "min_us": 251.566,
+          "median_us": 252.729,
+          "max_us": 255.702
+        }
+      ],
+      "summary": {
+        "before": {
+          "median_of_medians_us": 255.1645,
+          "medians": [
+            263.173,
+            252.935,
+            257.394,
+            252.729
+          ]
+        },
+        "after": {
+          "median_of_medians_us": 258.428,
+          "medians": [
+            255.607,
+            264.064,
+            253.619,
+            261.249
+          ]
+        }
+      },
+      "ratio_after_over_before": 1.0127897885481718
+    },
+    "collections": {
+      "platform": "macOS-26.7.2-arm64-arm-64bit",
+      "case": "collections",
+      "method": "Alternating process pairs; each verifies the result, warms up 10 times, then measures 7 samples of 200 prepared runs. No profiler or counting allocator. No builds, tests or profilers run during the series.",
+      "environment": {
+        "RUSH_BENCH_CASE": "collections",
+        "RUSH_BENCH_ITEMS": "1000",
+        "RUSH_BENCH_ITERS": "200",
+        "RUSH_BENCH_OPERATION": "prepared_run"
+      },
+      "variant_env": {
+        "before": {},
+        "after": {}
+      },
+      "binaries": {
+        "before": {
+          "path": "/private/tmp/runtime-before-limits",
+          "sha256": "c3b41fbdb296a1bd9fb27cd60e223d8ba92e2ef6efe8d0c7ca9077d5756031d6"
+        },
+        "after": {
+          "path": "/private/tmp/runtime-after-limits",
+          "sha256": "d835f5caf68831f84424d4f5079ba16afe5d1b30af28b840341998b690e48883"
+        }
+      },
+      "runs": [
+        {
+          "pair": 0,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t271.390\t281.901\t402.692\n",
+          "stderr": "",
+          "min_us": 271.39,
+          "median_us": 281.901,
+          "max_us": 402.692
+        },
+        {
+          "pair": 0,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t270.856\t271.717\t275.294\n",
+          "stderr": "",
+          "min_us": 270.856,
+          "median_us": 271.717,
+          "max_us": 275.294
+        },
+        {
+          "pair": 1,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t261.291\t262.170\t264.896\n",
+          "stderr": "",
+          "min_us": 261.291,
+          "median_us": 262.17,
+          "max_us": 264.896
+        },
+        {
+          "pair": 1,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t267.510\t268.539\t270.631\n",
+          "stderr": "",
+          "min_us": 267.51,
+          "median_us": 268.539,
+          "max_us": 270.631
+        },
+        {
+          "pair": 2,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t269.180\t271.527\t272.142\n",
+          "stderr": "",
+          "min_us": 269.18,
+          "median_us": 271.527,
+          "max_us": 272.142
+        },
+        {
+          "pair": 2,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t259.810\t261.406\t262.471\n",
+          "stderr": "",
+          "min_us": 259.81,
+          "median_us": 261.406,
+          "max_us": 262.471
+        },
+        {
+          "pair": 3,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t260.673\t261.755\t262.356\n",
+          "stderr": "",
+          "min_us": 260.673,
+          "median_us": 261.755,
+          "max_us": 262.356
+        },
+        {
+          "pair": 3,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections\tprepared_run\t200\t267.108\t270.641\t274.403\n",
+          "stderr": "",
+          "min_us": 267.108,
+          "median_us": 270.641,
+          "max_us": 274.403
+        }
+      ],
+      "summary": {
+        "before": {
+          "median_of_medians_us": 271.084,
+          "medians": [
+            281.901,
+            268.539,
+            271.527,
+            270.641
+          ]
+        },
+        "after": {
+          "median_of_medians_us": 261.9625,
+          "medians": [
+            271.717,
+            262.17,
+            261.406,
+            261.755
+          ]
+        }
+      },
+      "ratio_after_over_before": 0.9663517581266322
+    },
+    "collections_lazy-limits-on": {
+      "platform": "macOS-26.7.2-arm64-arm-64bit",
+      "case": "collections_lazy",
+      "method": "Alternating process pairs; each verifies the result, warms up 10 times, then measures 7 samples of 200 prepared runs. No profiler or counting allocator. No builds, tests or profilers run during the series.",
+      "environment": {
+        "RUSH_BENCH_CASE": "collections_lazy",
+        "RUSH_BENCH_ITEMS": "1000",
+        "RUSH_BENCH_ITERS": "200",
+        "RUSH_BENCH_OPERATION": "prepared_run"
+      },
+      "variant_env": {
+        "before": {},
+        "after": {
+          "RUSH_BENCH_HEAP_BYTES": "1073741824",
+          "RUSH_BENCH_ALLOCATED_BYTES": "1073741824"
+        }
+      },
+      "binaries": {
+        "before": {
+          "path": "/private/tmp/runtime-after-limits",
+          "sha256": "d835f5caf68831f84424d4f5079ba16afe5d1b30af28b840341998b690e48883"
+        },
+        "after": {
+          "path": "/private/tmp/runtime-after-limits",
+          "sha256": "d835f5caf68831f84424d4f5079ba16afe5d1b30af28b840341998b690e48883"
+        }
+      },
+      "runs": [
+        {
+          "pair": 0,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t227.851\t233.967\t238.887\n",
+          "stderr": "",
+          "min_us": 227.851,
+          "median_us": 233.967,
+          "max_us": 238.887
+        },
+        {
+          "pair": 0,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t224.912\t226.882\t227.947\n",
+          "stderr": "",
+          "min_us": 224.912,
+          "median_us": 226.882,
+          "max_us": 227.947
+        },
+        {
+          "pair": 1,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t223.441\t232.446\t233.294\n",
+          "stderr": "",
+          "min_us": 223.441,
+          "median_us": 232.446,
+          "max_us": 233.294
+        },
+        {
+          "pair": 1,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t228.159\t230.929\t234.326\n",
+          "stderr": "",
+          "min_us": 228.159,
+          "median_us": 230.929,
+          "max_us": 234.326
+        },
+        {
+          "pair": 2,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t227.324\t230.681\t233.479\n",
+          "stderr": "",
+          "min_us": 227.324,
+          "median_us": 230.681,
+          "max_us": 233.479
+        },
+        {
+          "pair": 2,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t222.185\t228.160\t228.998\n",
+          "stderr": "",
+          "min_us": 222.185,
+          "median_us": 228.16,
+          "max_us": 228.998
+        },
+        {
+          "pair": 3,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t236.976\t238.099\t240.501\n",
+          "stderr": "",
+          "min_us": 236.976,
+          "median_us": 238.099,
+          "max_us": 240.501
+        },
+        {
+          "pair": 3,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t218.994\t224.421\t224.776\n",
+          "stderr": "",
+          "min_us": 218.994,
+          "median_us": 224.421,
+          "max_us": 224.776
+        }
+      ],
+      "summary": {
+        "before": {
+          "median_of_medians_us": 230.805,
+          "medians": [
+            233.967,
+            230.929,
+            230.681,
+            224.421
+          ]
+        },
+        "after": {
+          "median_of_medians_us": 230.303,
+          "medians": [
+            226.882,
+            232.446,
+            228.16,
+            238.099
+          ]
+        }
+      },
+      "ratio_after_over_before": 0.997825003791079
+    },
+    "collections_lazy": {
+      "platform": "macOS-26.7.2-arm64-arm-64bit",
+      "case": "collections_lazy",
+      "method": "Alternating process pairs; each verifies the result, warms up 10 times, then measures 7 samples of 200 prepared runs. No profiler or counting allocator. No builds, tests or profilers run during the series.",
+      "environment": {
+        "RUSH_BENCH_CASE": "collections_lazy",
+        "RUSH_BENCH_ITEMS": "1000",
+        "RUSH_BENCH_ITERS": "200",
+        "RUSH_BENCH_OPERATION": "prepared_run"
+      },
+      "variant_env": {
+        "before": {},
+        "after": {}
+      },
+      "binaries": {
+        "before": {
+          "path": "/private/tmp/runtime-before-limits",
+          "sha256": "c3b41fbdb296a1bd9fb27cd60e223d8ba92e2ef6efe8d0c7ca9077d5756031d6"
+        },
+        "after": {
+          "path": "/private/tmp/runtime-after-limits",
+          "sha256": "d835f5caf68831f84424d4f5079ba16afe5d1b30af28b840341998b690e48883"
+        }
+      },
+      "runs": [
+        {
+          "pair": 0,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t227.581\t232.806\t235.664\n",
+          "stderr": "",
+          "min_us": 227.581,
+          "median_us": 232.806,
+          "max_us": 235.664
+        },
+        {
+          "pair": 0,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t234.661\t238.027\t242.570\n",
+          "stderr": "",
+          "min_us": 234.661,
+          "median_us": 238.027,
+          "max_us": 242.57
+        },
+        {
+          "pair": 1,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t228.651\t230.155\t237.532\n",
+          "stderr": "",
+          "min_us": 228.651,
+          "median_us": 230.155,
+          "max_us": 237.532
+        },
+        {
+          "pair": 1,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t221.084\t224.488\t231.061\n",
+          "stderr": "",
+          "min_us": 221.084,
+          "median_us": 224.488,
+          "max_us": 231.061
+        },
+        {
+          "pair": 2,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t226.499\t229.199\t269.733\n",
+          "stderr": "",
+          "min_us": 226.499,
+          "median_us": 229.199,
+          "max_us": 269.733
+        },
+        {
+          "pair": 2,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t228.904\t233.000\t237.751\n",
+          "stderr": "",
+          "min_us": 228.904,
+          "median_us": 233.0,
+          "max_us": 237.751
+        },
+        {
+          "pair": 3,
+          "variant": "after",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t227.178\t230.557\t231.349\n",
+          "stderr": "",
+          "min_us": 227.178,
+          "median_us": 230.557,
+          "max_us": 231.349
+        },
+        {
+          "pair": 3,
+          "variant": "before",
+          "stdout": "Collection input items: 1000; verified expected sum: 333666\nRush runtime \u00b7 macos aarch64 \u00b7 7 samples, 10 warmup operations\nworkload\toperation\titerations/sample\tmin_us\tmedian_us\tmax_us\ncollections_lazy\tprepared_run\t200\t227.517\t228.058\t229.145\n",
+          "stderr": "",
+          "min_us": 227.517,
+          "median_us": 228.058,
+          "max_us": 229.145
+        }
+      ],
+      "summary": {
+        "before": {
+          "median_of_medians_us": 228.6285,
+          "medians": [
+            232.806,
+            224.488,
+            229.199,
+            228.058
+          ]
+        },
+        "after": {
+          "median_of_medians_us": 231.7785,
+          "medians": [
+            238.027,
+            230.155,
+            233.0,
+            230.557
+          ]
+        }
+      },
+      "ratio_after_over_before": 1.0137778098531023
+    }
+  },
+  "note": "Reduced to 4 alternating process pairs per comparison (from the usual 6) to fit the session; full per-process samples retained in comparisons.*.runs."
+}

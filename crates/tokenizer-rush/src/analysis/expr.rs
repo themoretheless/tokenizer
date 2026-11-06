@@ -371,6 +371,8 @@ impl<'s> Checker<'s> {
 
     pub(super) fn expr(&mut self, expr: &Expr<'s>) {
         match &expr.kind {
+            // Stage A: the operand is analysed; result hints arrive in stage B.
+            ExprKind::Await(value) => self.expr(value),
             ExprKind::Try(value) => {
                 if self.calls {
                     let operand = self.shape(value);
@@ -400,7 +402,9 @@ impl<'s> Checker<'s> {
                 self.expr(then_value);
                 self.expr(else_value);
             }
-            ExprKind::Lambda { parameters, body } => {
+            ExprKind::Lambda {
+                parameters, body, ..
+            } => {
                 self.return_types.push(None);
                 self.inferred_returns.push(Vec::new());
                 self.scopes.push(HashMap::new());

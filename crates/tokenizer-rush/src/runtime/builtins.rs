@@ -73,6 +73,7 @@ pub enum Builtin {
     Arena,
     ArenaRun,
     ArenaStats,
+    ArenaReset,
     JsonParse,
     JsonStringify,
     Trim,
@@ -139,8 +140,9 @@ impl Builtin {
             | Self::ToLower
             | Self::ToUpper => (1, 1),
             Self::Range | Self::RangeIter => (2, 3),
-            Self::Assert | Self::Arena => (1, 2),
-            Self::ArenaStats => (1, 1),
+            Self::Assert => (1, 2),
+            Self::Arena => (1, 3),
+            Self::ArenaStats | Self::ArenaReset => (1, 1),
             Self::ArenaRun => (2, 2),
             Self::GridMesh
             | Self::Slerp
@@ -235,6 +237,7 @@ pub fn builtin_catalog() -> &'static [(&'static str, Builtin)] {
         ("arena", Builtin::Arena),
         ("arena_run", Builtin::ArenaRun),
         ("arena_stats", Builtin::ArenaStats),
+        ("arena_reset", Builtin::ArenaReset),
         ("translation", Builtin::Translation),
         ("scaling", Builtin::Scaling),
         ("rotation_x", Builtin::RotationX),
@@ -322,6 +325,7 @@ pub fn lookup_builtin(name: &str) -> Option<Builtin> {
         "arena" => Builtin::Arena,
         "arena_run" => Builtin::ArenaRun,
         "arena_stats" => Builtin::ArenaStats,
+        "arena_reset" => Builtin::ArenaReset,
         "translation" => Builtin::Translation,
         "scaling" => Builtin::Scaling,
         "rotation_x" => Builtin::RotationX,

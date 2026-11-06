@@ -7,6 +7,11 @@
 pub struct InputLimits {
     pub max_input_bytes: usize,
     pub max_tokens: usize,
+    /// Byte budget for the parse output retained per document (token vector
+    /// plus syntax tree). The default derives from `max_input_bytes` and the
+    /// measured parse-output density of 33-58 bytes per source byte
+    /// (docs/benchmarks/rush-memory-inventory-2026-10-24.txt, section 4).
+    pub max_ast_bytes: usize,
     pub max_diagnostics: usize,
     pub max_depth: usize,
 }
@@ -18,14 +23,25 @@ impl InputLimits {
         Self {
             max_input_bytes: 16 * 1024 * 1024,
             max_tokens: 1_000_000,
+            max_ast_bytes: 64 * 16 * 1024 * 1024,
             max_diagnostics: 256,
             max_depth: 128,
         }
     }
 
+    /// Sets the input byte budget and, with it, the derived AST byte budget
+    /// (64 bytes of parse output per source byte). Call `max_ast_bytes`
+    /// afterwards when a different ratio is needed.
     #[must_use]
     pub const fn max_input_bytes(mut self, n: usize) -> Self {
         self.max_input_bytes = n;
+        self.max_ast_bytes = 64 * n;
+        self
+    }
+
+    #[must_use]
+    pub const fn max_ast_bytes(mut self, n: usize) -> Self {
+        self.max_ast_bytes = n;
         self
     }
 
@@ -66,6 +82,7 @@ impl Default for InputLimits {
 pub enum LimitExceeded {
     InputBytes { max: usize, actual: usize },
     Tokens { max: usize },
+    AstBytes { max: usize },
     Diagnostics { max: usize },
     Depth { max: usize },
 }
@@ -77,6 +94,7 @@ impl core::fmt::Display for LimitExceeded {
                 write!(f, "input is {actual} bytes; max is {max}")
             }
             Self::Tokens { max } => write!(f, "token limit {max} exceeded"),
+            Self::AstBytes { max } => write!(f, "parse output byte limit {max} exceeded"),
             Self::Diagnostics { max } => write!(f, "diagnostic limit {max} exceeded"),
             Self::Depth { max } => write!(f, "nesting depth limit {max} exceeded"),
         }

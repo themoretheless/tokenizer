@@ -274,7 +274,11 @@ impl<'s> Writer<'s> {
                 parameters,
                 result,
                 body,
+                is_async,
             } => {
+                if *is_async {
+                    self.text("async ");
+                }
                 self.text("fn ");
                 self.name(name);
                 self.text("(");
@@ -470,6 +474,10 @@ impl<'s> Writer<'s> {
                 self.text(" ");
                 self.expr(value, 19);
             }
+            ExprKind::Await(value) => {
+                self.text("await ");
+                self.expr(value, 19);
+            }
             ExprKind::Binary {
                 operator,
                 left,
@@ -535,7 +543,14 @@ impl<'s> Writer<'s> {
                 }
                 self.text("}");
             }
-            ExprKind::Lambda { parameters, body } => {
+            ExprKind::Lambda {
+                parameters,
+                body,
+                is_async,
+            } => {
+                if *is_async {
+                    self.text("async ");
+                }
                 self.text("(");
                 for (i, pattern) in parameters.iter().enumerate() {
                     if i > 0 {

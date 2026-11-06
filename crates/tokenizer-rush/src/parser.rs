@@ -9,6 +9,153 @@ struct Token {
     newline: bool,
 }
 
+/// Requested-bytes estimate of retained parse output, matching the
+/// counting-allocator methodology of benches/inventory.rs: each node counts
+/// its own `size_of` plus the capacities of the Vec/String buffers it owns.
+/// Identifiers, literal spellings and operators borrow the source and add no
+/// heap, so they are not counted. Diagnostics are bounded by
+/// `max_diagnostics` and excluded.
+fn expr_bytes(expr: &Expr<'_>) -> usize {
+    let kind = match &expr.kind {
+        ExprKind::Try(inner) => expr_bytes(inner),
+        ExprKind::If {
+            condition,
+            then_value,
+            else_value,
+        } => expr_bytes(condition) + expr_bytes(then_value) + expr_bytes(else_value),
+        ExprKind::Lambda {
+            parameters, body, ..
+        } => {
+            parameters.capacity() * std::mem::size_of::<Expr>()
+                + parameters.iter().map(expr_bytes).sum::<usize>()
+                + expr_bytes(body)
+        }
+        ExprKind::Name(_) | ExprKind::Number(_) | ExprKind::String(_) => 0,
+        ExprKind::Bool(_) | ExprKind::Null | ExprKind::Error => 0,
+        ExprKind::Unary { value, .. } => expr_bytes(value),
+        ExprKind::Await(value) => expr_bytes(value),
+        ExprKind::Binary { left, right, .. } => expr_bytes(left) + expr_bytes(right),
+        ExprKind::Assign { target, value, .. } => expr_bytes(target) + expr_bytes(value),
+        ExprKind::Call { callee, arguments } => {
+            expr_bytes(callee)
+                + arguments.capacity() * std::mem::size_of::<Expr>()
+                + arguments.iter().map(expr_bytes).sum::<usize>()
+        }
+        ExprKind::Member { object, .. } => expr_bytes(object),
+        ExprKind::Index { object, index } => expr_bytes(object) + expr_bytes(index),
+        ExprKind::List(items) | ExprKind::Tuple(items) => {
+            items.capacity() * std::mem::size_of::<Expr>()
+                + items.iter().map(expr_bytes).sum::<usize>()
+        }
+        ExprKind::Map(entries) => {
+            entries.capacity() * std::mem::size_of::<(Expr, Expr)>()
+                + entries
+                    .iter()
+                    .map(|(key, value)| expr_bytes(key) + expr_bytes(value))
+                    .sum::<usize>()
+        }
+        ExprKind::Pipeline { input, stages } => {
+            expr_bytes(input)
+                + stages.capacity() * std::mem::size_of::<Expr>()
+                + stages.iter().map(expr_bytes).sum::<usize>()
+        }
+        ExprKind::Match { value, arms } => {
+            expr_bytes(value)
+                + arms.capacity() * std::mem::size_of::<MatchArm>()
+                + arms
+                    .iter()
+                    .map(|arm| {
+                        expr_bytes(&arm.pattern)
+                            + arm.guard.as_ref().map_or(0, expr_bytes)
+                            + expr_bytes(&arm.value)
+                    })
+                    .sum::<usize>()
+        }
+        ExprKind::Interpolate(parts) => {
+            parts.capacity() * std::mem::size_of::<InterpolationPart>()
+                + parts
+                    .iter()
+                    .map(|part| match part {
+                        InterpolationPart::Literal(text) => text.capacity(),
+                        InterpolationPart::Expr(expr) => expr_bytes(expr),
+                    })
+                    .sum::<usize>()
+        }
+    };
+    std::mem::size_of::<Expr>() + kind
+}
+
+fn type_bytes(ty: &Type<'_>) -> usize {
+    std::mem::size_of::<Type>()
+        + ty.path.capacity() * std::mem::size_of::<Name>()
+        + ty.arguments.capacity() * std::mem::size_of::<Type>()
+        + ty.arguments.iter().map(type_bytes).sum::<usize>()
+}
+
+fn block_bytes(block: &Block<'_>) -> usize {
+    block.stmts.capacity() * std::mem::size_of::<Stmt>()
+        + block.stmts.iter().map(stmt_bytes).sum::<usize>()
+}
+
+fn stmt_bytes(stmt: &Stmt<'_>) -> usize {
+    let kind = match &stmt.kind {
+        StmtKind::Show(expr) | StmtKind::Yield(expr) | StmtKind::Expr(expr) => expr_bytes(expr),
+        StmtKind::Struct { fields, .. } => {
+            fields.capacity() * std::mem::size_of::<(Name, Type)>()
+                + fields.iter().map(|(_, ty)| type_bytes(ty)).sum::<usize>()
+        }
+        StmtKind::Enum { variants, .. } => {
+            variants.capacity() * std::mem::size_of::<(Name, Vec<Type>)>()
+                + variants
+                    .iter()
+                    .map(|(_, types)| {
+                        types.capacity() * std::mem::size_of::<Type>()
+                            + types.iter().map(type_bytes).sum::<usize>()
+                    })
+                    .sum::<usize>()
+        }
+        StmtKind::Export(names) => names.capacity() * std::mem::size_of::<Name>(),
+        StmtKind::Import(_) => 0,
+        StmtKind::Destructure { pattern, value } => expr_bytes(pattern) + expr_bytes(value),
+        StmtKind::Function {
+            parameters,
+            result,
+            body,
+            ..
+        } => {
+            parameters.capacity() * std::mem::size_of::<Parameter>()
+                + parameters
+                    .iter()
+                    .map(|parameter| {
+                        expr_bytes(&parameter.pattern) + parameter.ty.as_ref().map_or(0, type_bytes)
+                    })
+                    .sum::<usize>()
+                + result.as_ref().map_or(0, type_bytes)
+                + block_bytes(body)
+        }
+        StmtKind::Declaration { ty, value, .. } => {
+            ty.as_ref().map_or(0, type_bytes) + expr_bytes(value)
+        }
+        StmtKind::Return(value) => value.as_ref().map_or(0, expr_bytes),
+        StmtKind::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
+            expr_bytes(condition)
+                + block_bytes(then_block)
+                + else_block.as_ref().map_or(0, block_bytes)
+        }
+        StmtKind::While { condition, body } => expr_bytes(condition) + block_bytes(body),
+        StmtKind::For { iterable, body, .. } => expr_bytes(iterable) + block_bytes(body),
+        StmtKind::Break | StmtKind::Continue | StmtKind::Error => 0,
+        StmtKind::Region { budget, body, .. } => {
+            budget.as_ref().map_or(0, expr_bytes) + block_bytes(body)
+        }
+    };
+    std::mem::size_of::<Stmt>() + kind
+}
+
 pub(crate) fn run(source: &str, lexed: Lexed, valid: bool, limits: InputLimits) -> Parse<'_> {
     let bytes = source.as_bytes();
     let mut tokens = Vec::with_capacity(lexed.tokens.len());
@@ -60,10 +207,27 @@ pub(crate) fn run(source: &str, lexed: Lexed, valid: bool, limits: InputLimits) 
         limits,
         depth: 0,
         functions: 0,
+        async_fns: 0,
         loops: 0,
         roles: Vec::new(),
+        ast_bytes: lexed.tokens.len() * std::mem::size_of::<LexToken>(),
+        sequence_depth: 0,
     };
     let items = parser.sequence(None, Some(0));
+    // The top-level statement vector and roles are retained alongside the
+    // parse output and grow with the source.
+    parser.ast_bytes += items.capacity() * std::mem::size_of::<Stmt>();
+    parser.ast_bytes += parser.roles.capacity() * std::mem::size_of::<(Span, &'static str)>();
+    if parser.valid && parser.ast_bytes > parser.limits.max_ast_bytes {
+        parser.valid = false;
+        if parser.diagnostics.len() < parser.limits.max_diagnostics {
+            parser.diagnostics.push(Diagnostic::new(
+                Span::new(0, source.len()),
+                "ast-limit",
+                "Parse output byte limit exceeded",
+            ));
+        }
+    }
     Parse {
         source,
         lexed,
@@ -86,8 +250,16 @@ struct Parser<'s> {
     limits: InputLimits,
     depth: usize,
     functions: usize,
+    /// Nesting of async function/closure bodies; `await` is legal only inside one.
+    async_fns: usize,
     loops: usize,
     roles: Vec<(Span, &'static str)>,
+    /// Running requested-bytes estimate of the retained parse output
+    /// (tokens, statements, roles), checked against `limits.max_ast_bytes`.
+    ast_bytes: usize,
+    /// Nesting of `sequence` calls; per-statement charging happens only at
+    /// the top level so nested blocks are counted exactly once.
+    sequence_depth: usize,
 }
 
 impl<'s> Parser<'s> {
@@ -216,6 +388,8 @@ impl<'s> Parser<'s> {
         }
     }
     fn sequence(&mut self, closing: Option<&str>, indent: Option<usize>) -> Vec<Stmt<'s>> {
+        self.sequence_depth += 1;
+        let charge = self.sequence_depth == 1;
         let mut stmts = Vec::new();
         while self.peek().is_some() {
             if closing.is_some_and(|s| self.at(s)) {
@@ -251,6 +425,13 @@ impl<'s> Parser<'s> {
                     | StmtKind::For { .. }
             );
             stmts.push(stmt);
+            if charge {
+                self.ast_bytes += stmt_bytes(stmts.last().unwrap());
+                if self.ast_bytes > self.limits.max_ast_bytes {
+                    self.error("ast-limit", "Parse output byte limit exceeded");
+                    break;
+                }
+            }
             if self.pos == before {
                 self.error("unexpected-token", "Expected a statement");
                 self.bump();
@@ -270,6 +451,7 @@ impl<'s> Parser<'s> {
                 self.recover();
             }
         }
+        self.sequence_depth -= 1;
         stmts
     }
     fn user_type(&mut self) -> StmtKind<'s> {
@@ -344,7 +526,11 @@ impl<'s> Parser<'s> {
         }
         let kind = match self.text() {
             "struct" | "enum" => self.user_type(),
-            "fn" => self.function(token.indent),
+            "fn" => self.function(token.indent, false),
+            "async" if self.text_at(1) == "fn" => {
+                self.bump();
+                self.function(token.indent, true)
+            }
             "export" => {
                 self.bump();
                 let mut names = vec![self.inline_name("export")];
@@ -472,15 +658,7 @@ impl<'s> Parser<'s> {
                     StmtKind::Continue
                 }
             }
-            "async" | "await" => {
-                self.error(
-                    "unsupported-syntax",
-                    "This keyword is reserved but its grammar is not supported yet",
-                );
-                self.bump();
-                self.recover();
-                StmtKind::Error
-            }
+            "await" => StmtKind::Expr(self.expr(0, false, true)),
             _ => StmtKind::Expr(self.expr(0, false, true)),
         };
         self.depth -= 1;
@@ -489,7 +667,7 @@ impl<'s> Parser<'s> {
             kind,
         }
     }
-    fn function(&mut self, indent: usize) -> StmtKind<'s> {
+    fn function(&mut self, indent: usize, is_async: bool) -> StmtKind<'s> {
         self.bump();
         let name = self.inline_name("function");
         let parens = !self.newline() && self.eat("(");
@@ -535,7 +713,9 @@ impl<'s> Parser<'s> {
         let old_loops = self.loops;
         self.loops = 0;
         self.functions += 1;
+        let outer_async = std::mem::replace(&mut self.async_fns, usize::from(is_async));
         let body = self.block(indent);
+        self.async_fns = outer_async;
         self.functions -= 1;
         self.loops = old_loops;
         StmtKind::Function {
@@ -543,6 +723,7 @@ impl<'s> Parser<'s> {
             parameters,
             result,
             body,
+            is_async,
         }
     }
     fn ty(&mut self) -> Type<'s> {
@@ -906,8 +1087,8 @@ impl<'s> Parser<'s> {
                 .get(index)
                 .map(|t| &self.source[t.raw.span.start..t.raw.span.end])
         };
-        let lambda = if text == "(" {
-            let mut cursor = self.pos + 1;
+        let parenthesized_lambda = |open: usize| {
+            let mut cursor = open + 1;
             let mut depth = 1;
             while let Some(token) = spelling(cursor) {
                 match token {
@@ -923,16 +1104,33 @@ impl<'s> Parser<'s> {
                 cursor += 1;
             }
             depth == 0 && spelling(cursor + 1) == Some("=>")
-        } else {
-            self.peek().is_some_and(|t| {
-                matches!(t.raw.kind, SyntaxKind::Identifier | SyntaxKind::TypeIdent)
-            }) && spelling(self.pos + 1) == Some("=>")
         };
+        let is_async = text == "async"
+            && match spelling(self.pos + 1) {
+                Some("(") => parenthesized_lambda(self.pos + 1),
+                Some("=>") => true,
+                _ => {
+                    self.tokens.get(self.pos + 1).is_some_and(|t| {
+                        matches!(t.raw.kind, SyntaxKind::Identifier | SyntaxKind::TypeIdent)
+                    }) && spelling(self.pos + 2) == Some("=>")
+                }
+            };
+        let lambda = is_async
+            || if text == "(" {
+                parenthesized_lambda(self.pos)
+            } else {
+                self.peek().is_some_and(|t| {
+                    matches!(t.raw.kind, SyntaxKind::Identifier | SyntaxKind::TypeIdent)
+                }) && spelling(self.pos + 1) == Some("=>")
+            };
+        if is_async {
+            self.bump();
+        }
         if lambda {
             let parens = self.eat("(");
             let mut parameters: Vec<Expr<'s>> = Vec::new();
             let mut names = std::collections::HashSet::new();
-            if !parens || !self.at(")") {
+            if !self.at("=>") && (!parens || !self.at(")")) {
                 loop {
                     let pattern = self.match_pattern();
                     self.parameter_names(&pattern, &mut names);
@@ -946,12 +1144,16 @@ impl<'s> Parser<'s> {
                 self.expect(")");
             }
             self.expect("=>");
+            // Await belongs to the innermost async function or closure body.
+            let outer_async = std::mem::replace(&mut self.async_fns, usize::from(is_async));
             let body = self.required_expr(multiline);
+            self.async_fns = outer_async;
             return Expr {
                 span: Span::new(span.start, body.span.end.max(span.end)),
                 kind: ExprKind::Lambda {
                     parameters,
                     body: Box::new(body),
+                    is_async,
                 },
             };
         }
@@ -1082,7 +1284,23 @@ impl<'s> Parser<'s> {
                 self.bump();
                 ExprKind::Null
             }
-            Some(SyntaxKind::Keyword) if matches!(text, "async" | "await" | "import") => {
+            Some(SyntaxKind::Keyword) if text == "await" => {
+                self.bump();
+                if self.async_fns == 0 {
+                    self.error_at(
+                        span,
+                        "await-outside-async",
+                        "await requires an async function body",
+                    );
+                }
+                let value = if !multiline && self.newline() {
+                    self.required_expr(false)
+                } else {
+                    self.expr(19, multiline, false)
+                };
+                ExprKind::Await(Box::new(value))
+            }
+            Some(SyntaxKind::Keyword) if matches!(text, "async" | "import") => {
                 self.error(
                     "unsupported-syntax",
                     "This keyword is reserved but its grammar is not supported yet",
@@ -1532,7 +1750,9 @@ fn offset_expr_spans(expr: &mut Expr<'_>, offset: usize) {
             offset_expr_spans(then_value, offset);
             offset_expr_spans(else_value, offset);
         }
-        ExprKind::Lambda { parameters, body } => {
+        ExprKind::Lambda {
+            parameters, body, ..
+        } => {
             for param in parameters {
                 offset_expr_spans(param, offset);
             }
@@ -1543,6 +1763,7 @@ fn offset_expr_spans(expr: &mut Expr<'_>, offset: usize) {
             name.span.end += offset;
         }
         ExprKind::Unary { value, .. } => offset_expr_spans(value, offset),
+        ExprKind::Await(value) => offset_expr_spans(value, offset),
         ExprKind::Binary { left, right, .. } => {
             offset_expr_spans(left, offset);
             offset_expr_spans(right, offset);

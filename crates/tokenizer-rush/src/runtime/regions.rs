@@ -85,11 +85,14 @@ impl<'s> Runtime<'_, 's> {
         }
     }
 
-    /// Open a region (arena) frame; cells allocated inside get its stamp and
-    /// count towards the metrics of its name.
-    pub(super) fn enter_region(&mut self, budget: Option<usize>, name: Option<&str>) -> u32 {
+    /// Mint a region frame without pushing it: allocates the id, resolves the
+    /// stats entry for the name and counts one entry.
+    pub(super) fn mint_region_frame(
+        &mut self,
+        budget: Option<usize>,
+        name: Option<&str>,
+    ) -> RegionFrame {
         self.next_region = self.next_region.checked_add(1).expect("region id overflow");
-        let region = self.next_region;
         let stats = match self
             .region_stats
             .iter()
@@ -106,13 +109,21 @@ impl<'s> Runtime<'_, 's> {
             }
         };
         self.region_stats[stats].entries += 1;
-        self.region_stack.push(RegionFrame {
-            id: region,
+        RegionFrame {
+            id: self.next_region,
             budget,
             live: 0,
             stats,
             cells: Vec::new(),
-        });
+        }
+    }
+
+    /// Open a region (arena) frame; cells allocated inside get its stamp and
+    /// count towards the metrics of its name.
+    pub(super) fn enter_region(&mut self, budget: Option<usize>, name: Option<&str>) -> u32 {
+        let frame = self.mint_region_frame(budget, name);
+        let region = frame.id;
+        self.region_stack.push(frame);
         region
     }
 

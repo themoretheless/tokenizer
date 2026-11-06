@@ -180,9 +180,7 @@ impl<'s> Runtime<'_, 's> {
                                 location: None,
                                 module: self.module.map(str::to_owned),
                                 span,
-                                message: format!(
-                                    "Runtime sequence source allocation failed: {e:?}"
-                                ),
+                                message: e.message("Runtime sequence source allocation failed"),
                             },
                         )?,
                     ),
@@ -196,9 +194,7 @@ impl<'s> Runtime<'_, 's> {
                                 callback: stage.callback.clone(),
                                 kind: match stage.kind {
                                     crate::bytecode::BytecodeStageKind::Map => StageKind::Map,
-                                    crate::bytecode::BytecodeStageKind::Filter => {
-                                        StageKind::Filter
-                                    }
+                                    crate::bytecode::BytecodeStageKind::Filter => StageKind::Filter,
                                     crate::bytecode::BytecodeStageKind::FlatMap => {
                                         StageKind::FlatMap
                                     }
@@ -212,7 +208,7 @@ impl<'s> Runtime<'_, 's> {
                             location: None,
                             module: self.module.map(str::to_owned),
                             span,
-                            message: format!("Runtime sequence stage allocation failed: {e:?}"),
+                            message: e.message("Runtime sequence stage allocation failed"),
                         })?;
                 }
                 Rc::new(Sequence { source, stages })
@@ -228,7 +224,7 @@ impl<'s> Runtime<'_, 's> {
                         location: None,
                         module: self.module.map(str::to_owned),
                         span,
-                        message: format!("Runtime sequence source allocation failed: {e:?}"),
+                        message: e.message("Runtime sequence source allocation failed"),
                     })?,
                 ),
                 stages: SequenceStages::default(),
@@ -255,81 +251,81 @@ impl<'s> Runtime<'_, 's> {
         }
         'candidate: loop {
             self.charge(1, span)?;
-            let (mut item, mut stage_index) =
-                if let Some((value, resume)) = cursor.pending.pop_front() {
-                    (value, resume)
-                } else {
-                    let item = match &cursor.sequence.source {
-                        SequenceSource::Host(source) => {
-                            if cursor.host.is_none() {
-                                cursor.host =
-                                    Some(source.factory.open(self.cancellation).map_err(
-                                        |message| RuntimeError {
-                                            stack: Vec::new(),
-                                            location: None,
-                                            module: self.module.map(str::to_owned),
-                                            span,
-                                            message,
-                                        },
-                                    )?);
-                                self.check(span)?;
-                            }
-                            let next = cursor
-                                .host
-                                .as_mut()
-                                .unwrap()
-                                .next(self.cancellation)
-                                .map_err(|message| RuntimeError {
+            let (mut item, mut stage_index) = if let Some((value, resume)) =
+                cursor.pending.pop_front()
+            {
+                (value, resume)
+            } else {
+                let item = match &cursor.sequence.source {
+                    SequenceSource::Host(source) => {
+                        if cursor.host.is_none() {
+                            cursor.host = Some(source.factory.open(self.cancellation).map_err(
+                                |message| RuntimeError {
                                     stack: Vec::new(),
                                     location: None,
                                     module: self.module.map(str::to_owned),
                                     span,
                                     message,
-                                })?;
+                                },
+                            )?);
                             self.check(span)?;
-                            let Some(item) = next else {
-                                cursor.finished = true;
-                                cursor.host = None;
-                                return Ok(None);
-                            };
-                            self.host_value_size(&item, span, 0)?;
-                            if !source.item_type.accepts(&item) {
-                                return self.error(
-                                    span,
-                                    "Host sequence item does not match its declared type",
-                                );
-                            }
-                            item
                         }
-                        SequenceSource::List(items) => match items.get(cursor.index) {
-                            Some(item) => item.clone(),
-                            None => return Ok(None),
-                        },
-                        SequenceSource::Range { start, end, step } => {
-                            let current = (cursor.index as f64).mul_add(*step, *start);
-                            if cursor.previous == Some(current) || !current.is_finite() {
-                                return self.error(span, "Range cannot advance finitely");
-                            }
-                            if if *step > 0.0 {
-                                current >= *end
-                            } else {
-                                current <= *end
-                            } {
-                                return Ok(None);
-                            }
-                            cursor.previous = Some(current);
-                            Value::Number(current)
+                        let next = cursor
+                            .host
+                            .as_mut()
+                            .unwrap()
+                            .next(self.cancellation)
+                            .map_err(|message| RuntimeError {
+                                stack: Vec::new(),
+                                location: None,
+                                module: self.module.map(str::to_owned),
+                                span,
+                                message,
+                            })?;
+                        self.check(span)?;
+                        let Some(item) = next else {
+                            cursor.finished = true;
+                            cursor.host = None;
+                            return Ok(None);
+                        };
+                        self.host_value_size(&item, span, 0)?;
+                        if !source.item_type.accepts(&item) {
+                            return self.error(
+                                span,
+                                "Host sequence item does not match its declared type",
+                            );
                         }
-                    };
-                    cursor.index = cursor.index.checked_add(1).ok_or_else(|| RuntimeError {
-                        stack: Vec::new(),
-                        location: None,
-                        module: self.module.map(str::to_owned),
-                        span,
-                        message: "Sequence index overflow".into(),
-                    })?;
-                    (item, 0)
+                        item
+                    }
+                    SequenceSource::List(items) => match items.get(cursor.index) {
+                        Some(item) => item.clone(),
+                        None => return Ok(None),
+                    },
+                    SequenceSource::Range { start, end, step } => {
+                        let current = (cursor.index as f64).mul_add(*step, *start);
+                        if cursor.previous == Some(current) || !current.is_finite() {
+                            return self.error(span, "Range cannot advance finitely");
+                        }
+                        if if *step > 0.0 {
+                            current >= *end
+                        } else {
+                            current <= *end
+                        } {
+                            return Ok(None);
+                        }
+                        cursor.previous = Some(current);
+                        Value::Number(current)
+                    }
                 };
+                cursor.index = cursor.index.checked_add(1).ok_or_else(|| RuntimeError {
+                    stack: Vec::new(),
+                    location: None,
+                    module: self.module.map(str::to_owned),
+                    span,
+                    message: "Sequence index overflow".into(),
+                })?;
+                (item, 0)
+            };
             while stage_index < cursor.sequence.stages.len() {
                 let stage = &cursor.sequence.stages[stage_index];
                 let previous_module = self.module;

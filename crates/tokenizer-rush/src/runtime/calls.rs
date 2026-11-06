@@ -10,6 +10,23 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
 
+impl Runtime<'_, '_> {
+    /// Maps a Cover rejection to the corresponding limit error.
+    fn cover_error(&self, span: crate::Span, error: memory::CoverError) -> RuntimeError {
+        let message = match error {
+            memory::CoverError::Heap => "Heap limit exceeded",
+            memory::CoverError::Allocated => "Allocation limit exceeded",
+        };
+        RuntimeError {
+            stack: Vec::new(),
+            location: None,
+            module: self.module.map(str::to_owned),
+            span,
+            message: message.into(),
+        }
+    }
+}
+
 impl<'s> Runtime<'_, 's> {
     pub(super) fn call(
         &mut self,
@@ -38,7 +55,8 @@ impl<'s> Runtime<'_, 's> {
         let result = match function {
             Value::Function(function) => self.call_user(function, arguments, span),
             Value::BytecodeFunction(closure) => {
-                let mut vm = crate::bytecode::Vm::new(self.remaining);
+                let mut vm =
+                    crate::bytecode::Vm::with_shared_budget(self.remaining, self.memory.clone());
                 let static_args: Vec<_> = arguments.iter().filter_map(|a| a.to_static()).collect();
                 if static_args.len() != arguments.len() {
                     return self.error(span, "Non-static arguments in bytecode call");
@@ -182,12 +200,16 @@ impl<'s> Runtime<'_, 's> {
                 }
                 let mut cursor = self.sequence_cursor(source.clone(), span)?;
                 let mut output = Vec::new();
+                let mut cover = memory::Cover::new(&self.memory);
                 for _ in 0..limit {
                     let Some(item) = self.sequence_next(&mut cursor, span)? else {
                         break;
                     };
                     self.charge(1, span)?;
                     output.push(item);
+                    cover
+                        .cover_vec(&output)
+                        .map_err(|e| self.cover_error(span, e))?;
                 }
                 return Ok(Value::List(output));
             }
@@ -232,7 +254,7 @@ impl<'s> Runtime<'_, 's> {
                         location: None,
                         module: self.module.map(str::to_owned),
                         span,
-                        message: format!("Runtime sequence allocation failed: {e:?}"),
+                        message: e.message("Runtime sequence allocation failed"),
                     })?;
                 return Ok(Value::Sequence(Rc::new(sequence)));
             }
@@ -530,13 +552,22 @@ impl<'s> Runtime<'_, 's> {
                         return self.error(span, "arena budget must be a non-negative integer");
                     }
                 };
-                self.collection_growth(0, 2, span)?;
+                let persistent = match arguments.next() {
+                    None | Some(Value::Null) => false,
+                    Some(Value::Bool(value)) => value,
+                    _ => return self.error(span, "arena persistent flag must be a boolean"),
+                };
+                self.collection_growth(0, 3, span)?;
                 return Ok(Value::Record(RecordMap::from([
                     ("name".into(), Value::String(name)),
                     ("budget".into(), budget),
+                    ("persistent".into(), Value::Bool(persistent)),
                 ])));
             }
-            if matches!(builtin, Builtin::ArenaRun | Builtin::ArenaStats) {
+            if matches!(
+                builtin,
+                Builtin::ArenaRun | Builtin::ArenaStats | Builtin::ArenaReset
+            ) {
                 let mut arguments = arguments.into_owned().into_iter();
                 let descriptor = arguments.next().unwrap();
                 let Value::Record(fields) = &descriptor else {
@@ -553,7 +584,12 @@ impl<'s> Runtime<'_, 's> {
                     let metric = |pick: fn(&RegionStats) -> u64| {
                         stats.map_or(0.0, |entry| pick(entry) as f64)
                     };
-                    self.collection_growth(0, 7, span)?;
+                    let live = self
+                        .persistent_regions
+                        .iter()
+                        .find(|(n, _)| n == name)
+                        .map_or(0.0, |(_, frame)| frame.live as f64);
+                    self.collection_growth(0, 8, span)?;
                     return Ok(Value::Record(RecordMap::from([
                         ("name".into(), Value::String(name.clone())),
                         ("entries".into(), Value::Number(metric(|s| s.entries))),
@@ -571,7 +607,26 @@ impl<'s> Runtime<'_, 's> {
                             "suggested_budget".into(),
                             Value::Number(stats.map_or(0.0, |s| s.suggested_budget() as f64)),
                         ),
+                        ("live".into(), Value::Number(live)),
                     ])));
+                }
+                if builtin == Builtin::ArenaReset {
+                    // Retire the parked persistent frame: every surviving cell
+                    // is emptied in place, so holders observe `null` exactly
+                    // like after a move(). Scratch arenas have no parked
+                    // frame, so reset on them is a no-op.
+                    if let Some(index) = self.persistent_regions.iter().position(|(n, _)| n == name)
+                    {
+                        let (_, frame) = self.persistent_regions.swap_remove(index);
+                        for cell in frame.cells {
+                            if self.cell_regions.get(cell).copied() == Some(frame.id)
+                                && self.cell_ids[cell].upgrade().is_some()
+                            {
+                                self.cells[cell] = (Value::Null, None);
+                            }
+                        }
+                    }
+                    return Ok(Value::Null);
                 }
                 let callback = arguments.next().unwrap();
                 if !matches!(
@@ -589,6 +644,44 @@ impl<'s> Runtime<'_, 's> {
                         }
                     },
                 };
+                if matches!(fields.get("persistent"), Some(Value::Bool(true))) {
+                    // Persistent arena: reuse the parked frame (stable region
+                    // id) or mint one. Survivors keep the arena's stamp across
+                    // runs instead of promoting to the caller.
+                    let mut frame =
+                        match self.persistent_regions.iter().position(|(n, _)| n == name) {
+                            Some(index) => {
+                                let frame = self.persistent_regions.swap_remove(index).1;
+                                // Minting counts one entry; a reused frame must
+                                // count each rerun explicitly.
+                                self.region_stats[frame.stats].entries += 1;
+                                frame
+                            }
+                            None => self.mint_region_frame(budget, Some(name)),
+                        };
+                    frame.budget = budget;
+                    let region = frame.id;
+                    self.region_stack.push(frame);
+                    self.skip_call_region = true;
+                    let result = self.call(callback.clone(), Cow::Borrowed(&[]), span);
+                    self.skip_call_region = false;
+                    // Reclaim while the frame is still on the stack so its
+                    // dead cells are accounted, then keep only survivors.
+                    self.reclaim_cells();
+                    let mut frame = self.region_stack.pop().expect("region frame");
+                    debug_assert_eq!(frame.id, region);
+                    frame.cells.retain(|&index| {
+                        self.cell_regions.get(index).copied() == Some(region)
+                            && self.cell_ids[index].upgrade().is_some()
+                    });
+                    frame.live = frame.cells.len();
+                    let overflow = frame.budget.is_some_and(|budget| frame.live > budget);
+                    self.persistent_regions.push((name.clone(), frame));
+                    if overflow {
+                        return self.error(span, "Region cell budget exceeded");
+                    }
+                    return result;
+                }
                 let region = self.enter_region(budget, Some(name));
                 // The callback's own implicit call region would intercept its
                 // scratch cells before the arena sees them; the arena frame
@@ -809,6 +902,7 @@ impl<'s> Runtime<'_, 's> {
                     return Ok(Value::Range { start, end, step });
                 }
                 let mut values = Vec::new();
+                let mut cover = memory::Cover::new(&self.memory);
                 let mut current = start;
                 while if step > 0.0 {
                     current < end
@@ -824,6 +918,9 @@ impl<'s> Runtime<'_, 's> {
                         return self.error(span, "Collection item limit exceeded");
                     }
                     values.push(Value::Number(current));
+                    cover
+                        .cover_vec(&values)
+                        .map_err(|e| self.cover_error(span, e))?;
                     let next = (values.len() as f64).mul_add(step, start);
                     if !next.is_finite() || next == current {
                         return self.error(span, "Range cannot advance finitely");
@@ -863,6 +960,7 @@ impl<'s> Runtime<'_, 's> {
                 let mut cursor = self.sequence_cursor(source, span)?;
                 let mut positions = BTreeMap::<String, usize>::new();
                 let mut groups = Vec::<(String, Value<'s>)>::new();
+                let mut covers = Vec::<memory::Cover>::new();
                 while let Some(item) = self.sequence_next(&mut cursor, span)? {
                     let key = self.call(
                         callback.clone(),
@@ -881,6 +979,7 @@ impl<'s> Runtime<'_, 's> {
                         self.string_growth(0, field.len(), span)?;
                         let position = groups.len();
                         positions.insert(key.clone(), position);
+                        covers.push(memory::Cover::new(&self.memory));
                         groups.push((
                             key,
                             if reducer.is_some() {
@@ -898,6 +997,9 @@ impl<'s> Runtime<'_, 's> {
                     } else if let Value::List(values) = &mut groups[position].1 {
                         self.collection_growth(values.len(), 1, span)?;
                         values.push(item);
+                        covers[position]
+                            .cover_vec(values)
+                            .map_err(|e| self.cover_error(span, e))?;
                     }
                 }
                 let group_shape: RecordShape = Rc::from([String::from("key"), String::from(field)]);
@@ -940,6 +1042,7 @@ impl<'s> Runtime<'_, 's> {
                 return self.error(span, "Callback must be callable");
             }
             let mut output = Vec::new();
+            let mut cover = memory::Cover::new(&self.memory);
             while let Some(item) = self.sequence_next(&mut cursor, span)? {
                 let result = if builtin == Builtin::Fold {
                     self.call(
@@ -959,12 +1062,18 @@ impl<'s> Runtime<'_, 's> {
                     Builtin::Map => {
                         self.collection_growth(output.len(), 1, span)?;
                         output.push(result);
+                        cover
+                            .cover_vec(&output)
+                            .map_err(|e| self.cover_error(span, e))?;
                     }
                     Builtin::FlatMap => match result {
                         Value::List(values) => {
                             self.charge(values.len(), span)?;
                             self.collection_growth(output.len(), values.len(), span)?;
                             output.extend(values);
+                            cover
+                                .cover_vec(&output)
+                                .map_err(|e| self.cover_error(span, e))?;
                         }
                         _ => return self.error(span, "Flat map callback must return a list"),
                     },
@@ -972,6 +1081,9 @@ impl<'s> Runtime<'_, 's> {
                         Value::Bool(true) => {
                             self.collection_growth(output.len(), 1, span)?;
                             output.push(item);
+                            cover
+                                .cover_vec(&output)
+                                .map_err(|e| self.cover_error(span, e))?;
                         }
                         Value::Bool(false) => {}
                         _ => return self.error(span, "Filter callback must return a boolean"),
@@ -1029,6 +1141,7 @@ impl<'s> Runtime<'_, 's> {
                 .map_err(|e| self.environment_error(name.span, e))?,
             references: Rc::new(Vec::new()),
             siblings: Rc::new(Vec::new()),
+            is_async: false,
         })))
     }
 
@@ -1119,6 +1232,11 @@ impl<'s> Runtime<'_, 's> {
         }
         if matches!(&*function.body, FunctionBody::Constructor { .. }) {
             return self.call_constructor(&function, arguments, span);
+        }
+        if function.is_async {
+            // Stage A: the call spawns a task and returns its handle; the body
+            // runs only through resume_coroutine / the scheduler.
+            return self.spawn_async_task(function, &arguments, span);
         }
         let mut environment = self.take_call_environment(&function.environment);
         for sib in function.siblings.iter() {

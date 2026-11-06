@@ -451,6 +451,19 @@ impl ScriptInstance<'_, '_> {
     pub fn memory_usage(&self) -> usize {
         self.runtime.retained_usage().bytes
     }
+    /// Peak requested heap bytes charged to this run's reservation ledger so
+    /// far. Use it to calibrate `ExecutionLimits::max_heap_bytes`: it counts
+    /// ledger-covered storage (cells, environments, sequence buffers), not
+    /// transient values, host allocations or allocator overhead.
+    pub fn peak_heap_bytes(&self) -> usize {
+        self.runtime.memory.peak_bytes()
+    }
+    /// Cumulative requested bytes charged over the run so far, including work
+    /// whose results are already released. Use it to calibrate
+    /// `ExecutionLimits::max_allocated_bytes`.
+    pub fn allocated_bytes(&self) -> usize {
+        self.runtime.memory.allocated_bytes()
+    }
     /// Aggregated allocation metrics per region name, including regions
     /// executed inside coroutines. Use `peak_live` to size region budgets.
     pub fn region_stats(&self) -> &[RegionStats] {
@@ -524,6 +537,7 @@ pub(super) fn owned_value(value: Value<'_>) -> std::result::Result<Value<'static
         ),
         Value::Host(v) => Value::Host(v),
         Value::Builtin(v) => Value::Builtin(v),
+        Value::Task(id) => Value::Task(id),
         Value::BytecodeFunction(v) => Value::BytecodeFunction(v),
         Value::BytecodeSequence(v) => Value::BytecodeSequence(v),
         Value::BytecodeIterator(v) => Value::BytecodeIterator(v),

@@ -625,6 +625,9 @@ pub(crate) fn format_value_for_display(value: &Value<'_>, out: &mut String, dept
         Value::Builtin(b) => {
             let _ = write!(out, "<builtin {:?}>", b);
         }
+        Value::Task(id) => {
+            let _ = write!(out, "<task {}>", id.get());
+        }
         Value::Host(h) => {
             let _ = write!(out, "<host function {}>", h.name);
         }

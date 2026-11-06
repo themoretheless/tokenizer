@@ -330,9 +330,15 @@ impl<'s> Compiler<'s> {
                 parameters,
                 result,
                 body,
-                ..
+                is_async,
             } = &stmt.kind
             {
+                if *is_async {
+                    return Err(self.error(
+                        stmt.span,
+                        "async functions are not supported in bytecode compilation",
+                    ));
+                }
                 let (_, fn_idx) = hoisted_fns[fn_cursor];
                 fn_cursor += 1;
                 self.push_state(Some(name.text.to_string()), parameters.len());
@@ -1528,7 +1534,17 @@ impl<'s> Compiler<'s> {
                 let end_len = self.current().chunk.code.len();
                 self.current().chunk.patch_jump(end_jump, end_len);
             }
-            ExprKind::Lambda { parameters, body } => {
+            ExprKind::Lambda {
+                parameters,
+                body,
+                is_async,
+            } => {
+                if *is_async {
+                    return Err(self.error(
+                        span,
+                        "async closures are not supported in bytecode compilation",
+                    ));
+                }
                 self.push_state(None, parameters.len());
                 for (i, p) in parameters.iter().enumerate() {
                     if let Some(p_name) = extract_pattern_name(p) {
@@ -1720,6 +1736,9 @@ impl<'s> Compiler<'s> {
                 for ej in match_end_jumps {
                     self.current().chunk.patch_jump(ej, end_target);
                 }
+            }
+            ExprKind::Await(_) => {
+                return Err(self.error(span, "await is not supported in bytecode compilation"));
             }
             _ => {
                 return Err(self.error(span, "Expression not supported in bytecode compilation"));
