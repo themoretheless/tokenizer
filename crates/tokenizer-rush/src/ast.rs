@@ -129,6 +129,10 @@ pub struct Expr<'s> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprKind<'s> {
     Try(Box<Expr<'s>>),
+    /// Transactional failure block `try { ... }`: catches `?` short-circuits
+    /// (`None` / `Err`) inside the block and rolls back any `mut` cell
+    /// mutations when the block evaluates to `None` or `Err`.
+    TryBlock(Block<'s>),
     /// `await expr` in an async function or closure body.
     Await(Box<Expr<'s>>),
     If {

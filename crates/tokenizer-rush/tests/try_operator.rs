@@ -1,4 +1,7 @@
-use themoretheless_tokenizer_rush::{Program, Value, evaluate, format_source};
+use themoretheless_tokenizer_rush::{
+    CancellationToken, ExecutionLimits, OwnedScriptInstance, Program, StateValue, Value, evaluate,
+    format_source,
+};
 
 #[test]
 fn option_and_result_successes_unwrap_and_failures_return_early() {
@@ -76,5 +79,168 @@ fn postfix_chaining_works_with_user_data_and_formats_stably() {
     assert_eq!(
         evaluate(&formatted, 1000).unwrap(),
         Value::Variant("Some", vec![Value::Number(7.)])
+    );
+}
+
+#[test]
+fn try_block_catches_propagation_and_rolls_back_mutations_on_failure() {
+    let source = "\
+mut counter = 10
+mut items = [1, 2]
+mut state = { hp: 100 }
+fn step(v: Result[number, str]) -> Result[number, str] {
+    counter += 5
+    items = [1, 2, 3]
+    state.hp -= 20
+    let x = v?
+    counter += x
+    return Ok(x * 2)
+}
+let failed = try {
+    let a = step(Ok(4))?
+    let b = step(Err('boom'))?
+    Ok(a + b)
+}
+let after_fail = (failed, counter, items, state.hp)
+let succeeded = try {
+    let a = step(Ok(4))?
+    let b = step(Ok(6))?
+    Ok(a + b)
+}
+(after_fail, succeeded, counter, items, state.hp)
+";
+    assert_eq!(
+        evaluate(source, 5000).unwrap(),
+        Value::Tuple(vec![
+            Value::Tuple(vec![
+                Value::Variant("Err", vec![Value::String("boom".into())]),
+                Value::Number(10.),
+                Value::List(vec![Value::Number(1.), Value::Number(2.)]),
+                Value::Number(100.),
+            ]),
+            Value::Variant("Ok", vec![Value::Number(20.)]),
+            Value::Number(30.),
+            Value::List(vec![
+                Value::Number(1.),
+                Value::Number(2.),
+                Value::Number(3.)
+            ]),
+            Value::Number(60.),
+        ])
+    );
+}
+
+#[test]
+fn nested_try_blocks_isolate_inner_rollback_while_preserving_outer_progress() {
+    let source = "\
+mut log = 0
+let outcome = try {
+    log += 10
+    let inner = try {
+        log += 100
+        let x = None()?
+        Some(x)
+    }
+    let fallback = match inner {
+        Some(v) => v,
+        None() => 5,
+    }
+    log += fallback
+    Some(log)
+}
+(outcome, log)
+";
+    assert_eq!(
+        evaluate(source, 5000).unwrap(),
+        Value::Tuple(vec![
+            Value::Variant("Some", vec![Value::Number(15.)]),
+            Value::Number(15.),
+        ])
+    );
+}
+
+#[test]
+fn try_block_formats_stably_and_rejects_invalid_control_or_types() {
+    let source = "let x = try { let v = Some(1)?; Some(v + 2) }; x";
+    let formatted = format_source(source).unwrap();
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+    assert_eq!(
+        evaluate(&formatted, 1000).unwrap(),
+        Value::Variant("Some", vec![Value::Number(3.)])
+    );
+
+    for invalid in [
+        "try { 42 }",
+        "try { let x = Some(1)?; Ok(x) }",
+        "try { let x = Ok(1)?; Some(x) }",
+        "try { let x = 42?; Some(x) }",
+        "fn f() -> Option[number] { let x = try { return Some(1) }; return x }",
+        "for i in [1, 2] { let x = try { break; Some(1) } }",
+    ] {
+        assert!(Program::compile(invalid).is_err(), "accepted {invalid}");
+    }
+}
+
+#[test]
+fn call_transactional_rolls_back_instance_mutations_on_err_none_or_runtime_error() {
+    let source = "\
+mut balance: int = 100
+fn withdraw(amount: int) -> Result[int, str] {
+    balance -= amount
+    if balance < 0 {
+        return Err('insufficient funds')
+    }
+    return Ok(balance)
+}
+fn explode(divisor: int) -> int {
+    balance -= 50
+    return 100 / divisor
+}
+";
+    let program = Program::compile(source).unwrap();
+    let token = CancellationToken::default();
+    let limits = ExecutionLimits::new(5000);
+    let mut instance = program
+        .instantiate(limits, &token, &[], &[], &[], &[])
+        .unwrap();
+
+    assert_eq!(
+        instance
+            .call_transactional("withdraw", &[Value::Int(30)], limits)
+            .unwrap(),
+        Value::Variant("Ok", vec![Value::Int(70)])
+    );
+    assert_eq!(instance.get("balance"), Some(Value::Int(70)));
+
+    assert_eq!(
+        instance
+            .call_transactional("withdraw", &[Value::Int(90)], limits)
+            .unwrap(),
+        Value::Variant("Err", vec![Value::String("insufficient funds".into())])
+    );
+    assert_eq!(instance.get("balance"), Some(Value::Int(70)));
+
+    assert!(
+        instance
+            .call_transactional("explode", &[Value::Int(0)], limits)
+            .is_err()
+    );
+    assert_eq!(instance.get("balance"), Some(Value::Int(70)));
+
+    let mut owned = OwnedScriptInstance::new(source, limits).unwrap();
+    assert!(
+        owned
+            .call_transactional("explode", &[StateValue::Int(0)], limits)
+            .is_err()
+    );
+    assert_eq!(
+        owned
+            .call_values_transactional("withdraw", &[Value::Int(150)], limits)
+            .unwrap(),
+        Value::Variant("Err", vec![Value::String("insufficient funds".into())])
+    );
+    assert_eq!(
+        owned.export_state(&["balance"]).unwrap().get("balance"),
+        Some(&StateValue::Int(100))
     );
 }

@@ -18,6 +18,7 @@ struct Token {
 fn expr_bytes(expr: &Expr<'_>) -> usize {
     let kind = match &expr.kind {
         ExprKind::Try(inner) => expr_bytes(inner),
+        ExprKind::TryBlock(body) => block_bytes(body),
         ExprKind::If {
             condition,
             then_value,
@@ -207,6 +208,7 @@ pub(crate) fn run(source: &str, lexed: Lexed, valid: bool, limits: InputLimits) 
         limits,
         depth: 0,
         functions: 0,
+        try_blocks: 0,
         async_fns: 0,
         loops: 0,
         roles: Vec::new(),
@@ -250,6 +252,8 @@ struct Parser<'s> {
     limits: InputLimits,
     depth: usize,
     functions: usize,
+    /// Nesting of `try { ... }` failure blocks; `?` is legal inside a function or try block.
+    try_blocks: usize,
     /// Nesting of async function/closure bodies; `await` is legal only inside one.
     async_fns: usize,
     loops: usize,
@@ -711,12 +715,15 @@ impl<'s> Parser<'s> {
             None
         };
         let old_loops = self.loops;
+        let old_try = self.try_blocks;
         self.loops = 0;
+        self.try_blocks = 0;
         self.functions += 1;
         let outer_async = std::mem::replace(&mut self.async_fns, usize::from(is_async));
         let body = self.block(indent);
         self.async_fns = outer_async;
         self.functions -= 1;
+        self.try_blocks = old_try;
         self.loops = old_loops;
         StmtKind::Function {
             name,
@@ -904,11 +911,11 @@ impl<'s> Parser<'s> {
                 let operator_span = self.span();
                 self.bump();
                 chain += 1;
-                if self.functions == 0 {
+                if self.functions == 0 && self.try_blocks == 0 {
                     self.error_at(
                         operator_span,
                         "try-outside-function",
-                        "? requires a function with an Option or Result return type",
+                        "? requires a try block or a function with an Option or Result return type",
                     );
                 }
                 left = Expr {
@@ -1146,7 +1153,11 @@ impl<'s> Parser<'s> {
             self.expect("=>");
             // Await belongs to the innermost async function or closure body.
             let outer_async = std::mem::replace(&mut self.async_fns, usize::from(is_async));
+            let outer_functions = std::mem::replace(&mut self.functions, 0);
+            let outer_try = std::mem::replace(&mut self.try_blocks, 0);
             let body = self.required_expr(multiline);
+            self.try_blocks = outer_try;
+            self.functions = outer_functions;
             self.async_fns = outer_async;
             return Expr {
                 span: Span::new(span.start, body.span.end.max(span.end)),
@@ -1182,6 +1193,33 @@ impl<'s> Parser<'s> {
         }
         if text == "match" {
             return self.match_expr(multiline);
+        }
+        if self.eat("try") {
+            let block_start = self.span().start;
+            let outer_functions = std::mem::replace(&mut self.functions, 0);
+            let outer_loops = std::mem::replace(&mut self.loops, 0);
+            self.try_blocks += 1;
+            let body = if self.eat("{") {
+                let stmts = self.sequence(Some("}"), None);
+                self.expect("}");
+                Block {
+                    span: Span::new(block_start, self.end().max(block_start)),
+                    stmts: std::rc::Rc::new(stmts),
+                }
+            } else {
+                self.error("expected-block", "Expected a brace block after try");
+                Block {
+                    span: Span::new(block_start, block_start),
+                    stmts: std::rc::Rc::new(vec![]),
+                }
+            };
+            self.try_blocks -= 1;
+            self.loops = outer_loops;
+            self.functions = outer_functions;
+            return Expr {
+                span: Span::new(span.start, self.end().max(span.start)),
+                kind: ExprKind::TryBlock(body),
+            };
         }
         if matches!(text, "-" | "+" | "!" | "not" | "~") {
             self.bump();
@@ -1741,6 +1779,19 @@ fn offset_expr_spans(expr: &mut Expr<'_>, offset: usize) {
     expr.span.end += offset;
     match &mut expr.kind {
         ExprKind::Try(sub) => offset_expr_spans(sub, offset),
+        ExprKind::TryBlock(body) => {
+            body.span.start += offset;
+            body.span.end += offset;
+            if let Some(stmts) = std::rc::Rc::get_mut(&mut body.stmts) {
+                for stmt in stmts {
+                    stmt.span.start += offset;
+                    stmt.span.end += offset;
+                    if let StmtKind::Expr(sub) = &mut stmt.kind {
+                        offset_expr_spans(sub, offset);
+                    }
+                }
+            }
+        }
         ExprKind::If {
             condition,
             then_value,

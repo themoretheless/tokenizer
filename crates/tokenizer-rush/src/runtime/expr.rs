@@ -45,6 +45,45 @@ impl<'s> Runtime<'_, 's> {
                 }
                 _ => self.error(span, "? requires Option or Result"),
             },
+            ExprKind::TryBlock(body) => {
+                let cells = self.snapshot_cells(span)?;
+                let scope = environment
+                    .try_clone()
+                    .map_err(|e| self.environment_error(span, e))?;
+                let region = self.enter_region(None, None);
+                let result = self.scoped_statements(&body.stmts, scope);
+                let result = if result.is_err() {
+                    if let Some(early) = self.early_return.take() {
+                        Ok(early)
+                    } else {
+                        result.map(|(v, _)| v)
+                    }
+                } else {
+                    result.map(|(v, _)| v)
+                };
+                match result {
+                    Ok(value @ Value::Variant("Some" | "Ok", _)) => {
+                        drop(cells);
+                        self.exit_region(region, span)?;
+                        Ok(value)
+                    }
+                    Ok(value @ Value::Variant("None" | "Err", _)) => {
+                        let _ = self.exit_region(region, span);
+                        self.restore_cells(cells);
+                        Ok(value)
+                    }
+                    Ok(_) => {
+                        let _ = self.exit_region(region, span);
+                        self.restore_cells(cells);
+                        self.error(span, "try block must evaluate to Option or Result")
+                    }
+                    Err(err) => {
+                        let _ = self.exit_region(region, span);
+                        self.restore_cells(cells);
+                        Err(err)
+                    }
+                }
+            }
 
             ExprKind::String(text) => {
                 self.charge(text.len().saturating_sub(2), span)?;

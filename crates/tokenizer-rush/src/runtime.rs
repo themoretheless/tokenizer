@@ -119,6 +119,31 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         Ok(value)
     }
 
+    /// Invoke a named callable transactionally: if the call fails with a
+    /// `RuntimeError` or evaluates to `None` / `Err`, all mutable cell bindings
+    /// across the instance (including module state and captured closures) are
+    /// rolled back to their pre-call values.
+    pub fn call_transactional(
+        &mut self,
+        name: &str,
+        arguments: &[Value<'s>],
+        limits: ExecutionLimits,
+    ) -> Result<Value<'s>> {
+        self.runtime.reclaim_cells();
+        let cells = self.runtime.snapshot_cells(self.span)?;
+        let result = self.call(name, arguments, limits);
+        match &result {
+            Ok(Value::Variant("None" | "Err", _)) | Err(_) => {
+                self.runtime.restore_cells(cells);
+            }
+            Ok(_) => {
+                drop(cells);
+                self.runtime.reclaim_cells();
+            }
+        }
+        result
+    }
+
     /// Incrementally execute top-level statements in this instance's environment.
     /// Useful for REPL and interactive notebook sessions.
     pub fn eval_chunk(&mut self, source: &'s str) -> Result<Option<Value<'s>>> {
@@ -712,6 +737,9 @@ pub fn evaluate(source: &str, budget: usize) -> Result<Value<'_>> {
     Program::compile(source)?.run(budget, &CancellationToken::default(), &[])
 }
 
+/// Snapshot of live mutable cells for transactional rollback.
+type CellSnapshot<'s> = memory::Slots<(usize, (Value<'s>, Option<ValueType>), Rc<CellId>)>;
+
 struct Runtime<'a, 's> {
     module: Option<&'s str>,
     early_return: Option<Value<'s>>,
@@ -869,5 +897,28 @@ impl<'s> Runtime<'_, 's> {
             span,
             message: message.into(),
         })
+    }
+    /// Pin live mutable cells and snapshot their values and contracts so a
+    /// transactional block or call can roll back mutations on failure.
+    pub(super) fn snapshot_cells(&self, span: Span) -> Result<CellSnapshot<'s>> {
+        let mut cells =
+            memory::Slots::new(&self.memory, 0).map_err(|e| self.environment_error(span, e))?;
+        for (index, id) in self.cell_ids.iter().enumerate() {
+            if let Some(id) = id.upgrade() {
+                cells
+                    .push((index, self.cells[index].clone(), id))
+                    .map_err(|e| self.environment_error(span, e))?;
+            }
+        }
+        Ok(cells)
+    }
+    /// Restore live mutable cells from a snapshot and reclaim any cells
+    /// allocated solely during the aborted transaction.
+    pub(super) fn restore_cells(&mut self, cells: CellSnapshot<'s>) {
+        for (index, value, _) in cells.iter() {
+            self.cells[*index] = value.clone();
+        }
+        drop(cells);
+        self.reclaim_cells();
     }
 }

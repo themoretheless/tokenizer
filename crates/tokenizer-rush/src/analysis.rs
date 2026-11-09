@@ -321,6 +321,7 @@ fn inspect_inner(
         record_fields: HashMap::new(),
         return_types: Vec::new(),
         inferred_returns: Vec::new(),
+        try_blocks: Vec::new(),
         function_shapes: HashMap::new(),
         suspending_functions: HashSet::new(),
         user_types: HashMap::new(),
@@ -339,6 +340,8 @@ fn inspect_inner(
         region_depth: 0,
         region_strict: Vec::new(),
         binding_regions: HashMap::new(),
+        record_cell_leaks: None,
+        cell_leaking_functions: HashSet::new(),
         moved: HashMap::new(),
         hoisted_declarations: HashSet::new(),
     };
@@ -533,6 +536,8 @@ struct Checker<'s> {
     record_fields: HashMap<usize, Vec<String>>,
     return_types: Vec<Option<ValueType>>,
     inferred_returns: Vec<Vec<Shape>>,
+    /// Active `try { ... }` blocks and the operand shapes of any `?` inside each.
+    try_blocks: Vec<Vec<(Span, Shape)>>,
     function_shapes: HashMap<usize, Shape>,
     suspending_functions: HashSet<usize>,
     function_results: HashMap<usize, ValueType>,
@@ -545,6 +550,13 @@ struct Checker<'s> {
     region_depth: usize,
     region_strict: Vec<bool>,
     binding_regions: HashMap<usize, usize>,
+    /// While analyzing a function body: (function name span start, region
+    /// depth at entry). Escape checks record the function as cell-leaking
+    /// instead of reporting, so `arena_run` call sites can lint the callback.
+    record_cell_leaks: Option<(usize, usize)>,
+    /// Functions whose bodies can let captured cells escape their implicit
+    /// per-call region (via outer assignment or return).
+    cell_leaking_functions: HashSet<usize>,
     /// Bindings emptied by `move(...)`; a read is an error until reassigned.
     moved: HashMap<usize, Span>,
     /// Pre-declared `import` / `struct` / `enum` / `fn` definition start offsets in the active scope.

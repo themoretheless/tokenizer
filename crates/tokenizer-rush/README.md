@@ -65,6 +65,15 @@ legacy spellings. `Geometry`, `Row`, `T`, `print`, `where`, `select`, `count`,
   `foreach` is retained as an alias of `for`.
 - `return [expression]` inside a function; `yield expression` inside a function
   or loop (suspension executes only through the coroutine API); `break` / `continue` inside a loop.
+- Postfix `expr?` unwraps `Some(v)` / `Ok(v)` and propagates `None()` / `Err(e)`
+  to the innermost enclosing `try { ... }` block or function returning `Option` /
+  `Result`. A `try { ... }` expression block acts as a local transactional failure
+  scope: if `?` short-circuits on `None` / `Err` (or the block evaluates to `None` /
+  `Err`), all `mut` cell mutations performed during the block are rolled back
+  atomically. Host callers can also invoke functions transactionally via
+  `ScriptInstance::call_transactional` (`OwnedScriptInstance::call_transactional` /
+  `call_values_transactional`), which rolls back `mut` cells on `RuntimeError`,
+  `None`, or `Err`.
 - Names, decimal numbers, strings, `true`, `false`, `null`, lists, maps,
   calls, member access and indexing. A map uses `{key: value, ...}`.
 - Assignment to a name, member or index with `=`, `+=`, `-=`, `*=`, `/=`, `%=`.
@@ -255,6 +264,41 @@ makes arenas easy to store, pass around and even construct by hand. Like
 `map`/`filter` callbacks, an `arena_run` callback is driven synchronously and
 therefore must not `yield`; analysis rejects suspending callbacks at compile
 time, while non-suspending runs compose with coroutines freely.
+
+Arenas can also **persist**: `arena(name, budget?, true)` parks its frame
+between runs instead of sweeping it — cells captured by escaping closures
+keep the arena's stamp and their values across separate `arena_run` calls,
+the budget bounds the total parked live cells (not just one run), and
+`arena_stats` gains a `live` field showing the current parked count:
+
+```text
+const cache = arena("cache", 1024, true)
+arena_run(cache, () => warm_up())    // survivors stay in the arena
+arena_run(cache, () => use_cache())  // ...and are visible here
+arena_reset(cache)                   // holders observe null, budget frees up
+```
+
+`arena_reset(handle)` retires the parked frame: every surviving cell is
+emptied in place, so closures holding them observe `null` — exactly like a
+`move()` — and the arena starts empty on the next run. Resetting a scratch
+arena is a harmless no-op.
+
+Finally, `arena(name, budget?, persistent?, strict?)` with `strict = true`
+turns retention into an error, mirroring `strict region` blocks: a scratch
+run fails with `Strict arena cells escaped the run` if any cell would
+promote out, and a persistent run fails with `Strict arena retained new
+cells` if its parked live count grew during the run (mutating already-parked
+cells stays legal). Use strict arenas for hot paths that must not leak
+allocations into longer-lived scopes.
+
+Analysis knows about arena runs too: a callback whose body can let captured
+cells escape its implicit per-call region (an outer assignment or a returned
+closure) is reported at the `arena_run` site with the `arena-escape` lint —
+a hard error when the descriptor is a statically visible strict
+`arena(name, .., true)` literal. Ordinary calls of the same function stay
+clean: escaping a call region is only suspicious when a region was meant to
+bound it. Escapes through explicit `region` blocks inside the callback keep
+reporting as `region-escape` exactly as before.
 
 ## Rust API and compatibility
 

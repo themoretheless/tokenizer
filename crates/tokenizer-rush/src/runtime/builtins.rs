@@ -141,7 +141,7 @@ impl Builtin {
             | Self::ToUpper => (1, 1),
             Self::Range | Self::RangeIter => (2, 3),
             Self::Assert => (1, 2),
-            Self::Arena => (1, 3),
+            Self::Arena => (1, 4),
             Self::ArenaStats | Self::ArenaReset => (1, 1),
             Self::ArenaRun => (2, 2),
             Self::GridMesh
@@ -701,6 +701,37 @@ pub(crate) fn eval_math_builtin<'s>(
     }
 }
 
+/// Validate `arena(name, budget?, persistent?, strict?)` arguments and build its descriptor record.
+pub(crate) fn build_arena_descriptor<'s>(args: &[Value<'s>]) -> Result<RecordMap<'s>, &'static str> {
+    let Some(Value::String(name)) = args.first() else {
+        return Err("arena requires a name string");
+    };
+    if name.is_empty() {
+        return Err("arena name must not be empty");
+    }
+    let budget = match args.get(1) {
+        None | Some(Value::Null) => Value::Null,
+        Some(v) if v.as_usize_index().is_some() => v.clone(),
+        _ => return Err("arena budget must be a non-negative integer"),
+    };
+    let persistent = match args.get(2) {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(value)) => *value,
+        _ => return Err("arena persistent flag must be a boolean"),
+    };
+    let strict = match args.get(3) {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(value)) => *value,
+        _ => return Err("arena strict flag must be a boolean"),
+    };
+    Ok(RecordMap::from([
+        ("name".into(), Value::String(name.clone())),
+        ("budget".into(), budget),
+        ("persistent".into(), Value::Bool(persistent)),
+        ("strict".into(), Value::Bool(strict)),
+    ]))
+}
+
 /// Evaluate pure, callback-free builtins shared across Bytecode VM and AST runtime.
 pub(crate) fn eval_pure_builtin<'s>(
     builtin: Builtin,
@@ -902,22 +933,14 @@ pub(crate) fn eval_pure_builtin<'s>(
             if !builtin.arity().contains(&args.len()) {
                 return Err("Incorrect builtin argument count".into());
             }
-            let Some(Value::String(name)) = args.first() else {
-                return Err("arena requires a name string".into());
-            };
-            if name.is_empty() {
-                return Err("arena name must not be empty".into());
-            }
-            let budget = match args.get(1) {
-                None | Some(Value::Null) => Value::Null,
-                Some(v) if v.as_usize_index().is_some() => v.clone(),
-                _ => return Err("arena budget must be a non-negative integer".into()),
-            };
-            Ok(Value::Record(RecordMap::from([
-                ("name".into(), Value::String(name.clone())),
-                ("budget".into(), budget),
-            ])))
+            build_arena_descriptor(args)
+                .map(Value::Record)
+                .map_err(Into::into)
         }
+        Builtin::ArenaRun | Builtin::ArenaStats | Builtin::ArenaReset => {
+            Err("Arena runtime operations require the tree-walk runtime".into())
+        }
+        Builtin::GridMesh => Err("grid_mesh requires the tree-walk runtime".into()),
         Builtin::Some | Builtin::None | Builtin::Ok | Builtin::Err => {
             let (tag, count) = match builtin {
                 Builtin::Some => ("Some", 1),

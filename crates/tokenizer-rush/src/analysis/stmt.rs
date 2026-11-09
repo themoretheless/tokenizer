@@ -474,6 +474,9 @@ impl<'s> Checker<'s> {
             | ExprKind::Member { object: value, .. } => {
                 Self::expr_calls_suspending(value, scopes, suspending)
             }
+            ExprKind::TryBlock(body) => {
+                Self::body_calls_suspending(&body.stmts, scopes, suspending)
+            }
             ExprKind::Index { object, index } => {
                 Self::expr_calls_suspending(object, scopes, suspending)
                     || Self::expr_calls_suspending(index, scopes, suspending)
@@ -914,7 +917,20 @@ impl<'s> Checker<'s> {
                         break;
                     }
                 }
+                // Analyze the body under its implicit per-call region: escapes
+                // of the function's own cells are recorded (for `arena_run`
+                // call-site lints), not reported — returning or storing
+                // closures is legitimate for ordinary calls.
+                let previous_recording =
+                    self.record_cell_leaks.replace((name.span.start, self.region_depth));
+                let saved_try = std::mem::take(&mut self.try_blocks);
+                self.region_depth += 1;
+                self.region_strict.push(false);
                 self.statements(&body.stmts);
+                self.region_strict.pop();
+                self.region_depth -= 1;
+                self.try_blocks = saved_try;
+                self.record_cell_leaks = previous_recording;
                 let mut returns = self.inferred_returns.pop().unwrap();
                 if result_type.is_none() {
                     if BlockExits::inspect(&body.stmts).next {

@@ -106,6 +106,16 @@ impl<'s> Checker<'s> {
         let Some(escaped) = self.escape_level(span, target_level) else {
             return;
         };
+        // While a function body is analyzed under its implicit per-call
+        // region, escapes of its own cells only mark the function as
+        // cell-leaking; genuine crossings of deeper (explicit) regions keep
+        // reporting normally.
+        if let Some((target, base)) = self.record_cell_leaks {
+            self.cell_leaking_functions.insert(target);
+            if escaped <= base + 1 {
+                return;
+            }
+        }
         if self
             .region_strict
             .get(target_level..escaped)
@@ -119,5 +129,19 @@ impl<'s> Checker<'s> {
         } else {
             self.warn(span, "region-escape", context);
         }
+    }
+}
+
+impl<'s> Checker<'s> {
+    /// True when the expression is literally `arena(name, .., true)` — the
+    /// only case where arena strictness is statically known at the call site.
+    pub(super) fn is_strict_arena_literal(&self, expression: &Expr<'s>) -> bool {
+        let ExprKind::Call { callee, arguments } = &expression.kind else {
+            return false;
+        };
+        let is_arena = matches!(&callee.kind, ExprKind::Name(name)
+            if name.text == "arena"
+                && !self.scopes.iter().any(|scope| scope.contains_key(name.text)));
+        is_arena && matches!(arguments.get(3).map(|a| &a.kind), Some(ExprKind::Bool(true)))
     }
 }

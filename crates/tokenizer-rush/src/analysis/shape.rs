@@ -479,6 +479,50 @@ impl<'s> Checker<'s> {
         }
     }
 
+    /// Check whether an expression is statically known to produce an `Option`
+    /// (`Some(true)`), a `Result` (`Some(false)`), or an unknown/dynamic value
+    /// (`None`). Returns `Err(())` if it is statically known to be neither
+    /// `Option` nor `Result`.
+    pub(super) fn try_family(&self, expression: &Expr<'s>) -> Result<Option<bool>, ()> {
+        if let ExprKind::Call { callee, arguments } = &expression.kind
+            && let Some(builtin) = self.known_builtin(callee)
+        {
+            match (builtin, arguments.len()) {
+                (Builtin::Some, 1) | (Builtin::None, 0) => return Ok(Some(true)),
+                (Builtin::Ok | Builtin::Err, 1) => return Ok(Some(false)),
+                _ => {}
+            }
+        }
+        match self.shape(expression) {
+            Shape::Typed(ValueType::Option(_)) => Ok(Some(true)),
+            Shape::Typed(ValueType::Result(_, _)) => Ok(Some(false)),
+            Shape::Unknown => Ok(None),
+            Shape::Alternatives(shapes) => {
+                let mut family = None;
+                for shape in shapes {
+                    match shape {
+                        Shape::Typed(ValueType::Option(_)) => {
+                            if family == Some(false) {
+                                return Err(());
+                            }
+                            family = Some(true);
+                        }
+                        Shape::Typed(ValueType::Result(_, _)) => {
+                            if family == Some(true) {
+                                return Err(());
+                            }
+                            family = Some(false);
+                        }
+                        Shape::Unknown => {}
+                        _ => return Err(()),
+                    }
+                }
+                Ok(family)
+            }
+            _ => Err(()),
+        }
+    }
+
     pub(super) fn shape(&self, expression: &Expr<'s>) -> Shape {
         if let Some(shape) = self
             .expression_shapes
@@ -517,6 +561,12 @@ impl<'s> Checker<'s> {
             ExprKind::Try(value) => match self.shape(value) {
                 Shape::Typed(ValueType::Option(ty) | ValueType::Result(ty, _)) => Shape::Typed(*ty),
                 _ => Shape::Unknown,
+            },
+            ExprKind::TryBlock(body) => match body.stmts.last().map(|stmt| &stmt.kind) {
+                Some(crate::StmtKind::Expr(last) | crate::StmtKind::Show(last)) => {
+                    self.shape(last)
+                }
+                _ => Shape::Typed(ValueType::Null),
             },
             ExprKind::Name(name) => self
                 .scopes

@@ -534,35 +534,16 @@ impl<'s> Runtime<'_, 's> {
                 return Ok(arguments.swap_remove(0));
             }
 
-            // First-class region handles: `arena(name, budget?)` builds a plain
-            // descriptor record, `arena_run` executes a callback inside a fresh
-            // frame of that region, `arena_stats` reads its aggregated metrics.
+            // First-class region handles: `arena(name, budget?, persistent?, strict?)`
+            // builds a plain descriptor record, `arena_run` executes a callback inside
+            // a frame of that region, `arena_stats` reads its aggregated metrics.
             if builtin == Builtin::Arena {
-                let mut arguments = arguments.into_owned().into_iter();
-                let Some(Value::String(name)) = arguments.next() else {
-                    return self.error(span, "arena requires a name string");
+                let record = match super::builtins::build_arena_descriptor(arguments.as_ref()) {
+                    Ok(record) => record,
+                    Err(message) => return self.error(span, message),
                 };
-                if name.is_empty() {
-                    return self.error(span, "arena name must not be empty");
-                }
-                let budget = match arguments.next() {
-                    None | Some(Value::Null) => Value::Null,
-                    Some(v) if v.as_usize_index().is_some() => v,
-                    _ => {
-                        return self.error(span, "arena budget must be a non-negative integer");
-                    }
-                };
-                let persistent = match arguments.next() {
-                    None | Some(Value::Null) => false,
-                    Some(Value::Bool(value)) => value,
-                    _ => return self.error(span, "arena persistent flag must be a boolean"),
-                };
-                self.collection_growth(0, 3, span)?;
-                return Ok(Value::Record(RecordMap::from([
-                    ("name".into(), Value::String(name)),
-                    ("budget".into(), budget),
-                    ("persistent".into(), Value::Bool(persistent)),
-                ])));
+                self.collection_growth(0, 4, span)?;
+                return Ok(Value::Record(record));
             }
             if matches!(
                 builtin,
@@ -576,6 +557,10 @@ impl<'s> Runtime<'_, 's> {
                 let Some(Value::String(name)) = fields.get("name") else {
                     return self.error(span, "arena record requires a name string");
                 };
+                let active_persistent = self.region_stack.iter().rev().find(|frame| {
+                    frame.persistent
+                        && self.region_stats[frame.stats].name.as_deref() == Some(name.as_str())
+                });
                 if builtin == Builtin::ArenaStats {
                     let stats = self
                         .region_stats
@@ -584,11 +569,14 @@ impl<'s> Runtime<'_, 's> {
                     let metric = |pick: fn(&RegionStats) -> u64| {
                         stats.map_or(0.0, |entry| pick(entry) as f64)
                     };
-                    let live = self
-                        .persistent_regions
-                        .iter()
-                        .find(|(n, _)| n == name)
-                        .map_or(0.0, |(_, frame)| frame.live as f64);
+                    let live = active_persistent
+                        .or_else(|| {
+                            self.persistent_regions
+                                .iter()
+                                .find(|(n, _)| n == name)
+                                .map(|(_, frame)| frame)
+                        })
+                        .map_or(0.0, |frame| frame.live as f64);
                     self.collection_growth(0, 8, span)?;
                     return Ok(Value::Record(RecordMap::from([
                         ("name".into(), Value::String(name.clone())),
@@ -611,6 +599,9 @@ impl<'s> Runtime<'_, 's> {
                     ])));
                 }
                 if builtin == Builtin::ArenaReset {
+                    if active_persistent.is_some() {
+                        return self.error(span, "cannot reset an active persistent arena");
+                    }
                     // Retire the parked persistent frame: every surviving cell
                     // is emptied in place, so holders observe `null` exactly
                     // like after a move(). Scratch arenas have no parked
@@ -619,19 +610,24 @@ impl<'s> Runtime<'_, 's> {
                     {
                         let (_, frame) = self.persistent_regions.swap_remove(index);
                         for cell in frame.cells {
-                            if self.cell_regions.get(cell).copied() == Some(frame.id)
-                                && self.cell_ids[cell].upgrade().is_some()
-                            {
-                                self.cells[cell] = (Value::Null, None);
+                            if self.cell_regions.get(cell).copied() == Some(frame.id) {
+                                self.cell_regions[cell] = 0;
+                                if self.cell_ids[cell].upgrade().is_some() {
+                                    self.cells[cell] = (Value::Null, None);
+                                }
                             }
                         }
+                        self.reclaim_cells();
                     }
                     return Ok(Value::Null);
                 }
                 let callback = arguments.next().unwrap();
                 if !matches!(
                     callback,
-                    Value::Function(_) | Value::Builtin(_) | Value::Host(_)
+                    Value::Function(_)
+                        | Value::BytecodeFunction(_)
+                        | Value::Builtin(_)
+                        | Value::Host(_)
                 ) {
                     return self.error(span, "arena_run requires a callable");
                 }
@@ -644,7 +640,11 @@ impl<'s> Runtime<'_, 's> {
                         }
                     },
                 };
+                let strict = matches!(fields.get("strict"), Some(Value::Bool(true)));
                 if matches!(fields.get("persistent"), Some(Value::Bool(true))) {
+                    if active_persistent.is_some() {
+                        return self.error(span, "persistent arena is already active");
+                    }
                     // Persistent arena: reuse the parked frame (stable region
                     // id) or mint one. Survivors keep the arena's stamp across
                     // runs instead of promoting to the caller.
@@ -660,6 +660,8 @@ impl<'s> Runtime<'_, 's> {
                             None => self.mint_region_frame(budget, Some(name)),
                         };
                     frame.budget = budget;
+                    frame.persistent = true;
+                    let parked_live = frame.live;
                     let region = frame.id;
                     self.region_stack.push(frame);
                     self.skip_call_region = true;
@@ -676,9 +678,16 @@ impl<'s> Runtime<'_, 's> {
                     });
                     frame.live = frame.cells.len();
                     let overflow = frame.budget.is_some_and(|budget| frame.live > budget);
+                    let leaked = strict && frame.live > parked_live;
                     self.persistent_regions.push((name.clone(), frame));
                     if overflow {
                         return self.error(span, "Region cell budget exceeded");
+                    }
+                    if leaked {
+                        return self.error(
+                            span,
+                            "Strict arena retained new cells; drop them before the run ends",
+                        );
                     }
                     return result;
                 }
@@ -689,7 +698,13 @@ impl<'s> Runtime<'_, 's> {
                 self.skip_call_region = true;
                 let result = self.call(callback.clone(), Cow::Borrowed(&[]), span);
                 self.skip_call_region = false;
-                self.exit_region(region, span)?;
+                let promoted = self.exit_region(region, span)?;
+                if strict && promoted > 0 {
+                    return self.error(
+                        span,
+                        "Strict arena cells escaped the run; drop or move() them explicitly",
+                    );
+                }
                 return result;
             }
 

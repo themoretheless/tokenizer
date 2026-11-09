@@ -437,7 +437,8 @@ impl<'s> Writer<'s> {
             ExprKind::Assign { .. }
             | ExprKind::Lambda { .. }
             | ExprKind::If { .. }
-            | ExprKind::Match { .. } => 0,
+            | ExprKind::Match { .. }
+            | ExprKind::TryBlock(_) => 0,
             ExprKind::Pipeline { .. } => 1,
             ExprKind::Binary { operator, .. } => crate::parser::binding(operator).unwrap().0,
             ExprKind::Unary { .. } => 19,
@@ -468,6 +469,10 @@ impl<'s> Writer<'s> {
             ExprKind::Try(value) => {
                 self.expr(value, 22);
                 self.text("?");
+            }
+            ExprKind::TryBlock(body) => {
+                self.text("try ");
+                self.block(body);
             }
             ExprKind::Unary { operator, value } => {
                 self.text(operator);
