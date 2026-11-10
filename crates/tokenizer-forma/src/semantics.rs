@@ -205,7 +205,8 @@ pub fn evaluate_value(
             if own(tokens, tail) {
                 return evaluate_value(&tokens[tail], props, state, stack, expand, env);
             }
-            return read_path(tokens, tail.split('.'), raw, optional);
+            let val = read_path(tokens, tail.split('.'), raw, optional)?;
+            return evaluate_value(&val, props, state, stack, expand, env);
         }
         if let Some(tail) = raw.strip_prefix("i18n.") {
             let i18n = &env["i18n"];
@@ -537,7 +538,7 @@ pub fn matches_type(value: &V, ty: &str, enums: &V) -> bool {
             .is_some_and(|n| n.is_finite() && n.fract() == 0. && n.abs() <= 9007199254740991.),
         "Color" => raw.as_str().is_some_and(|s| {
             s.strip_prefix('#').is_some_and(|s| {
-                [3, 6, 8].contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
+                [3, 4, 6, 8].contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
             })
         }),
         "Length" => {
@@ -615,6 +616,92 @@ pub(crate) fn check_constraints(val: &V, constraints: &V, path_label: &str) -> R
     }
     Ok(())
 }
+pub(crate) fn check_struct_constraints_recursive(
+    val: &V,
+    ty: &str,
+    enums: &V,
+    path_label: &str,
+) -> R<()> {
+    if val.is_null() {
+        return Ok(());
+    }
+    let ty = ty.trim();
+    if let Some(parts) = split_top_level(ty, b'|') {
+        for p in parts {
+            if matches_type(val, p, enums) {
+                return check_struct_constraints_recursive(val, p, enums, path_label);
+            }
+        }
+        return Ok(());
+    }
+    if let Some(inner) = ty.strip_suffix('?') {
+        return check_struct_constraints_recursive(val, inner.trim(), enums, path_label);
+    }
+    if let Some(inner) = ty.strip_prefix("List<").and_then(|s| s.strip_suffix('>')) {
+        if let Some(arr) = val.as_array() {
+            for (idx, item) in arr.iter().enumerate() {
+                check_struct_constraints_recursive(
+                    item,
+                    inner,
+                    enums,
+                    &format!("{path_label}[{idx}]"),
+                )?;
+            }
+        }
+        return Ok(());
+    }
+    if let Some(inner) = ty.strip_prefix("Map<").and_then(|s| s.strip_suffix('>')) {
+        if let Some(obj) = val.as_object() {
+            for (k, item) in obj {
+                check_struct_constraints_recursive(
+                    item,
+                    inner,
+                    enums,
+                    &format!("{path_label}.{k}"),
+                )?;
+            }
+        }
+        return Ok(());
+    }
+    if let Some(inner) = ty.strip_prefix("Record<").and_then(|s| s.strip_suffix('>')) {
+        if let Some(parts) = split_top_level(inner, b',')
+            && parts.len() == 2
+            && let Some(obj) = val.as_object()
+        {
+            for (k, item) in obj {
+                check_struct_constraints_recursive(
+                    item,
+                    parts[1],
+                    enums,
+                    &format!("{path_label}.{k}"),
+                )?;
+            }
+        }
+        return Ok(());
+    }
+    if let Some(obj) = val.as_object() {
+        if let Some(struct_cons) = enums["_structConstraints"].get(ty).and_then(V::as_object) {
+            for (field, fcons) in struct_cons {
+                if let Some(fval) = obj.get(field) {
+                    check_constraints(fval, fcons, &format!("{path_label}.{field}"))?;
+                }
+            }
+        }
+        if let Some(fields) = enums.get(ty).and_then(V::as_object) {
+            for (field, fty) in fields {
+                if let (Some(fty_str), Some(fval)) = (fty.as_str(), obj.get(field)) {
+                    check_struct_constraints_recursive(
+                        fval,
+                        fty_str,
+                        enums,
+                        &format!("{path_label}.{field}"),
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
 pub fn validate_contract(defs: &V, values: &V, enums: &V, label: &str) -> R<()> {
     if let Some(o) = defs.as_object() {
         for (name, d) in o {
@@ -631,27 +718,17 @@ pub fn validate_contract(defs: &V, values: &V, enums: &V, label: &str) -> R<()> 
                 }
                 continue;
             }
+            let prop_label = format!("{label}.{name}");
             if !matches_type(&values[name], ty, enums) {
                 return Err(Diagnostic::new(
                     "type-mismatch",
-                    format!("{label}.{name}: ожидался {ty}"),
+                    format!("{prop_label}: ожидался {ty}"),
                 ));
             }
             if d["constraints"].is_object() {
-                check_constraints(&values[name], &d["constraints"], &format!("{label}.{name}"))?;
+                check_constraints(&values[name], &d["constraints"], &prop_label)?;
             }
-            let base_ty = ty.strip_suffix('?').unwrap_or(ty);
-            if let Some(struct_cons) = enums["_structConstraints"]
-                .get(base_ty)
-                .and_then(V::as_object)
-                && let Some(obj) = values[name].as_object()
-            {
-                for (field, fcons) in struct_cons {
-                    if let Some(fval) = obj.get(field) {
-                        check_constraints(fval, fcons, &format!("{label}.{name}.{field}"))?;
-                    }
-                }
-            }
+            check_struct_constraints_recursive(&values[name], ty, enums, &prop_label)?;
         }
     }
     Ok(())
