@@ -50,6 +50,8 @@ pub(super) enum Frame<'s> {
     /// Survives suspension, so the sweep waits for the coroutine to finish
     /// the region instead of ending it at the first yield.
     Region { region: u32, span: Span },
+    /// Marker below a `let ... else` fallback block: errors if the block falls through.
+    LetElseFallback { span: Span },
 }
 impl<'s> Frame<'s> {
     pub(super) fn environment(&self) -> Option<&Environment<'s>> {
@@ -57,7 +59,7 @@ impl<'s> Frame<'s> {
             Self::Block { environment, .. }
             | Self::While { environment, .. }
             | Self::For { environment, .. } => Some(environment),
-            Self::Region { .. } => None,
+            Self::Region { .. } | Self::LetElseFallback { .. } => None,
         }
     }
     pub(super) fn sequence(&self) -> Option<&Rc<Sequence<'s>>> {
@@ -76,6 +78,8 @@ pub(super) struct Coroutine<'s> {
     /// Result of an awaited task, delivered by the scheduler on wake; the
     /// suspended await statement consumes it instead of re-evaluating.
     pub(super) pending_wake: Option<Value<'s>>,
+    /// Partial results accumulated while suspended at `await task_all([...])`.
+    pub(super) pending_all: Vec<Option<Value<'s>>>,
     /// Set when the task suspended at an `await` (not a plain `yield`):
     /// the scheduler must deliver a wake value (task result or null).
     pub(super) expects_wake: bool,
@@ -130,6 +134,11 @@ impl<'s> Coroutine<'s> {
                     runtime.exit_region(region, span)?;
                     self.frames.pop();
                     continue;
+                }
+                Frame::LetElseFallback { span } => {
+                    let span = *span;
+                    self.frames.pop();
+                    return runtime.error(span, "let-else fallback block did not diverge");
                 }
                 Frame::While {
                     condition,
@@ -209,6 +218,8 @@ impl<'s> Coroutine<'s> {
                     enum AwaitForm {
                         Statement,
                         Declare,
+                        Destructure,
+                        LetElse,
                         Return,
                     }
                     let await_form = match &statement.kind {
@@ -216,11 +227,19 @@ impl<'s> Coroutine<'s> {
                         | StmtKind::Declaration {
                             value: expression, ..
                         }
+                        | StmtKind::Destructure {
+                            value: expression, ..
+                        }
+                        | StmtKind::LetElse {
+                            value: expression, ..
+                        }
                         | StmtKind::Return(Some(expression)) => match &expression.kind {
                             ExprKind::Await(operand) => Some((
                                 match &statement.kind {
                                     StmtKind::Expr(_) => AwaitForm::Statement,
                                     StmtKind::Declaration { .. } => AwaitForm::Declare,
+                                    StmtKind::Destructure { .. } => AwaitForm::Destructure,
+                                    StmtKind::LetElse { .. } => AwaitForm::LetElse,
                                     _ => AwaitForm::Return,
                                 },
                                 operand,
@@ -230,43 +249,24 @@ impl<'s> Coroutine<'s> {
                         _ => None,
                     };
                     if let Some((form, operand)) = await_form {
-                        if let Some(value) = self.pending_wake.take() {
-                            match form {
-                                AwaitForm::Statement => {}
-                                AwaitForm::Declare => {
-                                    let StmtKind::Declaration {
-                                        name, constant, ty, ..
-                                    } = &statement.kind
-                                    else {
-                                        unreachable!("await declaration")
-                                    };
-                                    runtime.bind_declaration_value(
-                                        name,
-                                        *constant,
-                                        ty.as_ref(),
-                                        value,
-                                        statement.span,
-                                        environment,
-                                    )?;
-                                }
-                                AwaitForm::Return => {
-                                    self.unwind(runtime)?;
-                                    return Ok(CoroutineState::Complete(value));
-                                }
+                        let resolved = if let Some(value) = self.pending_wake.take() {
+                            value
+                        } else {
+                            let value = runtime.expr(operand, environment)?;
+                            let suspends = matches!(
+                                &value,
+                                Value::Task(_) | Value::Variant("TaskAll" | "TaskRace", _)
+                            ) || matches!(&value, Value::UserData(data) if data.type_name.ends_with("::Wait"));
+                            if suspends {
+                                self.expects_wake = true;
+                                return Ok(CoroutineState::Yielded(value));
                             }
-                            *next += 1;
-                            continue;
-                        }
-                        let value = runtime.expr(operand, environment)?;
-                        let suspends = matches!(&value, Value::Task(_))
-                            || matches!(&value, Value::UserData(data) if data.type_name.ends_with("::Wait"));
-                        if suspends {
-                            self.expects_wake = true;
-                            return Ok(CoroutineState::Yielded(value));
-                        }
-                        // await of a plain value is immediate and yields it.
+                            value
+                        };
                         match form {
-                            AwaitForm::Statement => {}
+                            AwaitForm::Statement => {
+                                *next += 1;
+                            }
                             AwaitForm::Declare => {
                                 let StmtKind::Declaration {
                                     name, constant, ty, ..
@@ -278,17 +278,68 @@ impl<'s> Coroutine<'s> {
                                     name,
                                     *constant,
                                     ty.as_ref(),
-                                    value,
+                                    resolved,
                                     statement.span,
                                     environment,
                                 )?;
+                                *next += 1;
+                            }
+                            AwaitForm::Destructure => {
+                                let StmtKind::Destructure { pattern, .. } = &statement.kind else {
+                                    unreachable!("await destructure")
+                                };
+                                runtime.bind_pattern(pattern, &resolved, environment)?;
+                                *next += 1;
+                            }
+                            AwaitForm::LetElse => {
+                                let StmtKind::LetElse {
+                                    pattern,
+                                    else_block,
+                                    ..
+                                } = &statement.kind
+                                else {
+                                    unreachable!("await let-else")
+                                };
+                                let mut candidate = environment
+                                    .try_clone()
+                                    .map_err(|e| runtime.environment_error(statement.span, e))?;
+                                *next += 1;
+                                if runtime.match_value(pattern, &resolved, &mut candidate)? {
+                                    *environment = candidate;
+                                    if code[*next..]
+                                        .iter()
+                                        .any(|s| matches!(s.kind, StmtKind::Function { .. }))
+                                    {
+                                        runtime.hoist_scope_functions(&code, environment)?;
+                                    }
+                                } else {
+                                    drop(candidate);
+                                    let else_env = environment.try_clone().map_err(|e| {
+                                        runtime.environment_error(statement.span, e)
+                                    })?;
+                                    self.push(
+                                        Frame::LetElseFallback {
+                                            span: else_block.span,
+                                        },
+                                        runtime,
+                                        statement.span,
+                                    )?;
+                                    self.push(
+                                        Frame::Block {
+                                            statements: else_block.stmts.clone(),
+                                            next: 0,
+                                            environment: else_env,
+                                        },
+                                        runtime,
+                                        statement.span,
+                                    )?;
+                                }
                             }
                             AwaitForm::Return => {
                                 self.unwind(runtime)?;
-                                return Ok(CoroutineState::Complete(value));
+                                return Ok(CoroutineState::Complete(resolved));
                             }
                         }
-                        *next += 1;
                         continue;
                     }
                     *next += 1;
@@ -301,6 +352,46 @@ impl<'s> Coroutine<'s> {
                         StmtKind::Yield(expression) => {
                             let value = runtime.expr(expression, environment)?;
                             return Ok(CoroutineState::Yielded(value));
+                        }
+                        StmtKind::LetElse {
+                            pattern,
+                            value,
+                            else_block,
+                        } => {
+                            let scrutinee = runtime.expr(value, environment)?;
+                            let mut candidate = environment
+                                .try_clone()
+                                .map_err(|e| runtime.environment_error(statement.span, e))?;
+                            if runtime.match_value(pattern, &scrutinee, &mut candidate)? {
+                                *environment = candidate;
+                                if code[*next..]
+                                    .iter()
+                                    .any(|s| matches!(s.kind, StmtKind::Function { .. }))
+                                {
+                                    runtime.hoist_scope_functions(&code, environment)?;
+                                }
+                            } else {
+                                drop(candidate);
+                                let else_env = environment
+                                    .try_clone()
+                                    .map_err(|e| runtime.environment_error(statement.span, e))?;
+                                self.push(
+                                    Frame::LetElseFallback {
+                                        span: else_block.span,
+                                    },
+                                    runtime,
+                                    statement.span,
+                                )?;
+                                self.push(
+                                    Frame::Block {
+                                        statements: else_block.stmts.clone(),
+                                        next: 0,
+                                        environment: else_env,
+                                    },
+                                    runtime,
+                                    statement.span,
+                                )?;
+                            }
                         }
                         StmtKind::If {
                             condition,
@@ -324,6 +415,37 @@ impl<'s> Coroutine<'s> {
                                         .map_err(|e| runtime.environment_error(span, e))?,
                                 };
                                 self.push(frame, runtime, statement.span)?;
+                            }
+                        }
+                        StmtKind::IfLet {
+                            pattern,
+                            value,
+                            then_block,
+                            else_block,
+                        } => {
+                            let scrutinee = runtime.expr(value, environment)?;
+                            let mut then_env = environment
+                                .try_clone()
+                                .map_err(|e| runtime.environment_error(statement.span, e))?;
+                            if runtime.match_value(pattern, &scrutinee, &mut then_env)? {
+                                let frame = Frame::Block {
+                                    statements: then_block.stmts.clone(),
+                                    next: 0,
+                                    environment: then_env,
+                                };
+                                self.push(frame, runtime, statement.span)?;
+                            } else {
+                                drop(then_env);
+                                if let Some(block) = else_block {
+                                    let frame = Frame::Block {
+                                        statements: block.stmts.clone(),
+                                        next: 0,
+                                        environment: environment
+                                            .try_clone()
+                                            .map_err(|e| runtime.environment_error(span, e))?,
+                                    };
+                                    self.push(frame, runtime, statement.span)?;
+                                }
                             }
                         }
                         StmtKind::While { condition, body } => {
@@ -463,9 +585,13 @@ impl<'s> Runtime<'_, 's> {
                 frames,
                 regions: Vec::new(),
                 pending_wake: None,
+                pending_all: Vec::new(),
                 expects_wake: false,
             },
         );
+        if let Some(frame) = self.tx_stack.last_mut() {
+            frame.spawned_coroutines.push(id);
+        }
         Ok(Value::Task(id))
     }
 }
@@ -565,6 +691,7 @@ impl<'a, 's> ScriptInstance<'a, 's> {
                 frames,
                 regions: Vec::new(),
                 pending_wake: None,
+                pending_all: Vec::new(),
                 expects_wake: false,
             },
         );

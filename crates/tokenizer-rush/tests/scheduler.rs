@@ -1,7 +1,7 @@
 use std::time::Duration;
 use themoretheless_tokenizer_rush::{
-    CancellationToken, CoroutineScheduler, ExecutionLimits, Program, ScheduledState, Value,
-    WakeRequest,
+    CancellationToken, CoroutineScheduler, ExecutionLimits, OwnedCoroutineScheduler, Program,
+    ScheduledState, Value, WakeRequest, analyze_host_calls,
 };
 const LIMITS: ExecutionLimits = ExecutionLimits::new(10_000);
 const WAIT: &str = "enum Wait{After(number),Event(str)}; ";
@@ -615,4 +615,195 @@ fn awaited_task_memory_limit_fails_both_tasks() {
     // The waiter's failure follows in the same poll.
     assert!(matches!(&steps[1].state, ScheduledState::Failed(_)));
     assert!(scheduler.is_empty());
+}
+
+#[test]
+fn task_all_preserves_input_order_handles_empty_and_cancels_siblings_on_failure() {
+    let source = format!(
+        "{WAIT}async fn slow() -> number {{ await Wait.After(3); return 10 }}; \
+         async fn mid() -> number {{ await Wait.After(2); return 20 }}; \
+         async fn fast() -> number {{ await Wait.After(1); return 30 }}; \
+         async fn run_all() {{ let xs = await task_all([slow(), mid(), fast()]); return xs }}; \
+         async fn run_empty() {{ let xs = await task_all([]); return xs }}"
+    );
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    let empty_id = scheduler.spawn("run_empty", &[], LIMITS).unwrap();
+    let all_id = scheduler.spawn("run_all", &[], LIMITS).unwrap();
+
+    let mut completed = std::collections::HashMap::new();
+    for tick in 0..=6 {
+        for step in scheduler.poll(Duration::from_secs(tick), LIMITS).unwrap() {
+            if let ScheduledState::Complete(val) = step.state {
+                completed.insert(step.id, val);
+            }
+        }
+        if scheduler.is_empty() {
+            break;
+        }
+    }
+    assert_eq!(completed.get(&empty_id), Some(&Value::List(vec![])));
+    assert_eq!(
+        completed.get(&all_id),
+        Some(&Value::List(vec![
+            Value::Number(10.),
+            Value::Number(20.),
+            Value::Number(30.),
+        ]))
+    );
+
+    // Child failure in `task_all` cancels still-waiting siblings and cleans up subscriptions.
+    let fail_source = format!(
+        "{WAIT}mut post_cancel = 0; \
+         async fn sleeper() {{ await Wait.Event('never'); post_cancel += 1; return 1 }}; \
+         async fn boom() {{ await Wait.After(1); assert(false); return 2 }}; \
+         async fn coordinator() {{ let xs = await task_all([sleeper(), boom()]); return xs }}"
+    );
+    let program = Program::compile(&fail_source).unwrap();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    let coord = scheduler.spawn("coordinator", &[], LIMITS).unwrap();
+    scheduler.poll(Duration::ZERO, LIMITS).unwrap(); // coordinator adopts children
+    scheduler.poll(Duration::ZERO, LIMITS).unwrap(); // sleeper subscribes to 'never', boom sets timer
+    assert_eq!(scheduler.subscriptions("never"), 1);
+
+    let steps = scheduler.poll(Duration::from_secs(1), LIMITS).unwrap();
+    assert!(
+        steps
+            .iter()
+            .any(|s| s.id == coord && matches!(s.state, ScheduledState::Failed(_))),
+        "{steps:?}"
+    );
+    assert_eq!(scheduler.subscriptions("never"), 0);
+    assert!(scheduler.is_empty());
+    assert_eq!(
+        scheduler.instance_mut().get("post_cancel"),
+        Some(Value::Number(0.))
+    );
+}
+
+#[test]
+fn task_race_returns_first_winner_cancels_losers_handles_ties_and_rejects_empty() {
+    let source = format!(
+        "{WAIT}mut loser_ran = 0; \
+         async fn slow() -> number {{ await Wait.Event('never'); loser_ran += 1; return 99 }}; \
+         async fn fast() -> number {{ await Wait.After(1); return 7 }}; \
+         async fn run_race() -> number {{ return await task_race([slow(), fast()]) }}; \
+         async fn tie_a() -> number {{ await Wait.After(1); return 11 }}; \
+         async fn tie_b() -> number {{ await Wait.After(1); return 22 }}; \
+         async fn run_tie() -> number {{ return await task_race([tie_a(), tie_b()]) }}; \
+         async fn run_empty_race() {{ return await task_race([]) }}"
+    );
+    let program = Program::compile(&source).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    let race_id = scheduler.spawn("run_race", &[], LIMITS).unwrap();
+    let tie_id = scheduler.spawn("run_tie", &[], LIMITS).unwrap();
+    let empty_id = scheduler.spawn("run_empty_race", &[], LIMITS).unwrap();
+
+    let mut outcomes = std::collections::HashMap::new();
+    for tick in 0..=4 {
+        for step in scheduler.poll(Duration::from_secs(tick), LIMITS).unwrap() {
+            match step.state {
+                ScheduledState::Complete(_) | ScheduledState::Failed(_) => {
+                    outcomes.insert(step.id, step.state);
+                }
+                ScheduledState::Waiting(WakeRequest::Race(_)) => {}
+                ScheduledState::Waiting(_) => {}
+            }
+        }
+        if scheduler.is_empty() {
+            break;
+        }
+    }
+    assert_eq!(
+        outcomes.get(&race_id),
+        Some(&ScheduledState::Complete(Value::Number(7.)))
+    );
+    assert_eq!(
+        outcomes.get(&tie_id),
+        Some(&ScheduledState::Complete(Value::Number(11.)))
+    );
+    assert!(matches!(
+        outcomes.get(&empty_id),
+        Some(ScheduledState::Failed(_))
+    ));
+    assert_eq!(scheduler.subscriptions("never"), 0);
+    assert!(scheduler.is_empty());
+    assert_eq!(
+        scheduler.instance_mut().get("loser_ran"),
+        Some(Value::Number(0.))
+    );
+}
+
+#[test]
+fn structured_concurrency_detects_cycles_supports_owned_scheduler_and_propagates_static_shapes() {
+    // Cycle detection through `task_all`.
+    let cycle_src =
+        format!("{WAIT}mut h = null; async fn s() {{ let xs = await task_all([h]) }}; h = s()");
+    let program = Program::compile(&cycle_src).unwrap();
+    let token = CancellationToken::default();
+    let mut instance = program
+        .instantiate(LIMITS, &token, &[], &[], &[], &[])
+        .unwrap();
+    let mut scheduler = CoroutineScheduler::new(&mut instance);
+    let id = scheduler
+        .instance_mut()
+        .get("h")
+        .and_then(|v| v.task_id())
+        .unwrap();
+    scheduler.spawn_task(id).unwrap();
+    let steps = scheduler.poll(Duration::ZERO, LIMITS).unwrap();
+    assert!(
+        matches!(&steps[0].state, ScheduledState::Failed(e) if e.message.contains("Cyclic task await")),
+        "{:?}",
+        steps[0].state
+    );
+    assert!(scheduler.is_empty());
+
+    // `OwnedCoroutineScheduler` runs `task_all` and `task_race` end-to-end.
+    let owned_src = format!(
+        "{WAIT}async fn p(v: number, d: number) -> number {{ await Wait.After(d); return v }}; \
+         async fn main_task() {{ \
+             let xs = await task_all([p(3, 2), p(4, 1)]); \
+             let w = await task_race([p(100, 5), p(xs[0] + xs[1], 1)]); \
+             return w \
+         }}"
+    );
+    let mut owned = OwnedCoroutineScheduler::new(owned_src, LIMITS).unwrap();
+    let main_id = owned.spawn("main_task", &[], LIMITS).unwrap();
+    let mut final_val = None;
+    for tick in 0..=8 {
+        for step in owned.poll(Duration::from_secs(tick), LIMITS).unwrap() {
+            if step.id == main_id
+                && let ScheduledState::Complete(v) = step.state
+            {
+                final_val = Some(v);
+            }
+        }
+        if owned.is_empty() {
+            break;
+        }
+    }
+    assert_eq!(final_val, Some(Value::Number(7.)));
+
+    // Static shape propagation: `await task_all([a(), b()])` has shape `list[vec3]`.
+    let bad_shape = "\
+async fn pt() -> vec3 { return vec3(1, 2, 3) }
+async fn f() {
+    let pts = await task_all([pt(), pt()])
+    pts[0].w
+}
+";
+    let parsed = analyze_host_calls(bad_shape, &[]);
+    assert!(!parsed.is_valid(), "expected shape error on pts[0].w");
 }

@@ -412,6 +412,13 @@ impl Runtime<'_, '_> {
         }
         for task in self.coroutines.values() {
             usage.value(&Value::Function(task.function.clone()));
+            for value in task
+                .pending_wake
+                .iter()
+                .chain(task.pending_all.iter().flatten())
+            {
+                usage.value(value);
+            }
             usage.add(
                 task.frames
                     .capacity()

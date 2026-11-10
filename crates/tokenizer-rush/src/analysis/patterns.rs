@@ -116,9 +116,23 @@ impl<'s> Checker<'s> {
             self.check_pattern_shape(pattern, shape);
         }
         match &pattern.kind {
-            ExprKind::Name(_) => {
+            ExprKind::Name(name) => {
                 if let Shape::Typed(ty) = shape {
                     self.pattern_type(pattern, ty);
+                } else if name.text != "_" {
+                    if let Shape::Record(fields) = shape {
+                        self.record_fields
+                            .insert(name.span.start, fields.keys().cloned().collect());
+                    }
+                    if matches!(
+                        shape,
+                        Shape::Record(_)
+                            | Shape::Tuple(_)
+                            | Shape::List(_)
+                            | Shape::Alternatives(_)
+                    ) {
+                        self.binding_shapes.insert(name.span.start, shape.clone());
+                    }
                 }
             }
             ExprKind::Call { callee, arguments } => {
@@ -177,6 +191,10 @@ impl<'s> Checker<'s> {
                     for (pattern, ty) in patterns.iter().zip(types) {
                         self.match_pattern_types(pattern, &Shape::Typed(ty.clone()));
                     }
+                } else if let Shape::Tuple(items) = shape {
+                    for (pattern, item) in patterns.iter().zip(items) {
+                        self.match_pattern_types(pattern, item);
+                    }
                 }
             }
             ExprKind::Map(patterns) => {
@@ -192,6 +210,14 @@ impl<'s> Checker<'s> {
                                     "Unknown struct field in pattern",
                                 );
                             }
+                        }
+                    }
+                } else if let Shape::Record(fields) = shape {
+                    for (key, pattern) in patterns {
+                        if let ExprKind::Name(name) = &key.kind
+                            && let Some(shape) = fields.get(name.text)
+                        {
+                            self.match_pattern_types(pattern, shape);
                         }
                     }
                 }
@@ -250,7 +276,7 @@ impl<'s> Checker<'s> {
             _ => self.error(
                 pattern.span,
                 "invalid-binding-pattern",
-                "Expected a name or tuple binding pattern",
+                "Refutable pattern requires let ... else { ... }; expected a name, tuple or record binding pattern",
             ),
         }
     }

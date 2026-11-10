@@ -8,6 +8,12 @@ pub enum WakeRequest {
     Event(String),
     /// `await task_handle`: wake when the referenced task completes or fails.
     Task(CoroutineId),
+    /// `await task_all([...])`: wake with `Value::List` when all tasks complete;
+    /// if any task fails or cancels, cancel remaining siblings and fail waiter.
+    All(Vec<CoroutineId>),
+    /// `await task_race([...])`: wake with the first completed result and
+    /// automatically cancel all losing sibling tasks.
+    Race(Vec<CoroutineId>),
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum ScheduledState<'s> {
@@ -27,6 +33,26 @@ enum Waiting {
     /// Suspended at `await task`: wakes when the target completes; a failure
     /// or cancellation of the target is terminal for the waiter.
     Task(CoroutineId),
+    /// Suspended at `await task_all([...])`; partial values live in `Coroutine::pending_all`.
+    All(Vec<CoroutineId>),
+    /// Suspended at `await task_race([...])`; first completion cancels remaining siblings.
+    Race(Vec<CoroutineId>),
+}
+impl Waiting {
+    fn awaits(&self, target: CoroutineId) -> bool {
+        match self {
+            Self::Task(t) => *t == target,
+            Self::All(targets) | Self::Race(targets) => targets.contains(&target),
+            _ => false,
+        }
+    }
+    fn siblings(&self) -> &[CoroutineId] {
+        match self {
+            Self::Task(t) => std::slice::from_ref(t),
+            Self::All(targets) | Self::Race(targets) => targets.as_slice(),
+            _ => &[],
+        }
+    }
 }
 struct ScheduledTask {
     order: u64,
@@ -75,7 +101,7 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
             .values()
             .filter_map(|task| match task.waiting {
                 Waiting::Ready(at) | Waiting::Timer(at) => Some(at),
-                Waiting::Event(_) | Waiting::Task(_) => None,
+                Waiting::Event(_) | Waiting::Task(_) | Waiting::All(_) | Waiting::Race(_) => None,
             })
             .min()
     }
@@ -147,20 +173,31 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
         }
         Ok(count)
     }
+    fn any_waiter_awaits(&self, target: CoroutineId) -> bool {
+        self.tasks.values().any(|task| task.waiting.awaits(target))
+    }
     pub fn cancel(&mut self, id: CoroutineId) -> bool {
         if self.tasks.remove(&id).is_none() {
             return false;
         }
         self.instance.cancel_coroutine(id);
-        // Awaiting a cancelled task is terminal for the waiters (and theirs).
-        let waiters: Vec<CoroutineId> = self
+        // Awaiting a cancelled task is terminal for the waiters (and any
+        // sibling tasks owned by structured `task_all` / `task_race` groups).
+        let waiters: Vec<(CoroutineId, Vec<CoroutineId>)> = self
             .tasks
             .iter()
-            .filter(|(_, task)| matches!(task.waiting, Waiting::Task(target) if target == id))
-            .map(|(waiter, _)| *waiter)
+            .filter(|(_, task)| task.waiting.awaits(id))
+            .map(|(waiter, task)| (*waiter, task.waiting.siblings().to_vec()))
             .collect();
-        for waiter in waiters {
+        let mut sibling_candidates = Vec::new();
+        for (waiter, siblings) in waiters {
+            sibling_candidates.extend(siblings.into_iter().filter(|sib| *sib != id));
             self.cancel(waiter);
+        }
+        for sib in sibling_candidates {
+            if !self.any_waiter_awaits(sib) {
+                self.cancel(sib);
+            }
         }
         true
     }
@@ -179,9 +216,27 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
         }
         Ok(())
     }
+    fn extract_task_list(
+        items: &[Value<'s>],
+    ) -> std::result::Result<Vec<CoroutineId>, &'static str> {
+        items
+            .iter()
+            .map(|item| match item {
+                Value::Task(id) => Ok(*id),
+                _ => Err("Task group requires task handles produced by async functions"),
+            })
+            .collect()
+    }
     fn request(value: Value<'s>) -> std::result::Result<WakeRequest, &'static str> {
-        if let Value::Task(id) = value {
-            return Ok(WakeRequest::Task(id));
+        match value {
+            Value::Task(id) => return Ok(WakeRequest::Task(id)),
+            Value::Variant("TaskAll", ref items) => {
+                return Self::extract_task_list(items).map(WakeRequest::All);
+            }
+            Value::Variant("TaskRace", ref items) => {
+                return Self::extract_task_list(items).map(WakeRequest::Race);
+            }
+            _ => {}
         }
         let Value::UserData(data) = value else {
             return Err("Yield a Wait.After(number) or Wait.Event(str) request");
@@ -194,22 +249,32 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
                 .map(WakeRequest::After)
                 .map_err(|_| "Wait.After requires a finite non-negative duration"),
             (Some("Event"), [Value::String(name)]) => Ok(WakeRequest::Event(name.clone())),
+            (Some("All"), [Value::List(items) | Value::Tuple(items)]) => {
+                Self::extract_task_list(items).map(WakeRequest::All)
+            }
+            (Some("Race"), [Value::List(items) | Value::Tuple(items)]) => {
+                Self::extract_task_list(items).map(WakeRequest::Race)
+            }
             _ => Err("Yield a Wait.After(number) or Wait.Event(str) request"),
         }
     }
-    /// Would `waiter` awaiting `target` close a cycle? Follows the chain of
-    /// task waits; self-await is the length-one cycle.
+    /// Would `waiter` awaiting `target` close a cycle? Follows the graph of
+    /// task waits (including `All` and `Race` groups); self-await is length 1.
     fn would_cycle(&self, waiter: CoroutineId, target: CoroutineId) -> bool {
-        let mut current = target;
-        loop {
+        let mut stack = vec![target];
+        let mut visited = std::collections::HashSet::new();
+        while let Some(current) = stack.pop() {
             if current == waiter {
                 return true;
             }
-            match self.tasks.get(&current).map(|task| &task.waiting) {
-                Some(Waiting::Task(next)) => current = *next,
-                _ => return false,
+            if !visited.insert(current) {
+                continue;
+            }
+            if let Some(task) = self.tasks.get(&current) {
+                stack.extend_from_slice(task.waiting.siblings());
             }
         }
+        false
     }
     /// Adopt an active but unscheduled task (awaited before registration):
     /// it becomes ready at the scheduler's current time.
@@ -229,7 +294,7 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
         Ok(())
     }
     /// Wake or fail every task awaiting `finished`, in creation order; a
-    /// failure cascades to the waiters' own waiters.
+    /// failure cascades to the waiters' own waiters and structured siblings.
     fn settle_waiters(
         &mut self,
         finished: CoroutineId,
@@ -239,26 +304,91 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
         let mut waiters: Vec<_> = self
             .tasks
             .iter()
-            .filter(|(_, task)| matches!(task.waiting, Waiting::Task(target) if target == finished))
+            .filter(|(_, task)| task.waiting.awaits(finished))
             .map(|(id, task)| (task.order, *id))
             .collect();
         waiters.sort_unstable_by_key(|(order, _)| *order);
         for (_, waiter) in waiters {
+            if !self.tasks.contains_key(&waiter) {
+                continue;
+            }
             match outcome {
                 ScheduledState::Complete(value) => {
+                    let mut cancel_losers: Vec<CoroutineId> = Vec::new();
                     if let Some(task) = self.tasks.get_mut(&waiter) {
-                        task.waiting = Waiting::Ready(self.now);
-                        if task.delivers
-                            && let Some(coroutine) =
-                                self.instance.runtime.coroutines.get_mut(&waiter)
-                        {
-                            coroutine.pending_wake = Some(value.clone());
+                        match &task.waiting {
+                            Waiting::Task(_) => {
+                                task.waiting = Waiting::Ready(self.now);
+                                if task.delivers
+                                    && let Some(coroutine) =
+                                        self.instance.runtime.coroutines.get_mut(&waiter)
+                                {
+                                    coroutine.pending_wake = Some(value.clone());
+                                }
+                            }
+                            Waiting::All(targets) => {
+                                let all_done = if let Some(coroutine) =
+                                    self.instance.runtime.coroutines.get_mut(&waiter)
+                                {
+                                    for (idx, target) in targets.iter().enumerate() {
+                                        if *target == finished
+                                            && let Some(slot) = coroutine.pending_all.get_mut(idx)
+                                        {
+                                            *slot = Some(value.clone());
+                                        }
+                                    }
+                                    if coroutine.pending_all.iter().all(Option::is_some) {
+                                        let collected: Vec<Value<'s>> = coroutine
+                                            .pending_all
+                                            .drain(..)
+                                            .map(|slot| slot.expect("completed slot"))
+                                            .collect();
+                                        if task.delivers {
+                                            coroutine.pending_wake = Some(Value::List(collected));
+                                        }
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                };
+                                if all_done {
+                                    task.waiting = Waiting::Ready(self.now);
+                                }
+                            }
+                            Waiting::Race(targets) => {
+                                cancel_losers =
+                                    targets.iter().copied().filter(|t| *t != finished).collect();
+                                task.waiting = Waiting::Ready(self.now);
+                                if task.delivers
+                                    && let Some(coroutine) =
+                                        self.instance.runtime.coroutines.get_mut(&waiter)
+                                {
+                                    coroutine.pending_wake = Some(value.clone());
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    for loser in cancel_losers {
+                        if !self.any_waiter_awaits(loser) {
+                            self.cancel(loser);
                         }
                     }
                 }
                 ScheduledState::Failed(error) => {
-                    self.tasks.remove(&waiter);
+                    let siblings = self
+                        .tasks
+                        .remove(&waiter)
+                        .map(|t| t.waiting.siblings().to_vec())
+                        .unwrap_or_default();
                     self.instance.cancel_coroutine(waiter);
+                    for sib in siblings {
+                        if sib != finished && !self.any_waiter_awaits(sib) {
+                            self.cancel(sib);
+                        }
+                    }
                     let state = ScheduledState::Failed(error.clone());
                     self.settle_waiters(waiter, &state, steps);
                     steps.push(ScheduledStep { id: waiter, state });
@@ -304,16 +434,37 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
         let mut orphaned: Vec<_> = self
             .tasks
             .iter()
-            .filter(|(_, task)| {
-                matches!(task.waiting, Waiting::Task(target)
-                    if !self.instance.runtime.coroutines.contains_key(&target))
+            .filter(|(waiter, task)| match &task.waiting {
+                Waiting::Task(target) => !self.instance.runtime.coroutines.contains_key(target),
+                Waiting::All(targets) => targets.iter().enumerate().any(|(idx, target)| {
+                    let already_settled = self
+                        .instance
+                        .runtime
+                        .coroutines
+                        .get(waiter)
+                        .and_then(|c| c.pending_all.get(idx))
+                        .is_some_and(Option::is_some);
+                    !already_settled && !self.instance.runtime.coroutines.contains_key(target)
+                }),
+                Waiting::Race(targets) => targets
+                    .iter()
+                    .any(|target| !self.instance.runtime.coroutines.contains_key(target)),
+                _ => false,
             })
             .map(|(id, task)| (task.order, *id))
             .collect();
         orphaned.sort_unstable_by_key(|(order, _)| *order);
         for (_, id) in orphaned {
-            self.tasks.remove(&id);
+            let Some(removed) = self.tasks.remove(&id) else {
+                continue;
+            };
+            let siblings = removed.waiting.siblings().to_vec();
             self.instance.cancel_coroutine(id);
+            for sib in siblings {
+                if !self.any_waiter_awaits(sib) {
+                    self.cancel(sib);
+                }
+            }
             let state =
                 ScheduledState::Failed(self.error::<()>("Awaited task was cancelled").unwrap_err());
             self.settle_waiters(id, &state, &mut steps);
@@ -333,7 +484,11 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
                 self.cancel_all();
                 break;
             }
-            let mut task = self.tasks.remove(&id).expect("ready task");
+            // A sibling completing earlier in the same poll (e.g. `task_race` or
+            // failed `task_all`) may have cancelled this ready task already.
+            let Some(mut task) = self.tasks.remove(&id) else {
+                continue;
+            };
             let state = match self.instance.resume_coroutine(id, limits) {
                 Ok(CoroutineState::Complete(value)) => ScheduledState::Complete(value),
                 Err(error) => ScheduledState::Failed(error),
@@ -367,6 +522,64 @@ impl<'i, 'a, 's> CoroutineScheduler<'i, 'a, 's> {
                                     }
                                 }
                                 Waiting::Task(*target)
+                            }
+                            WakeRequest::All(targets) => {
+                                if !expects_wake {
+                                    return Err(
+                                        "Yielding a task group does not await it; use await",
+                                    );
+                                }
+                                if targets.is_empty() {
+                                    if let Some(coroutine) =
+                                        self.instance.runtime.coroutines.get_mut(&id)
+                                    {
+                                        coroutine.pending_wake = Some(Value::List(Vec::new()));
+                                    }
+                                    Waiting::Ready(now)
+                                } else {
+                                    for target in targets {
+                                        if self.would_cycle(id, *target) {
+                                            return Err("Cyclic task await");
+                                        }
+                                        if !self.tasks.contains_key(target) {
+                                            if self.instance.runtime.coroutines.contains_key(target)
+                                            {
+                                                self.adopt(*target)?;
+                                            } else {
+                                                return Err("Awaited task is not active");
+                                            }
+                                        }
+                                    }
+                                    if let Some(coroutine) =
+                                        self.instance.runtime.coroutines.get_mut(&id)
+                                    {
+                                        coroutine.pending_all = vec![None; targets.len()];
+                                    }
+                                    Waiting::All(targets.clone())
+                                }
+                            }
+                            WakeRequest::Race(targets) => {
+                                if !expects_wake {
+                                    return Err(
+                                        "Yielding a task group does not await it; use await",
+                                    );
+                                }
+                                if targets.is_empty() {
+                                    return Err("task_race requires at least one task");
+                                }
+                                for target in targets {
+                                    if self.would_cycle(id, *target) {
+                                        return Err("Cyclic task await");
+                                    }
+                                    if !self.tasks.contains_key(target) {
+                                        if self.instance.runtime.coroutines.contains_key(target) {
+                                            self.adopt(*target)?;
+                                        } else {
+                                            return Err("Awaited task is not active");
+                                        }
+                                    }
+                                }
+                                Waiting::Race(targets.clone())
                             }
                         };
                         task.delivers = expects_wake;
@@ -479,7 +692,7 @@ impl OwnedCoroutineScheduler {
             .values()
             .filter_map(|t| match t.waiting {
                 Waiting::Ready(at) | Waiting::Timer(at) => Some(at),
-                Waiting::Event(_) | Waiting::Task(_) => None,
+                Waiting::Event(_) | Waiting::Task(_) | Waiting::All(_) | Waiting::Race(_) => None,
             })
             .min()
     }

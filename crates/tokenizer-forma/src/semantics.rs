@@ -483,12 +483,12 @@ pub fn matches_type(value: &V, ty: &str, enums: &V) -> bool {
             .as_object()
             .is_some_and(|o| o.values().all(|v| matches_type(v, inner, enums)));
     }
-    // K is fixed to String (JSON keys are always strings); only values are matched.
+    // K is fixed to String (JSON keys are always strings); reject non-String key types consistently.
     if let Some(inner) = ty.strip_prefix("Record<").and_then(|s| s.strip_suffix('>')) {
         let Some(parts) = split_top_level(inner, b',') else {
             return false;
         };
-        if parts.len() != 2 {
+        if parts.len() != 2 || parts[0] != "String" {
             return false;
         }
         let val_ty = parts[1];

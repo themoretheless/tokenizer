@@ -1,0 +1,125 @@
+[package]
+name = "themoretheless-tokenizer-languages"
+version = "0.8.0"
+edition = "2024"
+authors = ["Denis Mezhov"]
+description = "Table-driven multi-language syntax engines (49 programming & query languages) for themoretheless-tokenizer"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/themoretheless/tokenizer"
+readme = "README.md"
+publish = ["crates-io"]
+keywords = ["tokenizer", "lexer", "parser", "syntax-highlighting"]
+categories = ["parsing", "text-processing"]
+
+[lib]
+name = "themoretheless_tokenizer_languages"
+path = "src/lib.rs"
+
+[dependencies]
+themoretheless-tokenizer-core = { path = "../tokenizer-core", version = "0.8.0" }
+
+[features]
+default = []
+abap = []
+ada = []
+assembly = []
+bash = []
+c = []
+clojure = []
+cobol = []
+cpp = []
+csharp = []
+dart = []
+delphi = []
+dlang = []
+elixir = []
+erlang = []
+fortran = []
+fsharp = []
+go = []
+graphql = []
+groovy = []
+haskell = []
+java = []
+javascript = []
+julia = []
+kotlin = []
+lisp = []
+lua = []
+matlab = []
+mongo = []
+nim = []
+objectivec = []
+ocaml = []
+perl = []
+php = []
+powershell = []
+prolog = []
+python = []
+r = []
+ruby = []
+rust = []
+scala = []
+scheme = []
+solidity = []
+sql = []
+swift = []
+typescript = []
+verilog = []
+vhdl = []
+visualbasic = []
+zig = []
+all = [
+    "abap",
+    "ada",
+    "assembly",
+    "bash",
+    "c",
+    "clojure",
+    "cobol",
+    "cpp",
+    "csharp",
+    "dart",
+    "delphi",
+    "dlang",
+    "elixir",
+    "erlang",
+    "fortran",
+    "fsharp",
+    "go",
+    "graphql",
+    "groovy",
+    "haskell",
+    "java",
+    "javascript",
+    "julia",
+    "kotlin",
+    "lisp",
+    "lua",
+    "matlab",
+    "mongo",
+    "nim",
+    "objectivec",
+    "ocaml",
+    "perl",
+    "php",
+    "powershell",
+    "prolog",
+    "python",
+    "r",
+    "ruby",
+    "rust",
+    "scala",
+    "scheme",
+    "solidity",
+    "sql",
+    "swift",
+    "typescript",
+    "verilog",
+    "vhdl",
+    "visualbasic",
+    "zig",
+]
+
+[package.metadata.docs.rs]
+all-features = true

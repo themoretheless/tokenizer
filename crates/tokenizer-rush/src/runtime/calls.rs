@@ -143,7 +143,18 @@ impl<'s> Runtime<'_, 's> {
                 arguments
             };
             let result = match self.contextual.get(&Rc::as_ptr(&function)) {
-                Some(callback) => callback(&coerced_args, self.cancellation),
+                Some((callback, transactional)) => {
+                    if !transactional && self.in_transaction() {
+                        return self.error(
+                            span,
+                            &format!(
+                                "Host function '{}' has external side effects and cannot be called inside a transaction",
+                                function.name
+                            ),
+                        );
+                    }
+                    callback(&coerced_args, self.cancellation)
+                }
                 None => (function.callback)(&coerced_args, self.cancellation),
             }
             .map_err(|message| RuntimeError {
@@ -534,6 +545,37 @@ impl<'s> Runtime<'_, 's> {
                 return Ok(arguments.swap_remove(0));
             }
 
+            if matches!(builtin, Builtin::TaskAll | Builtin::TaskRace) {
+                let mut arguments = arguments.into_owned();
+                let items = match arguments.swap_remove(0) {
+                    Value::List(items) | Value::Tuple(items) => items,
+                    _ => {
+                        return self.error(
+                            span,
+                            "task_all and task_race require a list or tuple of tasks",
+                        );
+                    }
+                };
+                if !items.iter().all(|item| matches!(item, Value::Task(_))) {
+                    return self.error(
+                        span,
+                        "task_all and task_race require task handles produced by async functions",
+                    );
+                }
+                if builtin == Builtin::TaskAll && items.is_empty() {
+                    return Ok(Value::List(Vec::new()));
+                }
+                if builtin == Builtin::TaskRace && items.is_empty() {
+                    return self.error(span, "task_race requires at least one task");
+                }
+                let tag = if builtin == Builtin::TaskAll {
+                    "TaskAll"
+                } else {
+                    "TaskRace"
+                };
+                return Ok(Value::Variant(tag, items));
+            }
+
             // First-class region handles: `arena(name, budget?, persistent?, strict?)`
             // builds a plain descriptor record, `arena_run` executes a callback inside
             // a frame of that region, `arena_stats` reads its aggregated metrics.
@@ -599,6 +641,12 @@ impl<'s> Runtime<'_, 's> {
                     ])));
                 }
                 if builtin == Builtin::ArenaReset {
+                    if self.in_transaction() {
+                        return self.error(
+                            span,
+                            "persistent arenas cannot be reset inside a transaction",
+                        );
+                    }
                     if active_persistent.is_some() {
                         return self.error(span, "cannot reset an active persistent arena");
                     }
@@ -642,6 +690,12 @@ impl<'s> Runtime<'_, 's> {
                 };
                 let strict = matches!(fields.get("strict"), Some(Value::Bool(true)));
                 if matches!(fields.get("persistent"), Some(Value::Bool(true))) {
+                    if self.in_transaction() {
+                        return self.error(
+                            span,
+                            "persistent arenas cannot be entered inside a transaction",
+                        );
+                    }
                     if active_persistent.is_some() {
                         return self.error(span, "persistent arena is already active");
                     }

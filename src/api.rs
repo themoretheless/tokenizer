@@ -30,7 +30,7 @@ use std::borrow::Cow;
 
 use crate::{
     HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostToken, HostTokenization,
-    InputLimits, TokenLayer, analyze_host, builtin_registry,
+    InputLimits, TokenLayer, analyze_host_with_options, builtin_registry,
 };
 
 /// Fluent analysis request for one source buffer and one language.
@@ -147,12 +147,8 @@ impl<'a> Source<'a> {
 
     /// Run a chosen token layer and return tokens + diagnostics.
     pub fn run(&self, layer: TokenLayer) -> Result<Analysis, HostError> {
-        let tokens = analyze_host(
-            self.language.as_ref(),
-            self.source,
-            self.dialect.as_ref(),
-            layer,
-        )?;
+        let opts = self.options();
+        let tokens = analyze_host_with_options(self.language.as_ref(), self.source, &opts, layer)?;
         Ok(Analysis {
             language: self.language.as_ref().to_owned(),
             dialect: self.dialect.as_ref().to_owned(),
@@ -213,10 +209,11 @@ impl Analysis {
     /// Token covering `offset` (UTF-8 byte), if any.
     #[must_use]
     pub fn token_at(&self, offset: usize) -> Option<&HostToken> {
-        self.inner
-            .tokens
-            .iter()
-            .find(|token| token.span.start <= offset && offset < token.span.end)
+        let tokens = &self.inner.tokens;
+        let idx = tokens.partition_point(|token| token.span.end <= offset);
+        tokens
+            .get(idx)
+            .filter(|token| token.span.start <= offset && offset < token.span.end)
     }
 
     /// Diagnostics whose span contains `offset`.
@@ -365,5 +362,27 @@ mod tests {
         use crate::LanguageId;
         assert_eq!(LanguageId::JSON.as_str(), "json");
         assert_eq!(LanguageId::URL.as_str(), "url");
+    }
+
+    #[cfg(feature = "json")]
+    #[test]
+    fn source_limits_are_respected_on_all_paths() {
+        let strict_limits = InputLimits {
+            max_input_bytes: 4,
+            ..InputLimits::conservative()
+        };
+        let req = Source::new("json", r#"{"ok":true}"#).limits(strict_limits);
+        assert!(matches!(
+            req.syntax(),
+            Err(HostError::InputTooLarge { max: 4, .. })
+        ));
+        assert!(matches!(
+            req.highlight(),
+            Err(HostError::InputTooLarge { max: 4, .. })
+        ));
+        assert!(matches!(
+            req.errors(),
+            Err(HostError::InputTooLarge { max: 4, .. })
+        ));
     }
 }

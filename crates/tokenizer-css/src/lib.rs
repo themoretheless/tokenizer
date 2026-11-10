@@ -44,7 +44,6 @@ use std::borrow::Cow;
 use themoretheless_tokenizer_core::{
     Capabilities, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan,
     HostToken, HostTokenization, LanguageDescriptor, LanguageId, Severity, language_descriptor,
-    require_default_dialect,
 };
 
 /// Real engine surface: no CST, cursor navigation or visitor API exists here.
@@ -94,8 +93,9 @@ fn host_kind(kind: SyntaxKind) -> &'static str {
 }
 
 fn host_tokenization(parsed: &Parse<'_>) -> HostTokenization {
-    let mut tokens = Vec::new();
-    for token in parsed.lexed().tokens() {
+    let lex_tokens = parsed.lexed().tokens();
+    let mut tokens = Vec::with_capacity(lex_tokens.len());
+    for token in lex_tokens {
         let error = token.has_error();
         tokens.push(HostToken {
             kind: Cow::Borrowed(if error {
@@ -146,40 +146,8 @@ impl HostLanguage for Host {
     }
 
     fn lex(&self, source: &str, opts: &HostAnalysisOptions) -> Result<HostTokenization, HostError> {
-        require_default_dialect(&DESCRIPTOR, opts.dialect.as_ref())?;
-        if opts.limits.exceeds_input_bytes(source.len()) {
-            return Err(HostError::InputTooLarge {
-                max: opts.limits.max_input_bytes,
-                actual: source.len(),
-            });
-        }
+        let _ = self.check_entry(source, opts)?;
         Ok(host_tokenization(&parse(source)))
-    }
-
-    /// The syntax stream is already context-resolved, so the semantic layer
-    /// is the same token list.
-    fn semantic_tokens(
-        &self,
-        source: &str,
-        opts: &HostAnalysisOptions,
-    ) -> Result<HostTokenization, HostError> {
-        // SEMANTIC dropped: identical to syntax (measurement-driven capability honesty).
-        self.lex(source, opts)
-    }
-
-    fn diagnose(
-        &self,
-        source: &str,
-        opts: &HostAnalysisOptions,
-    ) -> Result<Vec<HostDiagnostic>, HostError> {
-        require_default_dialect(&DESCRIPTOR, opts.dialect.as_ref())?;
-        if opts.limits.exceeds_input_bytes(source.len()) {
-            return Err(HostError::InputTooLarge {
-                max: opts.limits.max_input_bytes,
-                actual: source.len(),
-            });
-        }
-        Ok(host_tokenization(&parse(source)).diagnostics)
     }
 }
 

@@ -15,11 +15,31 @@ categories = ["parsing", "text-processing"]
 name = "themoretheless_tokenizer_rush"
 path = "src/lib.rs"
 
+[[bin]]
+name = "rush"
+path = "src/bin/rush.rs"
+required-features = ["runtime"]
+
+[features]
+default = ["runtime"]
+runtime = [
+    "dep:self_cell",
+    "dep:serde",
+    "dep:themoretheless-tokenizer-json",
+    "dep:libc",
+]
+
 [dependencies]
-self_cell = "1"
-serde = { version = "1", features = ["derive"] }
+self_cell = { version = "1", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
 themoretheless-tokenizer-core = { path = "../tokenizer-core", version = "0.8.0" }
-themoretheless-tokenizer-json = { path = "../tokenizer-json", version = "0.8.0" }
+themoretheless-tokenizer-json = { path = "../tokenizer-json", version = "0.8.0", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", optional = true }
+
+[dev-dependencies]
+serde_json = "1.0.151"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -27,57 +47,64 @@ all-features = true
 [[bench]]
 name = "runtime"
 harness = false
+required-features = ["runtime"]
 
 [[bench]]
 name = "memory"
 harness = false
+required-features = ["runtime"]
 
 [[bench]]
 name = "cancellation"
 harness = false
+required-features = ["runtime"]
 
 [[bench]]
 name = "allocator"
 harness = false
-
-[dev-dependencies]
-serde_json = "1.0.151"
+required-features = ["runtime"]
 
 [[bench]]
 name = "grouping"
 harness = false
+required-features = ["runtime"]
 
 [[bench]]
 name = "scalar_bytecode"
 harness = false
+required-features = ["runtime"]
 
 [[bench]]
 name = "scalar_memory"
 harness = false
+required-features = ["runtime"]
 
 [[bench]]
 name = "scalar_closures"
 harness = false
+required-features = ["runtime"]
 
 [[bench]]
 name = "loading"
 harness = false
+required-features = ["runtime"]
 
 [[bench]]
 name = "coroutine"
 harness = false
+required-features = ["runtime"]
 
 [[bench]]
 name = "remainder"
 harness = false
+required-features = ["runtime"]
 
 [[bench]]
 name = "bytecode_vm"
 harness = false
+required-features = ["runtime"]
 
 [[bench]]
 name = "inventory"
 harness = false
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
+required-features = ["runtime"]

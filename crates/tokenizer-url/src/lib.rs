@@ -8,7 +8,12 @@
 //! Class names in [`UrlKind::class_name`] match the Proxima inspector CSS
 //! (`u-scheme`, `u-host`, `u-key`, …).
 
-use themoretheless_tokenizer_core::{Diagnostic, Span};
+use std::borrow::Cow;
+use themoretheless_tokenizer_core::{
+    Capabilities, Diagnostic, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage,
+    HostSpan, HostToken, HostTokenization, LanguageDescriptor, LanguageId, Span,
+    language_descriptor, verify_lossless_spans,
+};
 
 /// Semantic highlight class for one URL fragment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -73,14 +78,7 @@ impl UrlTokenization {
     /// Concatenation of token texts equals `source` when spans are valid.
     #[must_use]
     pub fn is_lossless(&self, source: &str) -> bool {
-        let mut rebuilt = String::new();
-        for token in &self.tokens {
-            let Some(piece) = token.text(source) else {
-                return false;
-            };
-            rebuilt.push_str(piece);
-        }
-        rebuilt == source
+        verify_lossless_spans(source, self.tokens.iter().map(|t| t.span)).is_ok()
     }
 }
 
@@ -434,6 +432,72 @@ fn push_range(out: &mut UrlTokenization, source: &str, kind: UrlKind, from: usiz
             kind,
             span: Span::new(start, to),
         });
+    }
+}
+
+pub const LANGUAGE_ID: LanguageId = LanguageId::URL;
+
+/// Built-in [`HostLanguage`] adapter for URL / path syntax and lightweight validation.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct UrlHost;
+
+pub type Host = UrlHost;
+
+pub static DESCRIPTOR: LanguageDescriptor = language_descriptor(
+    LANGUAGE_ID,
+    "URL",
+    &["uri"],
+    &[],
+    &[],
+    env!("CARGO_PKG_VERSION"),
+    Capabilities::URL_TODAY,
+);
+
+pub static ENGINE: UrlHost = UrlHost;
+
+impl HostLanguage for UrlHost {
+    fn descriptor(&self) -> &'static LanguageDescriptor {
+        &DESCRIPTOR
+    }
+
+    fn lex(&self, source: &str, opts: &HostAnalysisOptions) -> Result<HostTokenization, HostError> {
+        let _ = self.check_entry(source, opts)?;
+        let result = tokenize(source);
+        let extra = validate(source);
+        let mut diagnostics = Vec::with_capacity(result.diagnostics.len() + extra.len());
+        diagnostics.extend(
+            result
+                .diagnostics
+                .iter()
+                .copied()
+                .map(HostDiagnostic::from_diagnostic),
+        );
+        diagnostics.extend(extra.into_iter().map(HostDiagnostic::from_diagnostic));
+        let mut tokens = Vec::with_capacity(result.tokens.len());
+        for token in &result.tokens {
+            tokens.push(HostToken {
+                kind: Cow::Borrowed(token.kind.class_name()),
+                span: HostSpan::from(token.span),
+                error: false,
+            });
+        }
+        Ok(HostTokenization {
+            tokens,
+            valid: diagnostics.is_empty(),
+            diagnostics,
+        })
+    }
+
+    fn diagnose(
+        &self,
+        source: &str,
+        opts: &HostAnalysisOptions,
+    ) -> Result<Vec<HostDiagnostic>, HostError> {
+        let _ = self.check_entry(source, opts)?;
+        Ok(validate(source)
+            .into_iter()
+            .map(HostDiagnostic::from_diagnostic)
+            .collect())
     }
 }
 

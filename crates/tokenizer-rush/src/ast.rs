@@ -71,6 +71,14 @@ pub enum StmtKind<'s> {
         pattern: Expr<'s>,
         value: Expr<'s>,
     },
+    /// Failable binding `let <pattern> = <value> else { ... }`: binds pattern
+    /// names into the enclosing scope when matched, or executes `else_block`
+    /// (which must diverge via `return`, `break`, `continue`, or `?`).
+    LetElse {
+        pattern: Expr<'s>,
+        value: Expr<'s>,
+        else_block: Block<'s>,
+    },
     Function {
         name: Name<'s>,
         parameters: Vec<Parameter<'s>>,
@@ -91,6 +99,12 @@ pub enum StmtKind<'s> {
     Yield(Expr<'s>),
     If {
         condition: Expr<'s>,
+        then_block: Block<'s>,
+        else_block: Option<Block<'s>>,
+    },
+    IfLet {
+        pattern: Expr<'s>,
+        value: Expr<'s>,
         then_block: Block<'s>,
         else_block: Option<Block<'s>>,
     },
@@ -137,6 +151,12 @@ pub enum ExprKind<'s> {
     Await(Box<Expr<'s>>),
     If {
         condition: Box<Expr<'s>>,
+        then_value: Box<Expr<'s>>,
+        else_value: Box<Expr<'s>>,
+    },
+    IfLet {
+        pattern: Box<Expr<'s>>,
+        value: Box<Expr<'s>>,
         then_value: Box<Expr<'s>>,
         else_value: Box<Expr<'s>>,
     },

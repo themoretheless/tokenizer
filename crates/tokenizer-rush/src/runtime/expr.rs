@@ -46,10 +46,14 @@ impl<'s> Runtime<'_, 's> {
                 _ => self.error(span, "? requires Option or Result"),
             },
             ExprKind::TryBlock(body) => {
-                let cells = self.snapshot_cells(span)?;
-                let scope = environment
-                    .try_clone()
-                    .map_err(|e| self.environment_error(span, e))?;
+                self.begin_transaction(span)?;
+                let scope = match environment.try_clone() {
+                    Ok(scope) => scope,
+                    Err(e) => {
+                        self.rollback_transaction();
+                        return Err(self.environment_error(span, e));
+                    }
+                };
                 let region = self.enter_region(None, None);
                 let result = self.scoped_statements(&body.stmts, scope);
                 let result = if result.is_err() {
@@ -63,23 +67,26 @@ impl<'s> Runtime<'_, 's> {
                 };
                 match result {
                     Ok(value @ Value::Variant("Some" | "Ok", _)) => {
-                        drop(cells);
-                        self.exit_region(region, span)?;
+                        if let Err(err) = self.exit_region(region, span) {
+                            self.rollback_transaction();
+                            return Err(err);
+                        }
+                        self.commit_transaction(span)?;
                         Ok(value)
                     }
                     Ok(value @ Value::Variant("None" | "Err", _)) => {
                         let _ = self.exit_region(region, span);
-                        self.restore_cells(cells);
+                        self.rollback_transaction();
                         Ok(value)
                     }
                     Ok(_) => {
                         let _ = self.exit_region(region, span);
-                        self.restore_cells(cells);
+                        self.rollback_transaction();
                         self.error(span, "try block must evaluate to Option or Result")
                     }
                     Err(err) => {
                         let _ = self.exit_region(region, span);
-                        self.restore_cells(cells);
+                        self.rollback_transaction();
                         Err(err)
                     }
                 }
@@ -217,12 +224,17 @@ impl<'s> Runtime<'_, 's> {
                         }
                         assigned = assigned.coerce_for_type(ty);
                     }
+                    let log_undo = self.reserve_cell_undo(index, span)?;
                     let previous = std::mem::replace(&mut self.cells[index].0, assigned.clone());
                     if let Err(error) = self.enforce_retained_limit(span, None) {
                         self.cells[index].0 = previous;
                         return Err(error);
                     }
+                    if log_undo {
+                        self.commit_cell_undo(index, previous);
+                    }
                 } else {
+                    let log_undo = self.reserve_cell_undo(index, span)?;
                     let previous = self.cells[index].0.clone();
                     if let Err(err) = mutate_path(
                         self.module,
@@ -248,6 +260,9 @@ impl<'s> Runtime<'_, 's> {
                     if let Err(error) = self.enforce_retained_limit(span, None) {
                         self.cells[index].0 = previous;
                         return Err(error);
+                    }
+                    if log_undo {
+                        self.commit_cell_undo(index, previous);
                     }
                 }
                 Ok(assigned)
@@ -294,6 +309,23 @@ impl<'s> Runtime<'_, 's> {
                     return self.error(span, "Condition must be boolean");
                 };
                 self.expr(if condition { then_value } else { else_value }, environment)
+            }
+            ExprKind::IfLet {
+                pattern,
+                value,
+                then_value,
+                else_value,
+            } => {
+                let scrutinee = self.expr(value, environment)?;
+                let mut then_env = environment
+                    .try_clone()
+                    .map_err(|e| self.environment_error(span, e))?;
+                if self.match_value(pattern, &scrutinee, &mut then_env)? {
+                    self.expr(then_value, &then_env)
+                } else {
+                    drop(then_env);
+                    self.expr(else_value, environment)
+                }
             }
             ExprKind::Member { object, field } => {
                 let object = self.expr(object, environment)?;

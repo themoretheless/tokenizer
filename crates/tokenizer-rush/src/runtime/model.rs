@@ -317,9 +317,9 @@ impl<'a, 's> ModelInstance<'a, 's> {
             .try_clone()
             .map_err(|e| self.script.runtime.environment_error(self.script.span, e))?;
         let old_output = self.script.initial_value.clone();
-        // Pin live mutable captures so collection cannot recycle their slots during
-        // an update, and save their values for rollback (including imported state).
-        let cells = self.script.runtime.snapshot_cells(self.script.span)?;
+        // Record mutable cell writes lazily so failed updates roll back cleanly
+        // (including imported module state).
+        self.script.runtime.begin_transaction(self.script.span)?;
         let mut dirty = vec![false; self.model.nodes.len()];
         let parameter = self
             .model
@@ -367,9 +367,9 @@ impl<'a, 's> ModelInstance<'a, 's> {
         if result.is_err() {
             self.script.environment = snapshot;
             self.script.initial_value = old_output;
-            self.script.runtime.restore_cells(cells);
+            self.script.runtime.rollback_transaction();
         } else {
-            drop(cells);
+            self.script.runtime.commit_transaction(self.script.span)?;
             self.script.runtime.reclaim_cells();
         }
         result.map_err(|e| {

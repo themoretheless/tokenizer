@@ -23,9 +23,30 @@ impl BlockExits {
             }
             let next = match &statement.kind {
                 StmtKind::Return(_) | StmtKind::Continue => Self::default(),
+                StmtKind::Expr(Expr {
+                    kind: ExprKind::Try(inner),
+                    ..
+                }) if matches!(
+                    &inner.kind,
+                    ExprKind::Call { callee, arguments }
+                        if matches!(
+                            (&callee.kind, arguments.len()),
+                            (ExprKind::Name(n), 0) if n.text == "None"
+                        ) || matches!(
+                            (&callee.kind, arguments.len()),
+                            (ExprKind::Name(n), 1) if n.text == "Err"
+                        )
+                ) =>
+                {
+                    Self::default()
+                }
                 StmtKind::Break => Self {
                     next: false,
                     breaks: true,
+                },
+                StmtKind::LetElse { else_block, .. } => Self {
+                    next: true,
+                    breaks: Self::inspect(&else_block.stmts).breaks,
                 },
                 StmtKind::If {
                     condition,
@@ -47,6 +68,24 @@ impl BlockExits {
                             next: left.next || right.next,
                             breaks: left.breaks || right.breaks,
                         },
+                    }
+                }
+                StmtKind::IfLet {
+                    then_block,
+                    else_block,
+                    ..
+                } => {
+                    let left = Self::inspect(&then_block.stmts);
+                    let right = else_block.as_ref().map_or(
+                        Self {
+                            next: true,
+                            breaks: false,
+                        },
+                        |block| Self::inspect(&block.stmts),
+                    );
+                    Self {
+                        next: left.next || right.next,
+                        breaks: left.breaks || right.breaks,
                     }
                 }
                 StmtKind::While { condition, body } => Self {
@@ -73,6 +112,46 @@ impl BlockExits {
 }
 
 impl<'s> Checker<'s> {
+    fn bind_match_silent(&mut self, pattern: &Expr<'s>, shape: &Shape, ids: &mut Vec<usize>) {
+        self.bind_pattern_silent(pattern, ids);
+        match (&pattern.kind, shape) {
+            (ExprKind::Name(name), Shape::Typed(ty)) if name.text != "_" => {
+                self.binding_types.insert(name.span.start, ty.clone());
+            }
+            (ExprKind::Call { callee, arguments }, Shape::Typed(ty)) => {
+                if let Some((type_id, Some(variant))) = self.user_constructor(callee)
+                    && let Some(def) = self.user_types.get(&type_id)
+                    && let Some(types) = def.variants.get(&variant).cloned()
+                {
+                    for (arg, arg_ty) in arguments.iter().zip(types) {
+                        self.bind_match_silent(arg, &Shape::Typed(arg_ty), ids);
+                    }
+                } else if let ExprKind::Name(name) = &callee.kind {
+                    let payload = match (name.text, ty) {
+                        ("Some", ValueType::Option(inner))
+                        | ("Ok", ValueType::Result(inner, _))
+                        | ("Err", ValueType::Result(_, inner)) => Some((**inner).clone()),
+                        _ => None,
+                    };
+                    if let (Some(inner_ty), Some(arg)) = (payload, arguments.first()) {
+                        self.bind_match_silent(arg, &Shape::Typed(inner_ty), ids);
+                    }
+                }
+            }
+            (ExprKind::Tuple(items), Shape::Typed(ValueType::Tuple(types))) => {
+                for (item, ty) in items.iter().zip(types) {
+                    self.bind_match_silent(item, &Shape::Typed(ty.clone()), ids);
+                }
+            }
+            (ExprKind::Tuple(items), Shape::Tuple(shapes)) => {
+                for (item, s) in items.iter().zip(shapes) {
+                    self.bind_match_silent(item, s, ids);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub(super) fn constrain(
         &mut self,
         expression: &Expr<'s>,
@@ -167,6 +246,24 @@ impl<'s> Checker<'s> {
                 self.constrain(then_value, expected.clone(), parameters);
                 self.constrain(else_value, expected, parameters);
             }
+            ExprKind::IfLet {
+                pattern,
+                value,
+                then_value,
+                else_value,
+            } => {
+                self.constrain(value, None, parameters);
+                let shape = self.shape(value);
+                let mut temp_ids = Vec::new();
+                self.scopes.push(HashMap::new());
+                self.bind_match_silent(pattern, &shape, &mut temp_ids);
+                self.constrain(then_value, expected.clone(), parameters);
+                self.scopes.pop();
+                for id in temp_ids {
+                    self.binding_types.remove(&id);
+                }
+                self.constrain(else_value, expected, parameters);
+            }
             ExprKind::Call { callee, arguments } => {
                 let types = self.known_user_parameters(callee).or_else(|| {
                     self.known_host(callee)
@@ -216,6 +313,12 @@ impl<'s> Checker<'s> {
                     self.constrain(&binary, target_expected, parameters);
                 }
             }
+            ExprKind::Try(value) => {
+                self.constrain(value, None, parameters);
+            }
+            ExprKind::TryBlock(body) => {
+                self.constrain_body(&body.stmts, expected, parameters);
+            }
             _ => {}
         }
     }
@@ -226,6 +329,7 @@ impl<'s> Checker<'s> {
         expected: Option<ValueType>,
         parameters: &HashSet<usize>,
     ) {
+        let mut body_temp_ids = Vec::new();
         self.scopes.push(HashMap::new());
         for statement in statements {
             match &statement.kind {
@@ -243,7 +347,7 @@ impl<'s> Checker<'s> {
                     ty,
                 } => {
                     let ty = ty.as_ref().and_then(|t| {
-                        ValueType::annotation_with(t, &|n| self.resolve_type(n)).ok()
+                        ValueType::parse_annotation_with(t, &|n| self.resolve_type(n)).ok()
                     });
                     self.constrain(value, ty.clone(), parameters);
                     let shape = self.shape(value);
@@ -264,6 +368,16 @@ impl<'s> Checker<'s> {
                         self.binding_shapes.insert(name.span.start, shape);
                     }
                 }
+                StmtKind::LetElse {
+                    pattern,
+                    value,
+                    else_block,
+                } => {
+                    self.constrain(value, None, parameters);
+                    let shape = self.shape(value);
+                    self.constrain_body(&else_block.stmts, expected.clone(), parameters);
+                    self.bind_match_silent(pattern, &shape, &mut body_temp_ids);
+                }
                 StmtKind::If {
                     condition,
                     then_block,
@@ -271,6 +385,26 @@ impl<'s> Checker<'s> {
                 } => {
                     self.constrain(condition, Some(ValueType::Bool), parameters);
                     self.constrain_body(&then_block.stmts, expected.clone(), parameters);
+                    if let Some(block) = else_block {
+                        self.constrain_body(&block.stmts, expected.clone(), parameters);
+                    }
+                }
+                StmtKind::IfLet {
+                    pattern,
+                    value,
+                    then_block,
+                    else_block,
+                } => {
+                    self.constrain(value, None, parameters);
+                    let shape = self.shape(value);
+                    let mut temp_ids = Vec::new();
+                    self.scopes.push(HashMap::new());
+                    self.bind_match_silent(pattern, &shape, &mut temp_ids);
+                    self.constrain_body(&then_block.stmts, expected.clone(), parameters);
+                    self.scopes.pop();
+                    for id in temp_ids {
+                        self.binding_types.remove(&id);
+                    }
                     if let Some(block) = else_block {
                         self.constrain_body(&block.stmts, expected.clone(), parameters);
                     }
@@ -294,6 +428,9 @@ impl<'s> Checker<'s> {
             }
         }
         self.scopes.pop();
+        for id in body_temp_ids {
+            self.binding_types.remove(&id);
+        }
     }
 
     pub(super) fn return_candidates(&self, statements: &[Stmt<'s>], output: &mut Vec<Shape>) {
@@ -304,7 +441,15 @@ impl<'s> Checker<'s> {
                         .as_ref()
                         .map_or(Shape::Typed(ValueType::Null), |v| self.shape(v)),
                 ),
+                StmtKind::LetElse { else_block, .. } => {
+                    self.return_candidates(&else_block.stmts, output);
+                }
                 StmtKind::If {
+                    then_block,
+                    else_block,
+                    ..
+                }
+                | StmtKind::IfLet {
                     then_block,
                     else_block,
                     ..

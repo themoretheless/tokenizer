@@ -382,6 +382,13 @@ impl<'s> Checker<'s> {
         if self.calls
             && let Some(host) = &host
         {
+            if !host.transactional && !self.try_blocks.is_empty() {
+                self.error(
+                    callee.span,
+                    "non-transactional-host",
+                    "Contextual host function has external side effects that cannot be rolled back by try",
+                );
+            }
             let supplied = implicit
                 .into_iter()
                 .chain(
@@ -546,6 +553,32 @@ impl<'s> Checker<'s> {
                 self.condition(condition);
                 self.expr(then_value);
                 self.expr(else_value);
+            }
+            ExprKind::IfLet {
+                pattern,
+                value,
+                then_value,
+                else_value,
+            } => {
+                self.expr(value);
+                let shape = self.shape(value);
+                self.scopes.push(HashMap::new());
+                self.scope_spans.push(then_value.span);
+                self.match_bindings(pattern, then_value.span.start);
+                self.match_pattern_types(pattern, &shape);
+                self.expr(then_value);
+                let left = self.shape(then_value);
+                self.scopes.pop();
+                self.scope_spans.pop();
+                self.expr(else_value);
+                let right = self.shape(else_value);
+                let result = if left == right {
+                    left
+                } else {
+                    Shape::Alternatives(vec![left, right])
+                };
+                self.expression_shapes
+                    .insert((expr.span.start, expr.span.end), result);
             }
             ExprKind::Lambda {
                 parameters, body, ..

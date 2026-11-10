@@ -130,14 +130,14 @@ impl<'a, 's> ScriptInstance<'a, 's> {
         limits: ExecutionLimits,
     ) -> Result<Value<'s>> {
         self.runtime.reclaim_cells();
-        let cells = self.runtime.snapshot_cells(self.span)?;
+        self.runtime.begin_transaction(self.span)?;
         let result = self.call(name, arguments, limits);
         match &result {
             Ok(Value::Variant("None" | "Err", _)) | Err(_) => {
-                self.runtime.restore_cells(cells);
+                self.runtime.rollback_transaction();
             }
             Ok(_) => {
-                drop(cells);
+                self.runtime.commit_transaction(self.span)?;
                 self.runtime.reclaim_cells();
             }
         }
@@ -261,25 +261,135 @@ impl<'s> Program<'s> {
         &self.imports
     }
     fn collect_imports(statements: &[Stmt<'s>]) -> Vec<Name<'s>> {
+        fn visit_expr<'a, 's>(expr: &'a Expr<'s>, pending: &mut Vec<&'a [Stmt<'s>]>) {
+            match &expr.kind {
+                ExprKind::Try(inner)
+                | ExprKind::Await(inner)
+                | ExprKind::Unary { value: inner, .. }
+                | ExprKind::Member { object: inner, .. } => visit_expr(inner, pending),
+                ExprKind::TryBlock(body) => pending.push(&body.stmts),
+                ExprKind::If {
+                    condition: scrutinee,
+                    then_value,
+                    else_value,
+                }
+                | ExprKind::IfLet {
+                    value: scrutinee,
+                    then_value,
+                    else_value,
+                    ..
+                } => {
+                    visit_expr(scrutinee, pending);
+                    visit_expr(then_value, pending);
+                    visit_expr(else_value, pending);
+                }
+                ExprKind::Lambda { body, .. } => visit_expr(body, pending),
+                ExprKind::Binary { left, right, .. }
+                | ExprKind::Assign {
+                    target: left,
+                    value: right,
+                    ..
+                }
+                | ExprKind::Index {
+                    object: left,
+                    index: right,
+                } => {
+                    visit_expr(left, pending);
+                    visit_expr(right, pending);
+                }
+                ExprKind::Call { callee, arguments } => {
+                    visit_expr(callee, pending);
+                    for arg in arguments {
+                        visit_expr(arg, pending);
+                    }
+                }
+                ExprKind::List(items) | ExprKind::Tuple(items) => {
+                    for item in items {
+                        visit_expr(item, pending);
+                    }
+                }
+                ExprKind::Map(entries) => {
+                    for (k, v) in entries {
+                        visit_expr(k, pending);
+                        visit_expr(v, pending);
+                    }
+                }
+                ExprKind::Pipeline { input, stages } => {
+                    visit_expr(input, pending);
+                    for stage in stages {
+                        visit_expr(stage, pending);
+                    }
+                }
+                ExprKind::Match { value, arms } => {
+                    visit_expr(value, pending);
+                    for arm in arms {
+                        if let Some(guard) = &arm.guard {
+                            visit_expr(guard, pending);
+                        }
+                        visit_expr(&arm.value, pending);
+                    }
+                }
+                ExprKind::Interpolate(parts) => {
+                    for part in parts {
+                        if let crate::InterpolationPart::Expr(sub) = part {
+                            visit_expr(sub, pending);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
         let mut imports = Vec::new();
         let mut pending = vec![statements];
         while let Some(statements) = pending.pop() {
             for statement in statements {
                 match &statement.kind {
                     StmtKind::Import(name) => imports.push(name.clone()),
-                    StmtKind::Function { body, .. }
-                    | StmtKind::For { body, .. }
-                    | StmtKind::While { body, .. } => pending.push(&body.stmts),
+                    StmtKind::Function { body, .. } => pending.push(&body.stmts),
+                    StmtKind::For { iterable, body, .. } => {
+                        visit_expr(iterable, &mut pending);
+                        pending.push(&body.stmts);
+                    }
+                    StmtKind::While { condition, body } => {
+                        visit_expr(condition, &mut pending);
+                        pending.push(&body.stmts);
+                    }
+                    StmtKind::Region { budget, body, .. } => {
+                        if let Some(budget) = budget {
+                            visit_expr(budget, &mut pending);
+                        }
+                        pending.push(&body.stmts);
+                    }
+                    StmtKind::LetElse {
+                        value, else_block, ..
+                    } => {
+                        visit_expr(value, &mut pending);
+                        pending.push(&else_block.stmts);
+                    }
                     StmtKind::If {
+                        condition: scrutinee,
+                        then_block,
+                        else_block,
+                    }
+                    | StmtKind::IfLet {
+                        value: scrutinee,
                         then_block,
                         else_block,
                         ..
                     } => {
+                        visit_expr(scrutinee, &mut pending);
                         pending.push(&then_block.stmts);
                         if let Some(block) = else_block {
                             pending.push(&block.stmts);
                         }
                     }
+                    StmtKind::Declaration { value, .. }
+                    | StmtKind::Destructure { value, .. }
+                    | StmtKind::Show(value)
+                    | StmtKind::Yield(value)
+                    | StmtKind::Expr(value) => visit_expr(value, &mut pending),
+                    StmtKind::Return(Some(value)) => visit_expr(value, &mut pending),
                     _ => {}
                 }
             }
@@ -561,13 +671,22 @@ impl<'s> Program<'s> {
         if !functions.is_empty() || !contextual.is_empty() {
             let hosts: HashMap<_, _> = functions
                 .iter()
-                .cloned()
+                .map(|function| (function, true))
                 .chain(
                     contextual
                         .iter()
-                        .map(|registration| registration.function.clone()),
+                        .map(|registration| (&registration.function, registration.transactional)),
                 )
-                .map(|function| (function.name.to_owned(), function))
+                .map(|(function, transactional)| {
+                    (
+                        function.name.to_owned(),
+                        Rc::new(crate::analysis::HostSignature {
+                            parameters: function.parameters.clone(),
+                            result: function.result.clone(),
+                            transactional,
+                        }),
+                    )
+                })
                 .collect();
             for (name, program) in std::iter::once((None, self)).chain(
                 modules
@@ -658,8 +777,14 @@ impl<'s> Program<'s> {
             cancellation,
             contextual: contextual
                 .iter()
-                .map(|entry| (Rc::as_ptr(&entry.function), entry.callback.clone()))
+                .map(|entry| {
+                    (
+                        Rc::as_ptr(&entry.function),
+                        (entry.callback.clone(), entry.transactional),
+                    )
+                })
                 .collect(),
+            tx_stack: Vec::new(),
         };
         runtime.check(self.parsed.module.span)?;
         let mut environment = Environment::new(&memory);
@@ -737,8 +862,15 @@ pub fn evaluate(source: &str, budget: usize) -> Result<Value<'_>> {
     Program::compile(source)?.run(budget, &CancellationToken::default(), &[])
 }
 
-/// Snapshot of live mutable cells for transactional rollback.
-type CellSnapshot<'s> = memory::Slots<(usize, (Value<'s>, Option<ValueType>), Rc<CellId>)>;
+type CellUndoEntry<'s> = (usize, (Value<'s>, Option<ValueType>), Rc<CellId>);
+
+/// Lazy write-barrier undo frame for nested transactional blocks and calls.
+struct TransactionFrame<'s> {
+    undo: memory::Slots<CellUndoEntry<'s>>,
+    seen: std::collections::HashSet<usize>,
+    spawned_coroutines: Vec<CoroutineId>,
+    cached_modules: Vec<&'s str>,
+}
 
 struct Runtime<'a, 's> {
     module: Option<&'s str>,
@@ -790,7 +922,9 @@ struct Runtime<'a, 's> {
     /// Lookups are linear — the number of distinct region names is tiny.
     region_stats: Vec<RegionStats>,
     cancellation: &'a CancellationToken,
-    contextual: HashMap<*const HostFunction, ContextualHostCallback>,
+    contextual: HashMap<*const HostFunction, (ContextualHostCallback, bool)>,
+    /// Active nested transactions (`try { ... }`, `call_transactional`, `ModelInstance::set`).
+    tx_stack: Vec<TransactionFrame<'s>>,
 }
 
 impl<'s> Runtime<'_, 's> {
@@ -898,27 +1032,95 @@ impl<'s> Runtime<'_, 's> {
             message: message.into(),
         })
     }
-    /// Pin live mutable cells and snapshot their values and contracts so a
-    /// transactional block or call can roll back mutations on failure.
-    pub(super) fn snapshot_cells(&self, span: Span) -> Result<CellSnapshot<'s>> {
-        let mut cells =
-            memory::Slots::new(&self.memory, 0).map_err(|e| self.environment_error(span, e))?;
-        for (index, id) in self.cell_ids.iter().enumerate() {
-            if let Some(id) = id.upgrade() {
-                cells
-                    .push((index, self.cells[index].clone(), id))
-                    .map_err(|e| self.environment_error(span, e))?;
-            }
-        }
-        Ok(cells)
+    #[inline]
+    pub(super) fn in_transaction(&self) -> bool {
+        !self.tx_stack.is_empty()
     }
-    /// Restore live mutable cells from a snapshot and reclaim any cells
-    /// allocated solely during the aborted transaction.
-    pub(super) fn restore_cells(&mut self, cells: CellSnapshot<'s>) {
-        for (index, value, _) in cells.iter() {
+    /// Open a nested transaction frame with `O(1)` zero-allocation setup.
+    /// Cell values are recorded lazily on first mutation (`reserve_cell_undo` / `commit_cell_undo`).
+    pub(super) fn begin_transaction(&mut self, span: Span) -> Result<()> {
+        let undo =
+            memory::Slots::new(&self.memory, 0).map_err(|e| self.environment_error(span, e))?;
+        self.tx_stack.push(TransactionFrame {
+            undo,
+            seen: std::collections::HashSet::new(),
+            spawned_coroutines: Vec::new(),
+            cached_modules: Vec::new(),
+        });
+        Ok(())
+    }
+    /// Reserve a slot in the innermost transaction's undo log prior to mutating `cells[index]`.
+    pub(super) fn reserve_cell_undo(&mut self, index: usize, span: Span) -> Result<bool> {
+        let Some(frame) = self.tx_stack.last_mut() else {
+            return Ok(false);
+        };
+        if frame.seen.contains(&index) {
+            return Ok(false);
+        }
+        if self.cell_ids.get(index).and_then(Weak::upgrade).is_none() {
+            return Ok(false);
+        }
+        if let Err(e) = frame.undo.reserve(1) {
+            return Err(self.environment_error(span, e));
+        }
+        Ok(true)
+    }
+    /// Record the pre-mutation value of `cells[index]` into the innermost undo log.
+    pub(super) fn commit_cell_undo(&mut self, index: usize, previous: Value<'s>) {
+        if let Some(frame) = self.tx_stack.last_mut()
+            && !frame.seen.contains(&index)
+            && let Some(id) = self.cell_ids.get(index).and_then(Weak::upgrade)
+        {
+            let contract = self.cells[index].1.clone();
+            frame
+                .undo
+                .push((index, (previous, contract), id))
+                .expect("undo slot reserved before cell mutation");
+            frame.seen.insert(index);
+        }
+    }
+    /// Commit the innermost transaction, merging its undo log into any enclosing
+    /// parent transaction so an outer abort still restores pre-outer state.
+    pub(super) fn commit_transaction(&mut self, span: Span) -> Result<()> {
+        let Some(mut child) = self.tx_stack.pop() else {
+            return Ok(());
+        };
+        if let Some(parent) = self.tx_stack.last_mut() {
+            while let Some((index, previous, id)) = child.undo.pop() {
+                if parent.seen.insert(index)
+                    && let Err(e) = parent.undo.push((index, previous, id))
+                {
+                    return Err(self.environment_error(span, e));
+                }
+            }
+            parent.spawned_coroutines.extend(child.spawned_coroutines);
+            parent.cached_modules.extend(child.cached_modules);
+        }
+        Ok(())
+    }
+    /// Roll back the innermost transaction: restore dirty cells, discard tasks
+    /// and module cache entries created inside it, and reclaim temporary cells.
+    pub(super) fn rollback_transaction(&mut self) {
+        let Some(frame) = self.tx_stack.pop() else {
+            return;
+        };
+        for (index, value, _) in frame.undo.iter() {
             self.cells[*index] = value.clone();
         }
-        drop(cells);
+        for id in &frame.spawned_coroutines {
+            self.coroutines.remove(id);
+        }
+        for module_name in &frame.cached_modules {
+            if let Ok(idx) = self
+                .module_cache
+                .binary_search_by_key(module_name, |(key, _)| *key)
+            {
+                let len = self.module_cache.len();
+                self.module_cache[idx..len].rotate_left(1);
+                let _ = self.module_cache.pop();
+            }
+        }
+        drop(frame);
         self.reclaim_cells();
     }
 }
