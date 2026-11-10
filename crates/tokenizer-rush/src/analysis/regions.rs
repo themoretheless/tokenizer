@@ -142,6 +142,10 @@ impl<'s> Checker<'s> {
         let is_arena = matches!(&callee.kind, ExprKind::Name(name)
             if name.text == "arena"
                 && !self.scopes.iter().any(|scope| scope.contains_key(name.text)));
-        is_arena && matches!(arguments.get(3).map(|a| &a.kind), Some(ExprKind::Bool(true)))
+        is_arena
+            && matches!(
+                arguments.get(3).map(|a| &a.kind),
+                Some(ExprKind::Bool(true))
+            )
     }
 }

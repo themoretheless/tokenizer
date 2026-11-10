@@ -961,8 +961,7 @@ fn arena_run_callback_escapes_lint_statically() {
         result.diagnostics
     );
     // Returning a captured closure leaks just the same.
-    let result =
-        analyze("fn body() { mut n = 1\nreturn () => n }\narena_run(arena(\"s\"), body)");
+    let result = analyze("fn body() { mut n = 1\nreturn () => n }\narena_run(arena(\"s\"), body)");
     assert!(
         result.diagnostics.iter().any(|d| d.code == "arena-escape"),
         "{:?}",

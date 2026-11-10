@@ -702,7 +702,9 @@ pub(crate) fn eval_math_builtin<'s>(
 }
 
 /// Validate `arena(name, budget?, persistent?, strict?)` arguments and build its descriptor record.
-pub(crate) fn build_arena_descriptor<'s>(args: &[Value<'s>]) -> Result<RecordMap<'s>, &'static str> {
+pub(crate) fn build_arena_descriptor<'s>(
+    args: &[Value<'s>],
+) -> Result<RecordMap<'s>, &'static str> {
     let Some(Value::String(name)) = args.first() else {
         return Err("arena requires a name string");
     };

@@ -498,9 +498,7 @@ impl<'s> Checker<'s> {
                             Shape::Typed(ty @ (ValueType::Option(_) | ValueType::Result(_, _))),
                             _,
                         ) => Some(ty.clone()),
-                        (_, Ok(Some(true))) => {
-                            Some(ValueType::Option(Box::new(ValueType::Null)))
-                        }
+                        (_, Ok(Some(true))) => Some(ValueType::Option(Box::new(ValueType::Null))),
                         (_, Ok(Some(false))) => Some(ValueType::Result(
                             Box::new(ValueType::Null),
                             Box::new(ValueType::Null),
@@ -517,9 +515,7 @@ impl<'s> Checker<'s> {
                                 || *err_b == Box::new(ValueType::Null)
                                 || !disjoint(err_a, err_b) => {}
                             (
-                                Shape::Typed(
-                                    ty @ (ValueType::Option(_) | ValueType::Result(_, _)),
-                                ),
+                                Shape::Typed(ty @ (ValueType::Option(_) | ValueType::Result(_, _))),
                                 None,
                             ) => {
                                 expected_family = Some(ty.clone());

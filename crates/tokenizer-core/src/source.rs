@@ -72,8 +72,10 @@ impl<'source> LineIndex<'source> {
     #[must_use]
     pub fn new(source: &'source str) -> Self {
         let bytes = source.as_bytes();
-        let mut line_starts = vec![0];
-        let mut line_ends = Vec::new();
+        let est_lines = (bytes.len() / 48).max(1) + 1;
+        let mut line_starts = Vec::with_capacity(est_lines);
+        line_starts.push(0);
+        let mut line_ends = Vec::with_capacity(est_lines);
         let mut cursor = 0;
 
         while cursor < bytes.len() {

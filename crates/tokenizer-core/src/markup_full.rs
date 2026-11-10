@@ -1,10 +1,42 @@
 //! Full markup / data-document engines: XML/HTML-ish tree, CSS rules, YAML/TOML docs, Markdown blocks, SQL stmts.
 
 use crate::{
-    Diagnostic, HostDiagnostic, HostSpan, HostToken, HostTokenization, Span,
-    langkit::HTML_RAW_TEXT, verify_lossless_spans,
+    Diagnostic, HostDiagnostic, HostSpan, HostToken, HostTokenization, Span, verify_lossless_spans,
 };
 use std::borrow::Cow;
+
+/// Elements whose HTML body is text until their own close tag, `<` included.
+pub const HTML_RAW_TEXT: [&str; 4] = ["script", "style", "textarea", "title"];
+
+/// Index of the `<` starting a complete `</name>` tag, ASCII-case insensitively, or `None` to
+/// end of input. Both the markup lexer and its parser need the same rule.
+#[must_use]
+pub fn find_close_tag(source: &str, from: usize, name: &str) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut i = from;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'<' && bytes[i + 1] == b'/' {
+            let ns = i + 2;
+            let mut ne = ns;
+            while ne < bytes.len()
+                && (bytes[ne].is_ascii_alphanumeric() || matches!(bytes[ne], b'-' | b':' | b'_'))
+            {
+                ne += 1;
+            }
+            if source[ns..ne].eq_ignore_ascii_case(name) {
+                let mut end = ne;
+                while end < bytes.len() && bytes[end].is_ascii_whitespace() {
+                    end += 1;
+                }
+                if bytes.get(end) == Some(&b'>') {
+                    return Some(i);
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MarkupTok {
@@ -100,25 +132,124 @@ pub struct MarkupParse<'s> {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-pub fn lex_markup(source: &str, flavor: MarkupFlavor) -> MLexed {
-    let h = crate::langkit::highlight_markup(source, flavor.is_html());
-    MLexed {
-        tokens: h
-            .tokens
-            .into_iter()
-            .map(|t| MToken {
-                kind: match t.kind {
-                    "comment" => MarkupTok::Comment,
-                    "tag" => MarkupTok::Tag,
-                    "text" => MarkupTok::Text,
-                    "whitespace" => MarkupTok::Whitespace,
-                    _ => MarkupTok::Text,
-                },
-                span: t.span,
-            })
-            .collect(),
-        diagnostics: h.diagnostics,
+#[inline]
+fn push_mtoken(out: &mut MLexed, kind: MarkupTok, start: usize, end: usize) {
+    if end > start {
+        out.tokens.push(MToken {
+            kind,
+            span: Span::new(start, end),
+        });
     }
+}
+
+#[must_use]
+pub fn lex_markup(source: &str, flavor: MarkupFlavor) -> MLexed {
+    let htmlish = flavor.is_html();
+    let bytes = source.as_bytes();
+    let mut out = MLexed {
+        tokens: Vec::with_capacity(bytes.len() / 6),
+        diagnostics: Vec::new(),
+    };
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        if bytes[i..].starts_with(b"<!--") {
+            let start = i;
+            i += 4;
+            while i + 2 < bytes.len() && !bytes[i..].starts_with(b"-->") {
+                i += 1;
+            }
+            if i + 2 < bytes.len() {
+                i += 3;
+            } else {
+                i = bytes.len();
+                out.diagnostics.push(Diagnostic::new(
+                    Span::new(start, i),
+                    "unclosed-comment",
+                    "Unclosed HTML/XML comment",
+                ));
+            }
+            push_mtoken(&mut out, MarkupTok::Comment, start, i);
+            continue;
+        }
+
+        if bytes[i] == b'<' {
+            let start = i;
+            i += 1;
+            if i < bytes.len() && (bytes[i] == b'!' || bytes[i] == b'?') {
+                while i < bytes.len() && bytes[i] != b'>' {
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    i += 1;
+                }
+                push_mtoken(&mut out, MarkupTok::Tag, start, i);
+                continue;
+            }
+            let closing = i < bytes.len() && bytes[i] == b'/';
+            if closing {
+                i += 1;
+            }
+            let name_start = i;
+            while i < bytes.len()
+                && (bytes[i].is_ascii_alphanumeric() || matches!(bytes[i], b'-' | b':' | b'_'))
+            {
+                i += 1;
+            }
+            let raw_text_name = &source[name_start..i];
+            let raw_text = htmlish
+                && !closing
+                && HTML_RAW_TEXT
+                    .iter()
+                    .any(|t| t.eq_ignore_ascii_case(raw_text_name));
+            while i < bytes.len() && bytes[i] != b'>' {
+                if bytes[i] == b'"' || bytes[i] == b'\'' {
+                    let q = bytes[i];
+                    i += 1;
+                    while i < bytes.len() && bytes[i] != q {
+                        i += 1;
+                    }
+                    if i < bytes.len() {
+                        i += 1;
+                    }
+                    continue;
+                }
+                i += 1;
+            }
+            if i < bytes.len() {
+                i += 1;
+            }
+            push_mtoken(&mut out, MarkupTok::Tag, start, i);
+            if raw_text {
+                let body_start = i;
+                match find_close_tag(source, body_start, raw_text_name) {
+                    Some(close) => {
+                        push_mtoken(&mut out, MarkupTok::Text, body_start, close);
+                        i = close;
+                        while i < bytes.len() && bytes[i] != b'>' {
+                            i += 1;
+                        }
+                        if i < bytes.len() {
+                            i += 1;
+                        }
+                        push_mtoken(&mut out, MarkupTok::Tag, close, i);
+                    }
+                    None => {
+                        i = bytes.len();
+                        push_mtoken(&mut out, MarkupTok::Text, body_start, i);
+                    }
+                }
+            }
+            continue;
+        }
+
+        let start = i;
+        while i < bytes.len() && bytes[i] != b'<' {
+            i += 1;
+        }
+        push_mtoken(&mut out, MarkupTok::Text, start, i);
+    }
+    out
 }
 
 /// Which markup dialect a document follows.
@@ -380,7 +511,7 @@ fn parse_element<'s>(
     if flavor.in_set(&HTML_RAW_TEXT, name) {
         let body_start = *i;
         // Shared with the lexer, so tokens and tree end the body at the same byte.
-        let children = match crate::langkit::find_close_tag(source, body_start, name) {
+        let children = match find_close_tag(source, body_start, name) {
             Some(close) => {
                 let mut children = Vec::new();
                 if close > body_start {
@@ -524,25 +655,49 @@ fn next_tag_is(source: &str, from: usize, name: &str, flavor: MarkupFlavor) -> b
     flavor.tag_eq(&source[ns..ne], name)
 }
 
-pub fn markup_to_host(parse: &MarkupParse<'_>) -> HostTokenization {
-    let valid = parse.diagnostics.is_empty();
-    HostTokenization {
-        tokens: parse
-            .lexed
-            .tokens
-            .iter()
-            .map(|t| HostToken {
+impl MarkupParse<'_> {
+    /// Convert this parse result into a [`HostTokenization`] without cloning
+    /// the diagnostics vector.
+    #[must_use]
+    pub fn into_host(self) -> HostTokenization {
+        let valid = self.diagnostics.is_empty();
+        let mut tokens = Vec::with_capacity(self.lexed.tokens.len());
+        for t in self.lexed.tokens {
+            tokens.push(HostToken {
                 kind: Cow::Borrowed(t.kind.as_str()),
                 span: HostSpan::from(t.span),
                 error: t.kind == MarkupTok::Error,
-            })
-            .collect(),
-        diagnostics: parse
-            .diagnostics
-            .iter()
-            .cloned()
-            .map(HostDiagnostic::from_diagnostic)
-            .collect(),
+            });
+        }
+        let mut diagnostics = Vec::with_capacity(self.diagnostics.len());
+        for d in self.diagnostics {
+            diagnostics.push(HostDiagnostic::from_diagnostic(d));
+        }
+        HostTokenization {
+            tokens,
+            diagnostics,
+            valid,
+        }
+    }
+}
+
+pub fn markup_to_host(parse: &MarkupParse<'_>) -> HostTokenization {
+    let valid = parse.diagnostics.is_empty();
+    let mut tokens = Vec::with_capacity(parse.lexed.tokens.len());
+    for t in &parse.lexed.tokens {
+        tokens.push(HostToken {
+            kind: Cow::Borrowed(t.kind.as_str()),
+            span: HostSpan::from(t.span),
+            error: t.kind == MarkupTok::Error,
+        });
+    }
+    let mut diagnostics = Vec::with_capacity(parse.diagnostics.len());
+    for d in &parse.diagnostics {
+        diagnostics.push(HostDiagnostic::from_diagnostic(*d));
+    }
+    HostTokenization {
+        tokens,
+        diagnostics,
         valid,
     }
 }

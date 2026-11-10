@@ -921,8 +921,9 @@ impl<'s> Checker<'s> {
                 // of the function's own cells are recorded (for `arena_run`
                 // call-site lints), not reported — returning or storing
                 // closures is legitimate for ordinary calls.
-                let previous_recording =
-                    self.record_cell_leaks.replace((name.span.start, self.region_depth));
+                let previous_recording = self
+                    .record_cell_leaks
+                    .replace((name.span.start, self.region_depth));
                 let saved_try = std::mem::take(&mut self.try_blocks);
                 self.region_depth += 1;
                 self.region_strict.push(false);

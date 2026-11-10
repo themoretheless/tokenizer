@@ -1,8 +1,8 @@
-//! Helpers for language crates that only implement highlight + diagnose.
+//! Descriptor and dialect helpers for language plugins.
 
 use crate::{
-    Capabilities, DialectDescriptor, DialectId, Highlighted, HostAnalysisOptions, HostDiagnostic,
-    HostError, HostTokenization, LanguageDescriptor, LanguageId, Severity,
+    Capabilities, DialectDescriptor, DialectId, HostAnalysisOptions, HostError, LanguageDescriptor,
+    LanguageId,
 };
 
 /// Build a default dialect list with only `default`.
@@ -15,28 +15,8 @@ pub const DEFAULT_DIALECTS: &[DialectDescriptor] = &[DialectDescriptor {
 /// Highlight-only capabilities (lex + validate via diagnostics).
 pub const HIGHLIGHT_CAPS: Capabilities = Capabilities::LEX.union(Capabilities::VALIDATE);
 
-/// Full pipeline capabilities (lex + parse + semantic + validate).
+/// Full pipeline capabilities (`LEX | PARSE | SEMANTIC`).
 pub const FULL_CAPS: Capabilities = crate::fullkit::FULL_ENGINE_CAPS;
-
-/// Convert highlight output for host APIs.
-#[must_use]
-pub fn host_tokenization(highlighted: Highlighted) -> HostTokenization {
-    highlighted.to_host()
-}
-
-/// Diagnose from a highlight pass.
-#[must_use]
-pub fn host_diagnostics(highlighted: Highlighted) -> Vec<HostDiagnostic> {
-    highlighted
-        .diagnostics
-        .into_iter()
-        .map(|d| {
-            let mut h = HostDiagnostic::from_diagnostic(d);
-            h.severity = Severity::Error;
-            h
-        })
-        .collect()
-}
 
 /// Resolve dialect or reject; accepts empty/default.
 pub fn require_default_dialect(
@@ -50,37 +30,20 @@ pub fn require_default_dialect(
         })
 }
 
-/// Standard highlight-only HostLanguage methods body.
-pub fn run_highlight_host(
-    descriptor: &'static LanguageDescriptor,
+/// Validate both the requested dialect and the input byte budget against `descriptor`.
+pub fn check_host_entry(
+    descriptor: &LanguageDescriptor,
     source: &str,
     opts: &HostAnalysisOptions,
-    tokenize: fn(&str) -> Highlighted,
-) -> Result<HostTokenization, HostError> {
-    require_default_dialect(descriptor, opts.dialect.as_ref())?;
+) -> Result<DialectId, HostError> {
+    let dialect = require_default_dialect(descriptor, opts.dialect.as_ref())?;
     if opts.limits.exceeds_input_bytes(source.len()) {
         return Err(HostError::InputTooLarge {
             max: opts.limits.max_input_bytes,
             actual: source.len(),
         });
     }
-    Ok(host_tokenization(tokenize(source)))
-}
-
-pub fn run_diagnose_host(
-    descriptor: &'static LanguageDescriptor,
-    source: &str,
-    opts: &HostAnalysisOptions,
-    tokenize: fn(&str) -> Highlighted,
-) -> Result<Vec<HostDiagnostic>, HostError> {
-    require_default_dialect(descriptor, opts.dialect.as_ref())?;
-    if opts.limits.exceeds_input_bytes(source.len()) {
-        return Err(HostError::InputTooLarge {
-            max: opts.limits.max_input_bytes,
-            actual: source.len(),
-        });
-    }
-    Ok(host_diagnostics(tokenize(source)))
+    Ok(dialect)
 }
 
 /// Descriptor builder for highlight-only plugins.

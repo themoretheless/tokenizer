@@ -8,7 +8,8 @@
 //! advertised — see [`FULL_ENGINE_CAPS`].
 
 use crate::{
-    Diagnostic, HostDiagnostic, HostSpan, HostToken, HostTokenization, Span, verify_lossless_spans,
+    Diagnostic, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan, HostToken,
+    HostTokenization, LanguageDescriptor, Span, scan::match_common_operator, verify_lossless_spans,
 };
 use std::borrow::Cow;
 
@@ -77,7 +78,7 @@ impl Lexed {
     }
 }
 
-// ─── Profile ─────────────────────────────────────────────────────────────────
+// ─── Profile & O(1) Keyword Lookup ───────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy)]
 pub struct FullProfile {
@@ -96,19 +97,198 @@ pub struct FullProfile {
     pub soft_indent_blocks: bool,
 }
 
+impl FullProfile {
+    pub const DEFAULT: Self = Self {
+        keywords: &[],
+        types: &[],
+        line_comment: Some("//"),
+        block_comment: Some(("/*", "*/")),
+        hash_line_comment: false,
+        dollar_ident: false,
+        backtick_strings: false,
+        triple_strings: false,
+        soft_indent_blocks: false,
+    };
+}
+
 impl Default for FullProfile {
     fn default() -> Self {
-        Self {
-            keywords: &[],
-            types: &[],
-            line_comment: Some("//"),
-            block_comment: Some(("/*", "*/")),
-            hash_line_comment: false,
-            dollar_ident: false,
-            backtick_strings: false,
-            triple_strings: false,
-            soft_indent_blocks: false,
+        Self::DEFAULT
+    }
+}
+
+const LOOKUP_CAP: usize = 512;
+const LOOKUP_MASK: usize = LOOKUP_CAP - 1;
+const LOOKUP_MAX_ITEMS: usize = 255;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LookupSlot {
+    kind: SyntaxKind,
+    idx: u8,
+}
+
+impl LookupSlot {
+    const EMPTY: Self = Self {
+        kind: SyntaxKind::Whitespace,
+        idx: 0,
+    };
+}
+
+#[inline]
+const fn hash_ascii_ci(bytes: &[u8]) -> u32 {
+    let mut h = 0x811c_9dc5u32;
+    let mut i = 0;
+    while i < bytes.len() {
+        h ^= bytes[i].to_ascii_lowercase() as u32;
+        h = h.wrapping_mul(0x0100_0193);
+        i += 1;
+    }
+    h
+}
+
+#[inline]
+const fn eq_ascii_ci(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i].to_ascii_lowercase() != b[i].to_ascii_lowercase() {
+            return false;
         }
+        i += 1;
+    }
+    true
+}
+
+/// Compile-time open-addressed hash table for $O(1)$ case-insensitive keyword and type lookup.
+#[derive(Debug, Clone, Copy)]
+pub struct KeywordLookup {
+    slots: [LookupSlot; LOOKUP_CAP],
+    len_mask: u64,
+    complete: bool,
+}
+
+impl KeywordLookup {
+    #[must_use]
+    pub const fn from_profile(profile: &FullProfile) -> Self {
+        let mut slots = [LookupSlot::EMPTY; LOOKUP_CAP];
+        let mut len_mask = 0u64;
+        if profile.keywords.len() > LOOKUP_MAX_ITEMS
+            || profile.types.len() > LOOKUP_MAX_ITEMS
+            || profile.keywords.len() + profile.types.len() > 384
+        {
+            return Self {
+                slots,
+                len_mask: u64::MAX,
+                complete: false,
+            };
+        }
+
+        let mut i = 0;
+        while i < profile.keywords.len() {
+            let kw = profile.keywords[i].as_bytes();
+            let bit = if kw.len() < 64 { kw.len() } else { 63 };
+            len_mask |= 1u64 << bit;
+            let h = hash_ascii_ci(kw) as usize;
+            let mut step = 0;
+            while step < LOOKUP_CAP {
+                let idx = (h + step) & LOOKUP_MASK;
+                match slots[idx].kind {
+                    SyntaxKind::Whitespace => {
+                        slots[idx] = LookupSlot {
+                            kind: SyntaxKind::Keyword,
+                            idx: i as u8,
+                        };
+                        break;
+                    }
+                    SyntaxKind::Keyword => {
+                        let existing = profile.keywords[slots[idx].idx as usize].as_bytes();
+                        if eq_ascii_ci(existing, kw) {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                step += 1;
+            }
+            i += 1;
+        }
+
+        let mut j = 0;
+        while j < profile.types.len() {
+            let ty = profile.types[j].as_bytes();
+            let bit = if ty.len() < 64 { ty.len() } else { 63 };
+            len_mask |= 1u64 << bit;
+            let h = hash_ascii_ci(ty) as usize;
+            let mut step = 0;
+            while step < LOOKUP_CAP {
+                let idx = (h + step) & LOOKUP_MASK;
+                match slots[idx].kind {
+                    SyntaxKind::Whitespace => {
+                        slots[idx] = LookupSlot {
+                            kind: SyntaxKind::TypeIdent,
+                            idx: j as u8,
+                        };
+                        break;
+                    }
+                    SyntaxKind::Keyword => {
+                        let existing = profile.keywords[slots[idx].idx as usize].as_bytes();
+                        if eq_ascii_ci(existing, ty) {
+                            break;
+                        }
+                    }
+                    SyntaxKind::TypeIdent => {
+                        let existing = profile.types[slots[idx].idx as usize].as_bytes();
+                        if eq_ascii_ci(existing, ty) {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                step += 1;
+            }
+            j += 1;
+        }
+
+        Self {
+            slots,
+            len_mask,
+            complete: true,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn classify(&self, profile: &FullProfile, ident: &str) -> SyntaxKind {
+        let len_bit = 1u64 << ident.len().min(63);
+        if (self.len_mask & len_bit) == 0 {
+            return SyntaxKind::Identifier;
+        }
+        if !self.complete {
+            return classify_linear(profile, ident);
+        }
+        let h = hash_ascii_ci(ident.as_bytes()) as usize;
+        let mut step = 0;
+        while step < LOOKUP_CAP {
+            let slot = self.slots[(h + step) & LOOKUP_MASK];
+            match slot.kind {
+                SyntaxKind::Whitespace => return SyntaxKind::Identifier,
+                SyntaxKind::Keyword => {
+                    if profile.keywords[slot.idx as usize].eq_ignore_ascii_case(ident) {
+                        return SyntaxKind::Keyword;
+                    }
+                }
+                SyntaxKind::TypeIdent => {
+                    if profile.types[slot.idx as usize].eq_ignore_ascii_case(ident) {
+                        return SyntaxKind::TypeIdent;
+                    }
+                }
+                _ => return SyntaxKind::Identifier,
+            }
+            step += 1;
+        }
+        SyntaxKind::Identifier
     }
 }
 
@@ -302,8 +482,33 @@ fn contains_ascii_case_insensitive(list: &[&str], needle: &str) -> bool {
         .any(|&item| item.len() == len && item.eq_ignore_ascii_case(needle))
 }
 
+#[inline]
+fn classify_linear(profile: &FullProfile, text: &str) -> SyntaxKind {
+    if contains_ascii_case_insensitive(profile.keywords, text) {
+        SyntaxKind::Keyword
+    } else if contains_ascii_case_insensitive(profile.types, text) {
+        SyntaxKind::TypeIdent
+    } else {
+        SyntaxKind::Identifier
+    }
+}
+
 #[must_use]
 pub fn lex_full(source: &str, profile: &FullProfile) -> Lexed {
+    if source.len() >= 96 {
+        let lookup = KeywordLookup::from_profile(profile);
+        lex_full_with_lookup(source, profile, Some(&lookup))
+    } else {
+        lex_full_with_lookup(source, profile, None)
+    }
+}
+
+#[must_use]
+pub fn lex_full_with_lookup(
+    source: &str,
+    profile: &FullProfile,
+    lookup: Option<&KeywordLookup>,
+) -> Lexed {
     let bytes = source.as_bytes();
     let mut out = Lexed {
         tokens: Vec::with_capacity(bytes.len() / 4),
@@ -462,17 +667,14 @@ pub fn lex_full(source: &str, profile: &FullProfile) -> Lexed {
                 i += 1;
             }
             let text = &source[start..i];
-            let kind = if contains_ascii_case_insensitive(profile.keywords, text) {
-                SyntaxKind::Keyword
-            } else if contains_ascii_case_insensitive(profile.types, text) {
-                SyntaxKind::TypeIdent
-            } else {
-                SyntaxKind::Identifier
+            let kind = match lookup {
+                Some(table) => table.classify(profile, text),
+                None => classify_linear(profile, text),
             };
             push_lex(&mut out, kind, start, i);
             continue;
         }
-        if let Some(len) = match_op(bytes, i) {
+        if let Some(len) = match_common_operator(bytes, i) {
             push_lex(&mut out, SyntaxKind::Operator, i, i + len);
             i += len;
             continue;
@@ -569,6 +771,7 @@ fn find_backtick_end(bytes: &[u8], mut i: usize) -> Option<usize> {
     None
 }
 
+#[inline]
 fn push_lex(out: &mut Lexed, kind: SyntaxKind, start: usize, end: usize) {
     if end > start {
         out.tokens.push(LexToken {
@@ -578,101 +781,89 @@ fn push_lex(out: &mut Lexed, kind: SyntaxKind, start: usize, end: usize) {
     }
 }
 
+#[inline]
 fn is_ident_start(b: u8, dollar: bool) -> bool {
     b.is_ascii_alphabetic() || b == b'_' || (dollar && b == b'$')
 }
 
+#[inline]
 fn is_ident_continue(b: u8, dollar: bool) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || (dollar && b == b'$')
 }
 
-fn match_op(bytes: &[u8], i: usize) -> Option<usize> {
-    for op in [
-        &b"..."[..],
-        b"<<=",
-        b">>=",
-        b"===",
-        b"!==",
-        b"??=",
-        b"**=",
-        b"<<",
-        b">>",
-        b"<=",
-        b">=",
-        b"==",
-        b"!=",
-        b"&&",
-        b"||",
-        b"**",
-        b"+=",
-        b"-=",
-        b"*=",
-        b"/=",
-        b"%=",
-        b"&=",
-        b"|=",
-        b"^=",
-        b"->",
-        b"=>",
-        b"::",
-        b"++",
-        b"--",
-        b"??",
-    ] {
-        if bytes[i..].starts_with(op) {
-            return Some(op.len());
-        }
-    }
-    None
-}
-
 // ─── Parser ──────────────────────────────────────────────────────────────────
 
-struct Parser<'s> {
+struct Parser<'s, 't> {
     source: &'s str,
-    tokens: Vec<LexToken>,
+    tokens: &'t [LexToken],
     pos: usize,
     profile: FullProfile,
 }
 
-impl<'s> Parser<'s> {
-    fn new(source: &'s str, lexed: &Lexed, profile: FullProfile) -> Self {
-        let tokens = lexed
-            .tokens
-            .iter()
-            .copied()
-            .filter(|t| !t.kind.is_trivia())
-            .collect();
-        Self {
+impl<'s, 't> Parser<'s, 't> {
+    fn new(source: &'s str, lexed: &'t Lexed, profile: FullProfile) -> Self {
+        let mut parser = Self {
             source,
-            tokens,
+            tokens: &lexed.tokens,
             pos: 0,
             profile,
+        };
+        parser.skip_trivia();
+        parser
+    }
+
+    #[inline]
+    fn skip_trivia(&mut self) {
+        while self.pos < self.tokens.len() && self.tokens[self.pos].kind.is_trivia() {
+            self.pos += 1;
         }
     }
 
+    #[inline]
     fn peek(&self) -> Option<LexToken> {
         self.tokens.get(self.pos).copied()
     }
 
+    #[inline]
     fn bump(&mut self) -> Option<LexToken> {
         let t = self.peek()?;
         self.pos += 1;
+        self.skip_trivia();
         Some(t)
     }
 
+    #[inline]
     fn at_text(&self, text: &str) -> bool {
         self.peek()
             .and_then(|t| t.span.slice(self.source))
             .is_some_and(|s| s == text)
     }
 
+    #[inline]
+    fn at_kw(&self, kw: &str) -> bool {
+        self.peek()
+            .and_then(|t| t.span.slice(self.source))
+            .is_some_and(|s| s.eq_ignore_ascii_case(kw))
+    }
+
+    #[inline]
     fn at_kind(&self, kind: SyntaxKind) -> bool {
         self.peek().is_some_and(|t| t.kind == kind)
     }
 
+    #[inline]
     fn eat_text(&mut self, text: &str) -> bool {
         if self.at_text(text) {
+            self.bump();
+            true
+        } else {
+            false
+        }
+    }
+
+    #[inline]
+    fn eat_kw(&mut self, kw: &str) -> bool {
+        if self.at_kw(kw) {
             self.bump();
             true
         } else {
@@ -684,6 +875,7 @@ impl<'s> Parser<'s> {
     /// an unrecognized construct is evidence of a grammar this shared parser
     /// does not model, not evidence that the document is broken. Provably broken
     /// delimiters come from [`check_delimiters`], over the token stream.
+    #[inline]
     fn expect_text(&mut self, text: &str) -> Option<LexToken> {
         if self.at_text(text) {
             self.bump()
@@ -692,8 +884,38 @@ impl<'s> Parser<'s> {
         }
     }
 
+    #[inline]
     fn text_of(&self, t: LexToken) -> &'s str {
         t.span.slice(self.source).unwrap_or("")
+    }
+
+    fn parse_decl_body(&mut self, fallback_span: Span, eat_semi: bool) -> Block<'s> {
+        if self.at_text("{") {
+            self.parse_block()
+        } else if self.profile.soft_indent_blocks && self.eat_text(":") {
+            self.parse_suite_after_colon(fallback_span.start)
+        } else {
+            if eat_semi {
+                self.eat_text(";");
+            }
+            Block {
+                span: fallback_span,
+                stmts: Vec::new(),
+            }
+        }
+    }
+
+    fn parse_control_body(&mut self, fallback_span: Span) -> Block<'s> {
+        if self.at_text("{") {
+            self.parse_block()
+        } else if self.profile.soft_indent_blocks && self.eat_text(":") {
+            self.parse_suite_after_colon(fallback_span.start)
+        } else {
+            Block {
+                span: fallback_span,
+                stmts: vec![self.parse_stmt()],
+            }
+        }
     }
 
     fn parse_module(&mut self) -> Module<'s> {
@@ -713,21 +935,24 @@ impl<'s> Parser<'s> {
     }
 
     fn parse_item(&mut self) -> Item<'s> {
-        // function-like keywords
-        if self.at_text("function")
-            || self.at_text("fn")
-            || self.at_text("def")
-            || self.at_text("func")
-            || self.at_text("fun")
+        if self.at_kw("function")
+            || self.at_kw("fn")
+            || self.at_kw("def")
+            || self.at_kw("func")
+            || self.at_kw("fun")
+            || self.at_kw("sub")
+            || self.at_kw("procedure")
         {
             return self.parse_function();
         }
-        if self.at_text("class")
-            || self.at_text("struct")
-            || self.at_text("interface")
-            || self.at_text("trait")
-            || self.at_text("type")
-            || self.at_text("enum")
+        if self.at_kw("class")
+            || self.at_kw("struct")
+            || self.at_kw("interface")
+            || self.at_kw("trait")
+            || self.at_kw("type")
+            || self.at_kw("enum")
+            || self.at_kw("module")
+            || self.at_kw("package")
         {
             return self.parse_class_like();
         }
@@ -749,49 +974,25 @@ impl<'s> Parser<'s> {
         }
         // optional return type junk
         if self.eat_text("->") || self.eat_text(":") {
-            while self.peek().is_some()
-                && !self.at_text("{")
-                && !self.at_text(":")
-                && !self.at_kind(SyntaxKind::Keyword)
-            {
-                if self.at_text(";") {
+            while let Some(t) = self.peek() {
+                let txt = self.text_of(t);
+                if txt == "{" || txt == ":" || txt == ";" || t.kind == SyntaxKind::Keyword {
                     break;
                 }
-                // stop before body
-                if self.at_text("{") {
-                    break;
-                }
-                // type idents
-                if self.at_kind(SyntaxKind::Identifier)
-                    || self.at_kind(SyntaxKind::TypeIdent)
-                    || self.at_kind(SyntaxKind::Operator)
-                    || self.at_kind(SyntaxKind::Punctuation)
-                {
-                    let t = self.peek().unwrap();
-                    if self.text_of(t) == "{" {
-                        break;
-                    }
-                    if self.text_of(t) == ";" {
-                        break;
-                    }
+                if matches!(
+                    t.kind,
+                    SyntaxKind::Identifier
+                        | SyntaxKind::TypeIdent
+                        | SyntaxKind::Operator
+                        | SyntaxKind::Punctuation
+                ) {
                     self.bump();
-                    continue;
+                } else {
+                    break;
                 }
-                break;
             }
         }
-        let body = if self.at_text("{") {
-            self.parse_block()
-        } else if self.profile.soft_indent_blocks && self.eat_text(":") {
-            // python-style: parse until dedent approximation — take following stmts until blank/end/def
-            self.parse_suite_after_colon(start_tok.span.start)
-        } else {
-            self.eat_text(";");
-            Block {
-                span: start_tok.span,
-                stmts: vec![],
-            }
-        };
+        let body = self.parse_decl_body(start_tok.span, true);
         let span = Span::new(start_tok.span.start, body.span.end);
         Item::Function {
             span,
@@ -817,17 +1018,7 @@ impl<'s> Parser<'s> {
             }
             self.bump();
         }
-        let body = if self.at_text("{") {
-            self.parse_block()
-        } else if self.profile.soft_indent_blocks && self.eat_text(":") {
-            self.parse_suite_after_colon(start_tok.span.start)
-        } else {
-            self.eat_text(";");
-            Block {
-                span: start_tok.span,
-                stmts: vec![],
-            }
-        };
+        let body = self.parse_decl_body(start_tok.span, true);
         Item::Class {
             span: Span::new(start_tok.span.start, body.span.end),
             name,
@@ -839,14 +1030,13 @@ impl<'s> Parser<'s> {
     fn parse_suite_after_colon(&mut self, start: usize) -> Block<'s> {
         let mut stmts = Vec::new();
         while self.peek().is_some() {
-            if self.at_text("def")
-                || self.at_text("class")
-                || self.at_text("fn")
-                || self.at_text("function")
+            if self.at_kw("def")
+                || self.at_kw("class")
+                || self.at_kw("fn")
+                || self.at_kw("function")
             {
                 break;
             }
-            // crude: stop on unexpected top-level-ish
             stmts.push(self.parse_stmt());
             if stmts.len() > 64 {
                 break;
@@ -878,12 +1068,12 @@ impl<'s> Parser<'s> {
     }
 
     fn parse_stmt(&mut self) -> Stmt<'s> {
-        if self.at_text("return") {
+        if self.at_kw("return") {
             let t = self.bump().unwrap();
             let value = if self.peek().is_some()
                 && !self.at_text(";")
                 && !self.at_text("}")
-                && !self.at_text("else")
+                && !self.at_kw("else")
             {
                 Some(self.parse_expr(0))
             } else {
@@ -899,10 +1089,10 @@ impl<'s> Parser<'s> {
                 value,
             };
         }
-        if self.at_text("if") {
+        if self.at_kw("if") {
             return self.parse_if();
         }
-        if self.at_text("while") {
+        if self.at_kw("while") {
             let t = self.bump().unwrap();
             let cond = if self.eat_text("(") {
                 let c = self.parse_expr(0);
@@ -911,25 +1101,15 @@ impl<'s> Parser<'s> {
             } else {
                 Some(self.parse_expr(0))
             };
-            let body = if self.at_text("{") {
-                self.parse_block()
-            } else if self.profile.soft_indent_blocks && self.eat_text(":") {
-                self.parse_suite_after_colon(t.span.start)
-            } else {
-                Block {
-                    span: t.span,
-                    stmts: vec![self.parse_stmt()],
-                }
-            };
+            let body = self.parse_control_body(t.span);
             return Stmt::While {
                 span: Span::new(t.span.start, body.span.end),
                 cond,
                 body,
             };
         }
-        if self.at_text("for") || self.at_text("foreach") {
+        if self.at_kw("for") || self.at_kw("foreach") {
             let t = self.bump().unwrap();
-            // skip header
             if self.eat_text("(") {
                 self.skip_balanced('(', ')');
             } else {
@@ -937,28 +1117,21 @@ impl<'s> Parser<'s> {
                     self.bump();
                 }
             }
-            let body = if self.at_text("{") {
-                self.parse_block()
-            } else if self.profile.soft_indent_blocks && self.eat_text(":") {
-                self.parse_suite_after_colon(t.span.start)
-            } else {
-                Block {
-                    span: t.span,
-                    stmts: vec![],
-                }
-            };
+            let body = self.parse_decl_body(t.span, false);
             return Stmt::For {
                 span: Span::new(t.span.start, body.span.end),
                 body,
             };
         }
-        // declaration keywords
-        if self.at_text("let")
-            || self.at_text("var")
-            || self.at_text("const")
-            || self.at_text("val")
-            || self.at_text("mut")
-            || self.at_text("final")
+        if self.at_kw("let")
+            || self.at_kw("var")
+            || self.at_kw("const")
+            || self.at_kw("val")
+            || self.at_kw("mut")
+            || self.at_kw("final")
+            || self.at_kw("dim")
+            || self.at_kw("local")
+            || self.at_kw("my")
         {
             let t = self.bump().unwrap();
             let mut name = None;
@@ -987,7 +1160,6 @@ impl<'s> Parser<'s> {
             };
         }
 
-        // bare expression / recovery
         if self.peek().is_none() {
             return Stmt::Error {
                 span: Span::new(self.source.len(), self.source.len()),
@@ -1010,31 +1182,15 @@ impl<'s> Parser<'s> {
         } else {
             Some(self.parse_expr(0))
         };
-        let then_block = if self.at_text("{") {
-            self.parse_block()
-        } else if self.profile.soft_indent_blocks && self.eat_text(":") {
-            self.parse_suite_after_colon(t.span.start)
-        } else {
-            Block {
-                span: t.span,
-                stmts: vec![self.parse_stmt()],
-            }
-        };
-        let else_block = if self.eat_text("else") {
-            if self.at_text("if") {
+        let then_block = self.parse_control_body(t.span);
+        let else_block = if self.eat_kw("else") {
+            if self.at_kw("if") {
                 Some(Block {
                     span: then_block.span,
                     stmts: vec![self.parse_if()],
                 })
-            } else if self.at_text("{") {
-                Some(self.parse_block())
-            } else if self.profile.soft_indent_blocks && self.eat_text(":") {
-                Some(self.parse_suite_after_colon(t.span.start))
             } else {
-                Some(Block {
-                    span: t.span,
-                    stmts: vec![self.parse_stmt()],
-                })
+                Some(self.parse_control_body(t.span))
             }
         } else {
             None
@@ -1063,7 +1219,6 @@ impl<'s> Parser<'s> {
             }
             let op_tok = self.bump().unwrap();
             if text == "(" {
-                // call
                 let mut args = Vec::new();
                 if !self.at_text(")") {
                     loop {
@@ -1162,7 +1317,6 @@ impl<'s> Parser<'s> {
             };
         }
         if text == "{" {
-            // map-ish or block-as-error: try map entries
             self.bump();
             let mut entries = Vec::new();
             if !self.at_text("}") {
@@ -1172,7 +1326,6 @@ impl<'s> Parser<'s> {
                     }
                     let k = self.parse_expr(0);
                     if !self.eat_text(":") && !self.eat_text("=>") {
-                        // not a map — recovery
                         break;
                     }
                     let v = self.parse_expr(0);
@@ -1192,7 +1345,7 @@ impl<'s> Parser<'s> {
         if text == "-"
             || text == "!"
             || text == "~"
-            || text == "not"
+            || text.eq_ignore_ascii_case("not")
             || text == "++"
             || text == "--"
         {
@@ -1208,10 +1361,17 @@ impl<'s> Parser<'s> {
             SyntaxKind::Identifier | SyntaxKind::TypeIdent | SyntaxKind::Keyword => {
                 let t = self.bump().unwrap();
                 let name = self.text_of(t);
-                let lit = match name {
-                    "true" | "True" | "TRUE" | "false" | "False" | "FALSE" => Some(LitKind::Bool),
-                    "null" | "None" | "nil" | "NULL" | "undefined" => Some(LitKind::Null),
-                    _ => None,
+                let lit = if name.eq_ignore_ascii_case("true") || name.eq_ignore_ascii_case("false")
+                {
+                    Some(LitKind::Bool)
+                } else if name.eq_ignore_ascii_case("null")
+                    || name.eq_ignore_ascii_case("none")
+                    || name.eq_ignore_ascii_case("nil")
+                    || name == "undefined"
+                {
+                    Some(LitKind::Null)
+                } else {
+                    None
                 };
                 if let Some(kind) = lit {
                     Expr::Literal {
@@ -1269,15 +1429,15 @@ impl<'s> Parser<'s> {
 
 fn infix_bp(op: &str) -> Option<(u8, u8)> {
     Some(match op {
-        "||" | "or" | "??" => (1, 2),
-        "&&" | "and" => (3, 4),
+        "||" | "or" | "OR" | "??" => (1, 2),
+        "&&" | "and" | "AND" => (3, 4),
         "==" | "!=" | "===" | "!==" | "<" | ">" | "<=" | ">=" => (5, 6),
         "|" | "^" | "&" => (7, 8),
         "<<" | ">>" => (9, 10),
         "+" | "-" => (11, 12),
         "*" | "/" | "%" | "**" => (13, 14),
         "(" | "[" | "." | "->" | "::" => (18, 19),
-        "=" | "+=" | "-=" | "*=" | "/=" | "%=" => (0, 0), // handled as binary low
+        "=" | "+=" | "-=" | "*=" | "/=" | "%=" => (0, 0),
         _ => return None,
     })
 }
@@ -1322,9 +1482,26 @@ fn item_span<'s>(i: &Item<'s>) -> Span {
 /// Full lex + parse.
 #[must_use]
 pub fn parse_full<'s>(source: &'s str, profile: &FullProfile) -> Parse<'s> {
-    let lexed = lex_full(source, profile);
-    let mut parser = Parser::new(source, &lexed, *profile);
-    let module = parser.parse_module();
+    if source.len() >= 96 {
+        let lookup = KeywordLookup::from_profile(profile);
+        parse_full_with_lookup(source, profile, Some(&lookup))
+    } else {
+        parse_full_with_lookup(source, profile, None)
+    }
+}
+
+/// Full lex + parse using a precomputed [`KeywordLookup`].
+#[must_use]
+pub fn parse_full_with_lookup<'s>(
+    source: &'s str,
+    profile: &FullProfile,
+    lookup: Option<&KeywordLookup>,
+) -> Parse<'s> {
+    let lexed = lex_full_with_lookup(source, profile, lookup);
+    let module = {
+        let mut parser = Parser::new(source, &lexed, *profile);
+        parser.parse_module()
+    };
     // Every diagnostic in the shared pipeline comes from the lex + delimiter
     // pass; the parser recovers silently. See [`Parser::expect_text`].
     let diagnostics = lexed.diagnostics.clone();
@@ -1336,28 +1513,42 @@ pub fn parse_full<'s>(source: &'s str, profile: &FullProfile) -> Parse<'s> {
     }
 }
 
-/// Semantic tokens: rewrite identifier kinds using AST context (function/class names).
-#[must_use]
-pub fn semantic_full(parse: &Parse<'_>) -> SemanticTokenization {
+fn build_semantic_tokens(parse: &Parse<'_>) -> Vec<SemanticToken> {
     let mut name_spans: Vec<(Span, &'static str)> = Vec::new();
     collect_names(&parse.module, &mut name_spans);
 
     let mut tokens = Vec::with_capacity(parse.lexed.tokens.len());
+    let mut cursor = 0usize;
     for t in &parse.lexed.tokens {
         let mut kind = t.kind.as_str();
         if matches!(t.kind, SyntaxKind::Identifier | SyntaxKind::TypeIdent) {
-            for (span, k) in &name_spans {
-                if span.start == t.span.start && span.end == t.span.end {
-                    kind = k;
-                    break;
-                }
+            while cursor < name_spans.len() && name_spans[cursor].0.start < t.span.start {
+                cursor += 1;
+            }
+            if cursor < name_spans.len() && name_spans[cursor].0 == t.span {
+                kind = name_spans[cursor].1;
             }
         }
         tokens.push(SemanticToken { kind, span: t.span });
     }
+    tokens
+}
+
+/// Semantic tokens: rewrite identifier kinds using AST context (function/class names).
+#[must_use]
+pub fn semantic_full(parse: &Parse<'_>) -> SemanticTokenization {
+    SemanticTokenization {
+        tokens: build_semantic_tokens(parse),
+        diagnostics: parse.diagnostics.clone(),
+    }
+}
+
+#[inline]
+fn semantic_full_owned(parse: Parse<'_>) -> SemanticTokenization {
+    let tokens = build_semantic_tokens(&parse);
     SemanticTokenization {
         tokens,
-        diagnostics: parse.diagnostics.clone(),
+        diagnostics: parse.diagnostics,
     }
 }
 
@@ -1441,12 +1632,7 @@ pub fn lex_to_host(lexed: Lexed) -> HostTokenization {
 #[must_use]
 pub fn analyze_full_host(source: &str, profile: &FullProfile) -> HostTokenization {
     let parsed = parse_full(source, profile);
-    let mut sem = semantic_full(&parsed);
-    // merge lex diagnostics already in parse.diagnostics
-    if sem.diagnostics.is_empty() {
-        sem.diagnostics = parsed.diagnostics;
-    }
-    sem.to_host()
+    semantic_full_owned(parsed).to_host()
 }
 
 /// Full engine capability bits. `VALIDATE` is deliberately absent: what this
@@ -1459,6 +1645,190 @@ pub fn analyze_full_host(source: &str, profile: &FullProfile) -> HostTokenizatio
 pub const FULL_ENGINE_CAPS: crate::Capabilities = crate::Capabilities::LEX
     .union(crate::Capabilities::PARSE)
     .union(crate::Capabilities::SEMANTIC);
+
+// ─── Shared Table-Driven Host Engine & Macro ─────────────────────────────────
+
+/// Table-driven host engine for a profiled wave language.
+#[derive(Debug, Clone, Copy)]
+pub struct FullEngine {
+    descriptor: &'static LanguageDescriptor,
+    profile: &'static FullProfile,
+    lookup: &'static KeywordLookup,
+}
+
+impl FullEngine {
+    #[must_use]
+    pub const fn new(
+        descriptor: &'static LanguageDescriptor,
+        profile: &'static FullProfile,
+        lookup: &'static KeywordLookup,
+    ) -> Self {
+        Self {
+            descriptor,
+            profile,
+            lookup,
+        }
+    }
+
+    #[must_use]
+    pub const fn profile(&self) -> &'static FullProfile {
+        self.profile
+    }
+
+    #[must_use]
+    pub fn lex_raw(&self, source: &str) -> Lexed {
+        lex_full_with_lookup(source, self.profile, Some(self.lookup))
+    }
+
+    #[must_use]
+    pub fn parse_raw<'s>(&self, source: &'s str) -> Parse<'s> {
+        parse_full_with_lookup(source, self.profile, Some(self.lookup))
+    }
+
+    #[must_use]
+    pub fn tokenize_raw(&self, source: &str) -> SemanticTokenization {
+        semantic_full_owned(self.parse_raw(source))
+    }
+
+    #[must_use]
+    pub fn validate_raw(&self, source: &str) -> Vec<Diagnostic> {
+        self.lex_raw(source).diagnostics
+    }
+}
+
+impl HostLanguage for FullEngine {
+    fn descriptor(&self) -> &'static LanguageDescriptor {
+        self.descriptor
+    }
+
+    fn lex(&self, source: &str, opts: &HostAnalysisOptions) -> Result<HostTokenization, HostError> {
+        let _ = self.check_entry(source, opts)?;
+        Ok(lex_to_host(self.lex_raw(source)))
+    }
+
+    fn semantic_tokens(
+        &self,
+        source: &str,
+        opts: &HostAnalysisOptions,
+    ) -> Result<HostTokenization, HostError> {
+        let _ = self.check_entry(source, opts)?;
+        Ok(self.tokenize_raw(source).to_host())
+    }
+
+    fn diagnose(
+        &self,
+        source: &str,
+        opts: &HostAnalysisOptions,
+    ) -> Result<Vec<HostDiagnostic>, HostError> {
+        let _ = self.check_entry(source, opts)?;
+        Ok(self
+            .validate_raw(source)
+            .into_iter()
+            .map(HostDiagnostic::from_diagnostic)
+            .collect())
+    }
+}
+
+/// Declare a complete profiled wave-language crate from its descriptor metadata and [`FullProfile`].
+#[macro_export]
+macro_rules! define_full_engine {
+    (
+        id: $id:expr,
+        name: $name:expr,
+        aliases: $aliases:expr,
+        extensions: $extensions:expr,
+        mime_types: $mime_types:expr,
+        profile: $profile:expr $(,)?
+    ) => {
+        pub const LANGUAGE_ID: $crate::LanguageId = $id;
+
+        pub static PROFILE: $crate::FullProfile = $profile;
+
+        pub static LOOKUP: $crate::KeywordLookup = $crate::KeywordLookup::from_profile(&PROFILE);
+
+        pub static DESCRIPTOR: $crate::LanguageDescriptor = $crate::full_descriptor(
+            LANGUAGE_ID,
+            $name,
+            $aliases,
+            $extensions,
+            $mime_types,
+            env!("CARGO_PKG_VERSION"),
+        );
+
+        pub type Host = $crate::FullEngine;
+
+        pub static ENGINE: $crate::FullEngine =
+            $crate::FullEngine::new(&DESCRIPTOR, &PROFILE, &LOOKUP);
+
+        /// Lossless lexer.
+        #[must_use]
+        pub fn lex(source: &str) -> $crate::Lexed {
+            ENGINE.lex_raw(source)
+        }
+
+        /// Recovering parse with borrowing AST.
+        #[must_use]
+        pub fn parse(source: &str) -> $crate::Parse<'_> {
+            ENGINE.parse_raw(source)
+        }
+
+        /// Parser-aware semantic tokens.
+        #[must_use]
+        pub fn tokenize(source: &str) -> $crate::SemanticTokenization {
+            ENGINE.tokenize_raw(source)
+        }
+
+        /// Diagnostics from the full pipeline.
+        #[must_use]
+        pub fn validate(source: &str) -> ::std::vec::Vec<$crate::Diagnostic> {
+            ENGINE.validate_raw(source)
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use super::*;
+            use $crate::{HostAnalysisOptions, HostError, HostLanguage, InputLimits};
+
+            #[test]
+            fn lossless_lex() {
+                let source = "fn main() { return 1; }";
+                assert!(lex(source).is_lossless(source));
+            }
+
+            #[test]
+            fn parse_smoke() {
+                let source = "function f(x) { return x + 1; }";
+                let p = parse(source);
+                assert!(p.lexed.is_lossless(source));
+                assert!(!p.module.items.is_empty() || source.is_empty());
+                let sem = tokenize(source);
+                assert_eq!(sem.tokens.len(), p.lexed.tokens.len());
+            }
+
+            #[test]
+            fn host_enforces_limits_on_all_layers() {
+                let mut opts = HostAnalysisOptions::default();
+                opts.limits = InputLimits {
+                    max_input_bytes: 4,
+                    ..InputLimits::default()
+                };
+                let sample = "12345";
+                assert!(matches!(
+                    ENGINE.lex(sample, &opts),
+                    Err(HostError::InputTooLarge { .. })
+                ));
+                assert!(matches!(
+                    ENGINE.semantic_tokens(sample, &opts),
+                    Err(HostError::InputTooLarge { .. })
+                ));
+                assert!(matches!(
+                    ENGINE.diagnose(sample, &opts),
+                    Err(HostError::InputTooLarge { .. })
+                ));
+            }
+        }
+    };
+}
 
 #[cfg(test)]
 mod tests {
@@ -1504,6 +1874,34 @@ mod tests {
             p.module.items.first(),
             Some(Item::Function { .. })
         ));
+    }
+
+    #[test]
+    fn keyword_lookup_matches_linear_case_insensitively() {
+        let profile = FullProfile {
+            keywords: &["SELECT", "FROM", "WHERE", "function"],
+            types: &["INTEGER", "VARCHAR", "int"],
+            ..FullProfile::DEFAULT
+        };
+        let table = KeywordLookup::from_profile(&profile);
+        for sample in [
+            "select",
+            "SELECT",
+            "From",
+            "FUNCTION",
+            "integer",
+            "VarChar",
+            "INT",
+            "unknown",
+            "x",
+            "very_long_identifier_name_over_sixty_four_bytes_to_test_mask_cap_behavior_12345",
+        ] {
+            assert_eq!(
+                table.classify(&profile, sample),
+                classify_linear(&profile, sample),
+                "mismatch for {sample}"
+            );
+        }
     }
 }
 

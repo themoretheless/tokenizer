@@ -195,18 +195,43 @@ pub trait HostLanguage: Send + Sync + 'static {
     fn lex(&self, source: &str, opts: &HostAnalysisOptions) -> Result<HostTokenization, HostError>;
 
     /// Parser-aware semantic highlight tokens when capable.
+    ///
+    /// Defaults to [`Self::lex`] for engines whose syntax stream already
+    /// carries the full highlight vocabulary.
     fn semantic_tokens(
         &self,
         source: &str,
         opts: &HostAnalysisOptions,
-    ) -> Result<HostTokenization, HostError>;
+    ) -> Result<HostTokenization, HostError> {
+        self.lex(source, opts)
+    }
 
     /// Diagnostics without requiring a specific token layer.
+    ///
+    /// Defaults to extracting diagnostics from [`Self::semantic_tokens`].
     fn diagnose(
         &self,
         source: &str,
         opts: &HostAnalysisOptions,
-    ) -> Result<Vec<HostDiagnostic>, HostError>;
+    ) -> Result<Vec<HostDiagnostic>, HostError> {
+        Ok(self.semantic_tokens(source, opts)?.diagnostics)
+    }
+
+    /// Validate dialect and input byte limits before running an engine pass.
+    fn check_entry(
+        &self,
+        source: &str,
+        opts: &HostAnalysisOptions,
+    ) -> Result<DialectId, HostError> {
+        let dialect = self.resolve_dialect(opts.dialect.as_ref())?;
+        if opts.limits.exceeds_input_bytes(source.len()) {
+            return Err(HostError::InputTooLarge {
+                max: opts.limits.max_input_bytes,
+                actual: source.len(),
+            });
+        }
+        Ok(dialect)
+    }
 
     /// Convenience: run the requested layer (`syntax` or `semantic`).
     fn tokenize_layer(

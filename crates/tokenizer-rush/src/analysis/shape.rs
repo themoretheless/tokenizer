@@ -563,9 +563,7 @@ impl<'s> Checker<'s> {
                 _ => Shape::Unknown,
             },
             ExprKind::TryBlock(body) => match body.stmts.last().map(|stmt| &stmt.kind) {
-                Some(crate::StmtKind::Expr(last) | crate::StmtKind::Show(last)) => {
-                    self.shape(last)
-                }
+                Some(crate::StmtKind::Expr(last) | crate::StmtKind::Show(last)) => self.shape(last),
                 _ => Shape::Typed(ValueType::Null),
             },
             ExprKind::Name(name) => self
