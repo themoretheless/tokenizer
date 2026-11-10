@@ -150,6 +150,18 @@ fn tokenize_borrowed(source: &str) -> R<(Vec<BorrowedToken<'_>>, Vec<Comment<'_>
                     i += 1;
                 }
             }
+            if i < bytes.len() && matches!(bytes[i], b'e' | b'E') {
+                let mut exp = i + 1;
+                if exp < bytes.len() && matches!(bytes[exp], b'+' | b'-') {
+                    exp += 1;
+                }
+                if exp < bytes.len() && bytes[exp].is_ascii_digit() {
+                    i = exp;
+                    while i < bytes.len() && bytes[i].is_ascii_digit() {
+                        i += 1;
+                    }
+                }
+            }
             for unit in [
                 "vmin", "vmax", "turn", "rem", "deg", "rad", "ms", "px", "em", "vw", "vh", "ch",
                 "fr", "s", "%", "*",
@@ -803,6 +815,9 @@ impl<'a> Parser<'a> {
             return parse_string(token, token_start + self.span_base, &mut self.spans);
         }
         if let Ok(n) = token.parse::<f64>() {
+            if !n.is_finite() {
+                return self.err(format!("Число {token} должно быть конечным"));
+            }
             return Ok(json!(n));
         }
         if self.peek() == "(" {
@@ -2294,6 +2309,28 @@ pub fn serialize_value(v: &V) -> String {
                 serialize_value(v)
             }
         };
+        fn serialize_pattern(p: &V) -> String {
+            if let Some(alts) = p["or"].as_array() {
+                return alts
+                    .iter()
+                    .map(serialize_pattern)
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+            }
+            if let Some(op) = p["comparison"].as_str() {
+                return format!("{op} {}", serialize_value(&p["value"]));
+            }
+            if let Some(a) = p.as_array() {
+                return format!(
+                    "({})",
+                    a.iter()
+                        .map(serialize_pattern)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            serialize_value(p)
+        }
         return format!(
             "match {} {{ {} }}",
             tuple(subject),
@@ -2301,11 +2338,18 @@ pub fn serialize_value(v: &V) -> String {
                 .as_array()
                 .unwrap()
                 .iter()
-                .map(|b| format!(
-                    "{} => {};",
-                    tuple(&b["pattern"]),
-                    serialize_value(&b["value"])
-                ))
+                .map(|b| {
+                    let guard = b
+                        .get("guard")
+                        .map(|g| format!(" if {}", serialize_value(g)))
+                        .unwrap_or_default();
+                    format!(
+                        "{}{} => {};",
+                        serialize_pattern(&b["pattern"]),
+                        guard,
+                        serialize_value(&b["value"])
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(" ")
         );
@@ -2389,6 +2433,8 @@ pub fn format_source(source: &str) -> R<String> {
     let (tokens, comments, _) = tokenize_borrowed(source)?;
     let mut out = String::with_capacity(source.len() + 64);
     let mut indent = 0usize;
+    let mut generic_depth = 0usize;
+    let mut ternary_depth = 0usize;
     let mut at_line_start = true;
     let base = source.as_ptr() as usize;
     let mut last_byte_end: Option<usize> = None;
@@ -2454,20 +2500,122 @@ pub fn format_source(source: &str) -> R<String> {
             continue;
         }
         out.push_str(t);
-        let no_space_after =
-            t == "(" || t == "[" || t == "#[" || t == "@" || t == "!" || t == "." || t == "?.";
+        let prev = idx
+            .checked_sub(1)
+            .and_then(|p| tokens.get(p))
+            .map(|x| x.text)
+            .unwrap_or("");
+        let is_generic_open = t == "<" && matches!(prev, "List" | "Map" | "Record");
+        if is_generic_open {
+            generic_depth += 1;
+        }
+        let closing_generic = t == ">" && generic_depth > 0;
+        if closing_generic {
+            generic_depth -= 1;
+        }
+        let prev_closes_generic = prev == ">"
+            && generic_depth == 0
+            && idx >= 2
+            && tokens[..idx]
+                .iter()
+                .rev()
+                .find(|tok| matches!(tok.text, "<" | ";" | "{" | "}"))
+                .is_some_and(|tok| tok.text == "<");
+        let is_nullable_type_q =
+            t == "?" && (prev_closes_generic || prev.starts_with(|c: char| c.is_ascii_uppercase()));
+        if t == "?" && !is_nullable_type_q {
+            ternary_depth += 1;
+        } else if t == ":" && ternary_depth > 0 {
+            ternary_depth -= 1;
+        } else if matches!(t, ";" | "{" | "}") {
+            ternary_depth = 0;
+            generic_depth = 0;
+        }
+        let is_attr_hash = t == "#" && next == "[";
+        let is_unary_sign = matches!(t, "-" | "+")
+            && matches!(
+                prev,
+                "" | "("
+                    | "["
+                    | "{"
+                    | ":"
+                    | "="
+                    | "=>"
+                    | "?"
+                    | ","
+                    | ";"
+                    | ".."
+                    | "..="
+                    | "+"
+                    | "-"
+                    | "*"
+                    | "/"
+                    | "%"
+                    | "=="
+                    | "!="
+                    | "==="
+                    | "!=="
+                    | "<"
+                    | "<="
+                    | ">"
+                    | ">="
+                    | "&&"
+                    | "||"
+                    | "??"
+            );
+        let no_space_after = t == "("
+            || t == "["
+            || is_attr_hash
+            || is_unary_sign
+            || t == "@"
+            || t == "!"
+            || t == "."
+            || t == "?."
+            || t == ".."
+            || t == "..="
+            || is_generic_open;
+        let next_opens_generic = next == "<" && matches!(t, "List" | "Map" | "Record");
+        let next_closes_generic = next == ">" && generic_depth > 0;
+        let next_is_nullable_type_suffix =
+            next == "?" && (closing_generic || t.starts_with(|c: char| c.is_ascii_uppercase()));
+        let next_is_property_colon = next == ":" && ternary_depth == 0;
         let no_space_before_next = next == ")"
             || next == "]"
             || next == ";"
             || next == ","
-            || next == ":"
+            || next_is_property_colon
             || next == "."
             || next == "?."
-            || next == "(";
+            || next == ".."
+            || next == "..="
+            || next == "("
+            || next_opens_generic
+            || next_closes_generic
+            || next_is_nullable_type_suffix;
         let force_space_before_paren = matches!(
             t,
             "if" | "for" | "match" | "return" | "where" | "=" | "=>" | "->" | "<->"
-        );
+        ) || (!is_unary_sign
+            && matches!(
+                t,
+                "+" | "-"
+                    | "*"
+                    | "/"
+                    | "%"
+                    | "=="
+                    | "!="
+                    | "==="
+                    | "!=="
+                    | "<"
+                    | "<="
+                    | ">"
+                    | ">="
+                    | "&&"
+                    | "||"
+                    | "??"
+                    | "?"
+                    | ":"
+            ));
         if !no_space_after
             && (!no_space_before_next || (next == "(" && force_space_before_paren))
             && !next.is_empty()

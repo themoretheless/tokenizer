@@ -71,7 +71,7 @@ fn parse_hex_color(v: &V) -> R<(u8, u8, u8, u8)> {
     let s = raw.trim().strip_prefix('#').ok_or_else(|| {
         Diagnostic::new(
             "invalid-color",
-            "Функция цвета ожидает hex-цвет (#rgb, #rrggbb или #rrggbbaa)",
+            "Функция цвета ожидает hex-цвет (#rgb, #rgba, #rrggbb или #rrggbbaa)",
         )
     })?;
     let hex = |slice: &str| {
@@ -85,6 +85,13 @@ fn parse_hex_color(v: &V) -> R<(u8, u8, u8, u8)> {
             let b = hex(&s[2..3])?;
             Ok((r * 17, g * 17, b * 17, 255))
         }
+        4 => {
+            let r = hex(&s[0..1])?;
+            let g = hex(&s[1..2])?;
+            let b = hex(&s[2..3])?;
+            let a = hex(&s[3..4])?;
+            Ok((r * 17, g * 17, b * 17, a * 17))
+        }
         6 => Ok((hex(&s[0..2])?, hex(&s[2..4])?, hex(&s[4..6])?, 255)),
         8 => Ok((
             hex(&s[0..2])?,
@@ -94,7 +101,7 @@ fn parse_hex_color(v: &V) -> R<(u8, u8, u8, u8)> {
         )),
         _ => Err(Diagnostic::new(
             "invalid-color",
-            "Функция цвета ожидает #rgb, #rrggbb или #rrggbbaa",
+            "Функция цвета ожидает #rgb, #rgba, #rrggbb или #rrggbbaa",
         )),
     }
 }
@@ -134,7 +141,7 @@ pub fn matches_constraint_pattern(s: &str, pat: &str) -> R<bool> {
             rest.is_some_and(|r| !r.is_empty() && !r.starts_with('/') && !r.contains(' '))
         }
         "hex" => s.strip_prefix('#').is_some_and(|h| {
-            [3, 6, 8].contains(&h.len()) && h.bytes().all(|b| b.is_ascii_hexdigit())
+            [3, 4, 6, 8].contains(&h.len()) && h.bytes().all(|b| b.is_ascii_hexdigit())
         }),
         _ => return regex_like_match(s, pat),
     })
@@ -481,6 +488,15 @@ where
         Some(_) => None,
         None => map.get("expr").and_then(V::as_str),
     } {
+        if path.starts_with('#')
+            || path == "*"
+            || path
+                .as_bytes()
+                .first()
+                .is_some_and(|b| b.is_ascii_digit() || matches!(*b, b'-' | b'+' | b'.'))
+        {
+            return Ok(v.clone());
+        }
         let neg = path.starts_with('!');
         let value = resolver(if neg { &path[1..] } else { path }, optional)?;
         return if neg {
@@ -1226,9 +1242,9 @@ where
                     numeric(total)
                 }
                 "range" => {
-                    let st = number(&args[0])? as i64;
-                    let en = number(&args[1])? as i64;
-                    if en < st {
+                    let st = number(&args[0])? as i128;
+                    let en = number(&args[1])? as i128;
+                    if en <= st {
                         return Ok(json!([]));
                     }
                     if en - st > 4096 {
@@ -1237,7 +1253,15 @@ where
                             "Превышен предел размера диапазона (макс. 4096)",
                         ));
                     }
-                    Ok(V::Array((st..en).map(|i| json!(i)).collect()))
+                    Ok(V::Array(
+                        (st..en)
+                            .map(|i| {
+                                i64::try_from(i)
+                                    .map(|n| json!(n))
+                                    .unwrap_or_else(|_| json!(i as f64))
+                            })
+                            .collect(),
+                    ))
                 }
                 "formatNumber" => {
                     let n = number(&args[0])?;
@@ -1458,9 +1482,10 @@ where
                         let idx = if n.abs() == 1.0 { 1 } else { 2 };
                         Ok(json!(text(&args[idx])?))
                     } else {
-                        let abs_int = (n.abs().trunc() as i64).abs();
-                        let mod10 = abs_int % 10;
-                        let mod100 = abs_int % 100;
+                        let abs_int = n.abs().trunc();
+                        let rem100 = (abs_int % 100.0) as i64;
+                        let mod10 = rem100 % 10;
+                        let mod100 = rem100;
                         let idx = if n.fract() != 0.0 {
                             2
                         } else if mod10 == 1 && mod100 != 11 {
@@ -1556,8 +1581,8 @@ where
                     }))
                 }
                 ".." | "..=" => {
-                    let st = number(&a)? as i64;
-                    let en = number(&b)? as i64;
+                    let st = number(&a)? as i128;
+                    let en = number(&b)? as i128;
                     let inclusive = op == "..=";
                     let count = if inclusive { en - st + 1 } else { en - st };
                     if count <= 0 {
@@ -1569,10 +1594,15 @@ where
                             "Превышен предел размера диапазона (макс. 4096)",
                         ));
                     }
+                    let to_val = |i: i128| {
+                        i64::try_from(i)
+                            .map(|n| json!(n))
+                            .unwrap_or_else(|_| json!(i as f64))
+                    };
                     let items: Vec<V> = if inclusive {
-                        (st..=en).map(|i| json!(i)).collect()
+                        (st..=en).map(to_val).collect()
                     } else {
-                        (st..en).map(|i| json!(i)).collect()
+                        (st..en).map(to_val).collect()
                     };
                     Ok(V::Array(items))
                 }
