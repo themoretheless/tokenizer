@@ -428,3 +428,54 @@ fn unused_token_and_i18n_key_lints() {
     let src = "tokens { a: 1px; b: 2px; }\ni18n { hi: 'H'; }\ni18n en { hello: 'H'; }";
     assert_eq!(lint_codes(src), []);
 }
+
+#[test]
+fn lint_unused_style_unknown_style_and_unreachable_branch_carry_utf16_spans() {
+    use themoretheless_tokenizer_forma::frontend::lint_document;
+
+    let src = "component A { title: '😀'; style unusedCard { color: #fff; } Row { apply missingCard; width: match 1 { _ => 10px; 2 => 20px; }; } }";
+    let items = lint_document(src).unwrap();
+    let arr = items.as_array().unwrap();
+
+    let unused_style = arr.iter().find(|w| w["code"] == "unused-style").unwrap();
+    let style_at = src.find("unusedCard").unwrap();
+    assert_eq!(unused_style["from"], src[..style_at].encode_utf16().count());
+    assert_eq!(
+        unused_style["to"],
+        src[..style_at].encode_utf16().count() + "unusedCard".len()
+    );
+
+    let unknown_style = arr.iter().find(|w| w["code"] == "unknown-style").unwrap();
+    let missing_at = src.find("missingCard").unwrap();
+    assert_eq!(unknown_style["severity"], "error");
+    assert_eq!(
+        unknown_style["from"],
+        src[..missing_at].encode_utf16().count()
+    );
+    assert_eq!(
+        unknown_style["to"],
+        src[..missing_at].encode_utf16().count() + "missingCard".len()
+    );
+
+    let unreachable = arr
+        .iter()
+        .find(|w| w["code"] == "unreachable-branch")
+        .unwrap();
+    let branch_at = src.find("2 => 20px").unwrap();
+    assert_eq!(unreachable["from"], src[..branch_at].encode_utf16().count());
+    assert_eq!(
+        unreachable["to"],
+        src[..branch_at].encode_utf16().count() + "1".len()
+    );
+
+    // Imported module (`use`) or inherited `base` suppresses local-only `unknown-style`
+    let imported = "use './theme.forma'; component A { Row { apply externalStyle; } }";
+    assert!(
+        !lint_document(imported)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["code"] == "unknown-style")
+    );
+}

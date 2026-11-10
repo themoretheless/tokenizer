@@ -1,7 +1,7 @@
 //! Conservative static expression types. Unknown host information suppresses
 //! diagnostics; the transport AST and runtime evaluator are deliberately unchanged.
-use crate::evaluate;
 use crate::frontend::SpanTable;
+use crate::semantics;
 use serde_json::{Value as V, json};
 use std::collections::{HashMap, HashSet};
 
@@ -343,6 +343,40 @@ struct Span {
     from: usize,
     to: usize,
 }
+fn expr_matches(span_raw: &str, doc_raw: &str) -> bool {
+    if span_raw == doc_raw {
+        return true;
+    }
+    if let (Some(sr), Some(dr)) = (span_raw.strip_prefix('!'), doc_raw.strip_prefix('!')) {
+        return dr.strip_prefix("state.") == Some(sr) || dr.strip_prefix("props.") == Some(sr);
+    }
+    doc_raw.strip_prefix("state.") == Some(span_raw)
+        || doc_raw.strip_prefix("props.") == Some(span_raw)
+}
+fn ast_span_equal(span_val: &V, doc_val: &V) -> bool {
+    match (span_val, doc_val) {
+        (V::Null, V::Null) => true,
+        (V::Bool(a), V::Bool(b)) => a == b,
+        (V::Number(a), V::Number(b)) => a.as_f64() == b.as_f64(),
+        (V::String(a), V::String(b)) => a == b,
+        (V::Array(a), V::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(x, y)| ast_span_equal(x, y))
+        }
+        (V::Object(a), V::Object(b)) => {
+            if a.len() != b.len() {
+                return false;
+            }
+            if a.len() == 1
+                && let (Some(V::String(sa)), Some(V::String(sb))) = (a.get("expr"), b.get("expr"))
+            {
+                return expr_matches(sa, sb);
+            }
+            a.iter()
+                .all(|(k, va)| b.get(k).is_some_and(|vb| ast_span_equal(va, vb)))
+        }
+        _ => false,
+    }
+}
 fn ast_range(value: &V) -> Option<Span> {
     Some(Span {
         from: value["from"].as_u64()? as usize,
@@ -354,6 +388,28 @@ fn node_range(value: &V) -> Option<Span> {
         from: value["start"].as_u64()? as usize,
         to: value["end"].as_u64()? as usize,
     })
+}
+pub(crate) fn match_container_span(table: &SpanTable, value: &V) -> Option<(usize, usize)> {
+    let span = if value["type"] == "Match" {
+        node_range(value)
+    } else {
+        root_span(table, value, None)
+    }?;
+    Some((span.from, span.to))
+}
+pub(crate) fn next_child_span(
+    table: &SpanTable,
+    value: &V,
+    parent: Option<(usize, usize)>,
+    after: Option<(usize, usize)>,
+) -> Option<(usize, usize)> {
+    let span = child_span_after(
+        table,
+        value,
+        parent.map(|(from, to)| Span { from, to }),
+        after.map(|(from, to)| Span { from, to }),
+    )?;
+    Some((span.from, span.to))
 }
 fn root_span(table: &SpanTable, value: &V, range: Option<Span>) -> Option<Span> {
     if let Some(range) = range {
@@ -371,7 +427,7 @@ fn root_span(table: &SpanTable, value: &V, range: Option<Span>) -> Option<Span> 
             if !is_exact && best.is_some_and(|b| len < b.to - b.from) {
                 continue;
             }
-            if evaluate::equal(&entry.value, value) {
+            if ast_span_equal(&entry.value, value) {
                 let candidate = Span {
                     from: entry.from,
                     to: entry.to,
@@ -390,7 +446,7 @@ fn root_span(table: &SpanTable, value: &V, range: Option<Span>) -> Option<Span> 
         if best.is_some_and(|b| len < b.to - b.from) {
             continue;
         }
-        if evaluate::equal(&entry.value, value) {
+        if ast_span_equal(&entry.value, value) {
             best = Some(Span {
                 from: entry.from,
                 to: entry.to,
@@ -409,9 +465,7 @@ fn child_span_after(
     after: Option<Span>,
 ) -> Option<Span> {
     let parent = parent?;
-    let min_from = after
-        .map_or(parent.from, |span| span.from.saturating_add(1))
-        .max(parent.from);
+    let min_from = after.map_or(parent.from, |span| span.to).max(parent.from);
     if min_from > parent.to {
         return None;
     }
@@ -428,7 +482,7 @@ fn child_span_after(
         if best.is_some_and(|(bk, _)| key >= bk) {
             continue;
         }
-        if evaluate::equal(&entry.value, value) {
+        if ast_span_equal(&entry.value, value) {
             best = Some((
                 key,
                 Span {
@@ -439,6 +493,28 @@ fn child_span_after(
         }
     }
     best.map(|(_, span)| span)
+}
+fn pure_function_arity(name: &str) -> Option<(usize, Option<usize>, &'static str)> {
+    match name {
+        "coalesce" | "min" | "max" => Some((1, None, ">= 1")),
+        "merge" => Some((2, None, ">= 2")),
+        "remap" => Some((5, Some(5), "5")),
+        "clamp" | "replace" | "find" | "lerp" => Some((3, Some(3), "3")),
+        "plural" => Some((3, Some(4), "3..=4")),
+        "contains" | "includes" | "indexOf" | "startsWith" | "endsWith" | "split" | "take"
+        | "skip" | "range" | "pluck" | "alpha" | "lighten" | "darken" | "saturate"
+        | "desaturate" | "contrast" | "groupBy" | "pow" | "repeat" | "chunk" | "zip" | "pick"
+        | "omit" => Some((2, Some(2), "2")),
+        "slice" | "mix" | "isValid" | "padStart" | "padEnd" | "truncate" => {
+            Some((2, Some(3), "2..=3"))
+        }
+        "join" | "formatNumber" | "sortBy" | "unique" => Some((1, Some(2), "1..=2")),
+        _ if crate::frontend::is_pure_function(name) => Some((1, Some(1), "1")),
+        _ => None,
+    }
+}
+fn is_static_literal(val: &V) -> bool {
+    matches!(val, V::Bool(_) | V::Number(_) | V::String(_) | V::Array(_))
 }
 
 #[derive(Debug)]
@@ -543,9 +619,10 @@ impl<'a> Analyzer<'a> {
             expected: None,
         }
     }
-    fn emit(
+    fn emit_message(
         &mut self,
         code: &str,
+        message: String,
         expected: String,
         actual: String,
         span: Option<Span>,
@@ -555,13 +632,30 @@ impl<'a> Analyzer<'a> {
         self.diagnostics.push(json!({
             "code": code,
             "severity": "error",
-            "message": format!("{context}: ожидался {expected}, получен {actual}"),
+            "message": message,
             "from": span.from,
             "to": span.to,
             "expected": expected,
             "actual": actual,
             "context": context,
         }));
+    }
+    fn emit(
+        &mut self,
+        code: &str,
+        expected: String,
+        actual: String,
+        span: Option<Span>,
+        context: &str,
+    ) {
+        self.emit_message(
+            code,
+            format!("{context}: ожидался {expected}, получен {actual}"),
+            expected,
+            actual,
+            span,
+            context,
+        );
     }
     fn check(
         &mut self,
@@ -579,8 +673,44 @@ impl<'a> Analyzer<'a> {
             true
         }
     }
+    fn check_static_constraints(
+        &mut self,
+        value: &V,
+        constraints: &V,
+        span: Option<Span>,
+        label: &str,
+    ) -> bool {
+        if !constraints.is_object() || !is_static_literal(value) {
+            return true;
+        }
+        if let Err(err) = semantics::check_constraints(value, constraints, label) {
+            let expected = if let Some(range) = constraints["range"].as_array()
+                && range.len() == 2
+            {
+                format!("{}..={}", range[0], range[1])
+            } else if let Some(pat) = constraints["pattern"].as_str() {
+                format!("pattern '{pat}'")
+            } else {
+                "constraint".into()
+            };
+            self.emit_message(
+                err.code,
+                err.message,
+                expected,
+                value.to_string(),
+                span,
+                label,
+            );
+            false
+        } else {
+            true
+        }
+    }
     fn child(&self, value: &V, parent: Option<Span>) -> Option<Span> {
         child_span(self.spans, value, parent)
+    }
+    fn child_after(&self, value: &V, parent: Option<Span>, after: Option<Span>) -> Option<Span> {
+        child_span_after(self.spans, value, parent, after)
     }
     fn infer_root(&mut self, value: &V, range: Option<Span>) -> Ty {
         let span = root_span(self.spans, value, range).or(range);
@@ -620,12 +750,16 @@ impl<'a> Analyzer<'a> {
         }
         if let Some(items) = value.as_array() {
             let elem_expected = contextual_list_element(contextual.as_ref());
+            let mut prev_span = None;
             let types = items
                 .iter()
                 .map(|item| {
-                    let child = self.child(item, span);
+                    let child = self.child_after(item, span, prev_span);
+                    if child.is_some() {
+                        prev_span = child;
+                    }
                     self.expected = elem_expected.clone();
-                    self.infer(item, child)
+                    self.infer(item, child.or(span))
                 })
                 .collect::<Vec<_>>();
             self.expected = None;
@@ -635,18 +769,23 @@ impl<'a> Analyzer<'a> {
             return self.infer_expr_reference(raw, span);
         }
         if let Some(parts) = value["interpolation"].as_array() {
+            let mut prev_span = None;
             for part in parts {
                 if part.is_string() {
                     continue;
                 }
-                let child = self.child(part, span);
-                let ty = self.infer(part, child);
+                let child = self.child_after(part, span, prev_span);
+                if child.is_some() {
+                    prev_span = child;
+                }
+                let part_span = child.or(span);
+                let ty = self.infer(part, part_span);
                 if !self.is_scalar(&ty) {
                     self.emit(
                         "incompatible-operand",
                         "String | Number | Bool | Null".into(),
                         ty.display(),
-                        child,
+                        part_span,
                         "Строковая интерполяция",
                     );
                 }
@@ -669,19 +808,43 @@ impl<'a> Analyzer<'a> {
                 });
                 if !missing_required {
                     let mut valid = true;
+                    let expected_keys = {
+                        let mut keys = fields.keys().map(String::as_str).collect::<Vec<_>>();
+                        keys.sort_unstable();
+                        keys.join(" | ")
+                    };
                     for (key, item) in object {
-                        let child = self.child(item, span);
+                        let child = self.child(item, span).or(span);
                         let field_expected = fields.get(key).and_then(V::as_str).map(parse_type);
                         self.expected = field_expected.clone();
                         let actual = self.infer(item, child);
                         if let Some(expected_ty) = &field_expected {
-                            valid &= self.check(
+                            let ok = self.check(
                                 &actual,
                                 expected_ty,
                                 "incompatible-binding",
                                 child,
                                 format_args!("Поле {struct_name}.{key}"),
                             );
+                            valid &= ok;
+                            if ok {
+                                let constraints = &doc["structConstraints"][struct_name][key];
+                                valid &= self.check_static_constraints(
+                                    item,
+                                    constraints,
+                                    child,
+                                    &format!("Поле {struct_name}.{key}"),
+                                );
+                            }
+                        } else {
+                            self.emit(
+                                "unknown-field",
+                                expected_keys.clone(),
+                                key.clone(),
+                                child,
+                                &format!("Структура {struct_name}"),
+                            );
+                            valid = false;
                         }
                     }
                     self.expected = None;
@@ -696,7 +859,7 @@ impl<'a> Analyzer<'a> {
             let types = object
                 .values()
                 .map(|item| {
-                    let child = self.child(item, span);
+                    let child = self.child(item, span).or(span);
                     self.expected = val_expected.clone();
                     self.infer(item, child)
                 })
@@ -717,7 +880,7 @@ impl<'a> Analyzer<'a> {
     }
     fn infer_expr_reference(&mut self, raw: &str, span: Option<Span>) -> Ty {
         if let Some(path) = raw.strip_prefix('!') {
-            let actual = self.infer_reference(path);
+            let actual = self.infer_reference(path, span);
             self.check(
                 &actual,
                 &Ty::Bool,
@@ -746,9 +909,9 @@ impl<'a> Analyzer<'a> {
         if let Some(ty) = unit_type(raw) {
             return ty;
         }
-        self.infer_reference(raw)
+        self.infer_reference(raw, span)
     }
-    fn infer_reference(&mut self, raw: &str) -> Ty {
+    fn infer_reference(&mut self, raw: &str, span: Option<Span>) -> Ty {
         let (head, rest) = raw.split_once('.').unwrap_or((raw, ""));
         if rest.is_empty() {
             if let Some(ty) = self.locals.get(head) {
@@ -771,6 +934,21 @@ impl<'a> Analyzer<'a> {
             }
             if self.doc["lets"].get(head).is_some() {
                 return self.infer_let(head);
+            }
+            if let Some(variants) = self.doc["enums"].get(head).and_then(V::as_array) {
+                let expected = variants
+                    .iter()
+                    .filter_map(V::as_str)
+                    .map(|v| format!("{head}.{v}"))
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                self.emit(
+                    "unknown-variant",
+                    expected,
+                    raw.into(),
+                    span,
+                    &format!("Перечисление {head}"),
+                );
             }
             return Ty::Unknown;
         }
@@ -798,7 +976,7 @@ impl<'a> Analyzer<'a> {
                     if sub_rest.is_empty() {
                         ty
                     } else {
-                        self.member_path_iter(ty, sub_rest.split('.'))
+                        self.resolve_member_path(ty, sub_rest.split('.'), span)
                     }
                 })
             }
@@ -812,7 +990,7 @@ impl<'a> Analyzer<'a> {
                         if sub_rest.is_empty() {
                             ty
                         } else {
-                            self.member_path_iter(ty, sub_rest.split('.'))
+                            self.resolve_member_path(ty, sub_rest.split('.'), span)
                         }
                     })
             }
@@ -823,24 +1001,112 @@ impl<'a> Analyzer<'a> {
                 _ => Ty::Unknown,
             },
             _ => {
-                if !rest.contains('.')
-                    && self.doc["enums"]
-                        .get(head)
-                        .and_then(V::as_array)
-                        .is_some_and(|variants| variants.iter().any(|v| v.as_str() == Some(rest)))
-                {
-                    return Ty::Named(head.into());
-                }
                 if let Some(ty) = self.locals.get(head).cloned() {
-                    return self.member_path_iter(ty, rest.split('.'));
+                    return self.resolve_member_path(ty, rest.split('.'), span);
+                }
+                if let Some(variants) = self.doc["enums"].get(head).and_then(V::as_array) {
+                    if !rest.contains('.') && variants.iter().any(|v| v.as_str() == Some(rest)) {
+                        return Ty::Named(head.into());
+                    }
+                    let expected = variants
+                        .iter()
+                        .filter_map(V::as_str)
+                        .map(|v| format!("{head}.{v}"))
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    self.emit(
+                        "unknown-variant",
+                        expected,
+                        raw.into(),
+                        span,
+                        &format!("Перечисление {head}"),
+                    );
                 }
                 Ty::Unknown
             }
         }
     }
-    fn member_path_iter<'b>(&self, base: Ty, path: impl IntoIterator<Item = &'b str>) -> Ty {
+    fn resolve_member_path<'b>(
+        &mut self,
+        base: Ty,
+        path: impl IntoIterator<Item = &'b str>,
+        span: Option<Span>,
+    ) -> Ty {
         path.into_iter()
-            .fold(base, |ty, part| self.member_type(&ty, part))
+            .fold(base, |ty, part| self.resolve_member(&ty, part, false, span))
+    }
+    fn resolve_member(
+        &mut self,
+        base: &Ty,
+        property: &str,
+        optional: bool,
+        span: Option<Span>,
+    ) -> Ty {
+        let target = if optional {
+            non_null(base.clone())
+        } else {
+            base.clone()
+        };
+        self.check_struct_field(&target, property, span);
+        self.member_type(&target, property)
+    }
+    fn check_struct_field(&mut self, base: &Ty, property: &str, span: Option<Span>) {
+        match base {
+            Ty::Named(name) => {
+                let doc = self.doc;
+                if let Some(fields) = doc["structs"].get(name).and_then(V::as_object)
+                    && !fields.contains_key(property)
+                {
+                    let mut keys = fields.keys().map(String::as_str).collect::<Vec<_>>();
+                    keys.sort_unstable();
+                    self.emit(
+                        "unknown-field",
+                        keys.join(" | "),
+                        property.into(),
+                        span,
+                        &format!("Структура {name}"),
+                    );
+                }
+            }
+            Ty::Union(types) => {
+                let non_null_types = types.iter().filter(|t| **t != Ty::Null).collect::<Vec<_>>();
+                if non_null_types.is_empty() {
+                    return;
+                }
+                let mut all_known_structs = true;
+                let mut any_has_field = false;
+                let mut expected_keys = Vec::new();
+                let doc = self.doc;
+                for ty in non_null_types {
+                    if let Ty::Named(name) = ty
+                        && let Some(fields) = doc["structs"].get(name).and_then(V::as_object)
+                    {
+                        if fields.contains_key(property) {
+                            any_has_field = true;
+                        }
+                        for k in fields.keys() {
+                            if !expected_keys.contains(&k.as_str()) {
+                                expected_keys.push(k.as_str());
+                            }
+                        }
+                    } else {
+                        all_known_structs = false;
+                        break;
+                    }
+                }
+                if all_known_structs && !any_has_field {
+                    expected_keys.sort_unstable();
+                    self.emit(
+                        "unknown-field",
+                        expected_keys.join(" | "),
+                        property.into(),
+                        span,
+                        &format!("Поле структуры {}", base.display()),
+                    );
+                }
+            }
+            _ => {}
+        }
     }
     fn member_type(&self, base: &Ty, property: &str) -> Ty {
         match base {
@@ -874,7 +1140,7 @@ impl<'a> Analyzer<'a> {
         let ty = if value.is_null() {
             Ty::Null
         } else {
-            self.infer_root(value, ast_range(&doc["propertyRanges"][name]))
+            self.infer_root(value, ast_range(&doc["defaultRanges"][name]))
         };
         self.visiting.remove(&key);
         self.let_cache.insert(name.into(), ty.clone());
@@ -909,26 +1175,32 @@ impl<'a> Analyzer<'a> {
             "conditional" => {
                 let condition = &expression["condition"];
                 let condition_span = self.child(condition, span);
-                let condition_ty = self.infer(condition, condition_span);
+                let mut prev_span = condition_span;
+                let cond_target = condition_span.or(span);
+                let condition_ty = self.infer(condition, cond_target);
                 self.check(
                     &condition_ty,
                     &Ty::Bool,
                     "incompatible-condition",
-                    condition_span,
+                    cond_target,
                     format_args!("Условный оператор"),
                 );
                 let mut valid = true;
                 let types = ["then", "else"].map(|key| {
                     let value = &expression[key];
-                    let child = self.child(value, span);
+                    let child = self.child_after(value, span, prev_span);
+                    if child.is_some() {
+                        prev_span = child;
+                    }
+                    let branch_span = child.or(span);
                     self.expected = expected.clone();
-                    let ty = self.infer(value, child);
+                    let ty = self.infer(value, branch_span);
                     if let Some(expected) = &expected {
                         valid &= self.check(
                             &ty,
                             expected,
                             "incompatible-binding",
-                            child,
+                            branch_span,
                             format_args!("Ветвь условного оператора"),
                         );
                     }
@@ -939,7 +1211,7 @@ impl<'a> Analyzer<'a> {
             }
             "unary" => {
                 let argument = &expression["argument"];
-                let child = self.child(argument, span);
+                let child = self.child(argument, span).or(span);
                 let actual = self.infer(argument, child);
                 let operator = expression["operator"].as_str().unwrap_or("");
                 let expected = if operator == "!" {
@@ -958,6 +1230,8 @@ impl<'a> Analyzer<'a> {
                     Ty::Unknown
                 } else if operator == "!" {
                     Ty::Bool
+                } else if actual == Ty::Int {
+                    Ty::Int
                 } else {
                     Ty::Number
                 }
@@ -965,10 +1239,11 @@ impl<'a> Analyzer<'a> {
             "member" => {
                 let object = &expression["object"];
                 let object_span = self.child(object, span);
-                let base = self.infer(object, object_span);
+                let base = self.infer(object, object_span.or(span));
+                let optional = expression["optional"] == true;
                 let Some(property) = expression["property"].as_str() else {
                     let dynamic = &expression["property"];
-                    let dynamic_span = self.child(dynamic, span);
+                    let dynamic_span = self.child_after(dynamic, span, object_span).or(span);
                     let key = self.infer(dynamic, dynamic_span);
                     self.check(
                         &key,
@@ -977,7 +1252,16 @@ impl<'a> Analyzer<'a> {
                         dynamic_span,
                         format_args!("Вычисляемое свойство"),
                     );
-                    return Ty::Unknown;
+                    let target = if optional { non_null(base) } else { base };
+                    let mut result = match target {
+                        Ty::List(item) => union([*item, Ty::Null]),
+                        Ty::Map(item) | Ty::Record(item) => union([*item, Ty::Null]),
+                        _ => Ty::Unknown,
+                    };
+                    if optional && result != Ty::Unknown {
+                        result = union([result, Ty::Null]);
+                    }
+                    return result;
                 };
                 let mut result = if property == "length" && matches!(base, Ty::String | Ty::List(_))
                 {
@@ -988,12 +1272,12 @@ impl<'a> Analyzer<'a> {
                 {
                     object
                         .get(property)
-                        .map(|v| self.infer(v, self.child(v, object_span)))
-                        .unwrap_or(Ty::Unknown)
+                        .map(|v| self.infer(v, self.child(v, object_span).or(span)))
+                        .unwrap_or(Ty::Null)
                 } else {
-                    self.member_type(&base, property)
+                    self.resolve_member(&base, property, optional, span)
                 };
-                if expression["optional"] == true {
+                if optional {
                     result = union([result, Ty::Null]);
                 }
                 result
@@ -1003,12 +1287,17 @@ impl<'a> Analyzer<'a> {
                 let args = expression["args"].as_array().map_or(&[][..], Vec::as_slice);
                 let mut types = Vec::with_capacity(args.len());
                 let mut spans = Vec::with_capacity(args.len());
+                let mut prev_span = None;
                 for arg in args {
-                    let child = self.child(arg, span);
-                    spans.push(child);
-                    types.push(self.infer(arg, child));
+                    let child = self.child_after(arg, span, prev_span);
+                    if child.is_some() {
+                        prev_span = child;
+                    }
+                    let arg_span = child.or(span);
+                    spans.push(arg_span);
+                    types.push(self.infer(arg, arg_span));
                 }
-                self.infer_call(name, args, &types, &spans)
+                self.infer_call(name, args, &types, &spans, span)
             }
             "binary" => self.infer_binary(expression, span),
             _ => {
@@ -1021,8 +1310,10 @@ impl<'a> Analyzer<'a> {
         let operator = expression["operator"].as_str().unwrap_or("");
         let left = &expression["left"];
         let right = &expression["right"];
-        let left_span = self.child(left, span);
-        let right_span = self.child(right, span);
+        let left_found = self.child(left, span);
+        let right_found = self.child_after(right, span, left_found);
+        let left_span = left_found.or(span);
+        let right_span = right_found.or(span);
         let a = self.infer(left, left_span);
         let b = self.infer(right, right_span);
         match operator {
@@ -1085,11 +1376,13 @@ impl<'a> Analyzer<'a> {
                     right_span,
                     format_args!("Диапазон"),
                 );
-                Ty::List(Box::new(Ty::Number))
+                Ty::List(Box::new(Ty::Int))
             }
             "+" => {
                 if matches!(a, Ty::Unknown | Ty::Any) || matches!(b, Ty::Unknown | Ty::Any) {
                     Ty::Unknown
+                } else if a == Ty::Int && b == Ty::Int {
+                    Ty::Int
                 } else if matches!(a, Ty::Number | Ty::Int) && matches!(b, Ty::Number | Ty::Int) {
                     Ty::Number
                 } else if a == Ty::String && b == Ty::String {
@@ -1122,6 +1415,8 @@ impl<'a> Analyzer<'a> {
                 );
                 if a == Ty::Unknown || b == Ty::Unknown {
                     Ty::Unknown
+                } else if operator != "/" && a == Ty::Int && b == Ty::Int {
+                    Ty::Int
                 } else {
                     Ty::Number
                 }
@@ -1131,14 +1426,24 @@ impl<'a> Analyzer<'a> {
     }
     fn infer_match_value(&mut self, value: &V, span: Option<Span>, expected: Option<Ty>) -> Ty {
         let subject = &value["match"];
-        let subject_span = self.child(subject, span);
+        let subject_found = self.child(subject, span);
+        let subject_span = subject_found.or(span);
         let subject_ty = self.infer(subject, subject_span);
+        let branches = value["branches"].as_array().map_or(&[][..], Vec::as_slice);
         let mut branch_types = Vec::new();
         let mut valid = true;
-        for branch in value["branches"].as_array().into_iter().flatten() {
-            self.check_pattern(&branch["pattern"], &subject_ty, span);
+        let mut cursor = subject_found;
+        for branch in branches {
+            let pat_found = self.check_pattern(&branch["pattern"], &subject_ty, span, cursor);
+            if pat_found.is_some() {
+                cursor = pat_found;
+            }
             if let Some(guard) = branch.get("guard") {
-                let guard_span = child_span_after(self.spans, guard, span, subject_span);
+                let guard_found = self.child_after(guard, span, cursor);
+                if guard_found.is_some() {
+                    cursor = guard_found;
+                }
+                let guard_span = guard_found.or(span);
                 let guard_ty = self.infer(guard, guard_span);
                 self.check(
                     &guard_ty,
@@ -1149,7 +1454,11 @@ impl<'a> Analyzer<'a> {
                 );
             }
             let result = &branch["value"];
-            let result_span = self.child(result, span);
+            let result_found = self.child_after(result, span, cursor);
+            if result_found.is_some() {
+                cursor = result_found;
+            }
+            let result_span = result_found.or(span);
             self.expected = expected.clone();
             let ty = self.infer(result, result_span);
             if let Some(expected) = &expected {
@@ -1164,26 +1473,38 @@ impl<'a> Analyzer<'a> {
             branch_types.push(ty);
         }
         self.expected = None;
+        self.check_match_exhaustiveness(&subject_ty, branches, span);
         if valid {
             union(branch_types)
         } else {
             Ty::Unknown
         }
     }
-    fn check_pattern(&mut self, pattern: &V, subject: &Ty, parent: Option<Span>) {
+    fn check_pattern(
+        &mut self,
+        pattern: &V,
+        subject: &Ty,
+        parent: Option<Span>,
+        after: Option<Span>,
+    ) -> Option<Span> {
+        let found = self.child_after(pattern, parent, after);
         if pattern["expr"] == "_" {
-            return;
+            return found;
         }
-        let span = self.child(pattern, parent);
+        let span = found.or(parent);
         if let Some(alternatives) = pattern["or"].as_array() {
+            let mut sub_after = None;
             for alternative in alternatives {
-                self.check_pattern(alternative, subject, parent);
+                let alt_found = self.check_pattern(alternative, subject, span, sub_after);
+                if alt_found.is_some() {
+                    sub_after = alt_found;
+                }
             }
-            return;
+            return found;
         }
         if pattern.get("comparison").is_some() {
             let value = &pattern["value"];
-            let value_span = self.child(value, span);
+            let value_span = self.child(value, span).or(span);
             let actual = self.infer(value, value_span);
             if !matches!(subject, Ty::Unknown | Ty::Any)
                 && compatible(&actual, subject) == Compatible::No
@@ -1197,31 +1518,63 @@ impl<'a> Analyzer<'a> {
                     "Сравнение в match",
                 );
             }
-            return;
+            return found;
         }
         if pattern["expression"]["kind"] == "binary"
             && ["..", "..="].contains(&pattern["expression"]["operator"].as_str().unwrap_or(""))
         {
-            let range_span = self.child(pattern, span);
-            self.infer(pattern, range_span);
+            self.infer(pattern, span);
             self.check(
                 subject,
                 &Ty::Number,
                 "incompatible-match-pattern",
-                range_span,
+                span,
                 format_args!("Диапазон в match"),
             );
-            return;
+            return found;
         }
         if let Some(items) = pattern.as_array() {
-            for item in items {
-                self.check_pattern(item, subject, span);
+            let item_subject = match subject {
+                Ty::List(elem) => elem.as_ref().clone(),
+                Ty::Union(ts) => {
+                    let list_elems = ts
+                        .iter()
+                        .filter_map(|t| match t {
+                            Ty::List(elem) => Some((**elem).clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    if list_elems.is_empty() {
+                        Ty::Unknown
+                    } else {
+                        union(list_elems)
+                    }
+                }
+                _ => Ty::Unknown,
+            };
+            if !matches!(subject, Ty::Unknown | Ty::Any | Ty::List(_))
+                && !matches!(subject, Ty::Union(ts) if ts.iter().any(|t| matches!(t, Ty::List(_) | Ty::Unknown | Ty::Any)))
+            {
+                self.emit(
+                    "incompatible-match-pattern",
+                    subject.display(),
+                    "List".into(),
+                    span,
+                    "Паттерн match",
+                );
             }
-            return;
+            let mut sub_after = None;
+            for item in items {
+                let item_found = self.check_pattern(item, &item_subject, span, sub_after);
+                if item_found.is_some() {
+                    sub_after = item_found;
+                }
+            }
+            return found;
         }
         let actual = self.infer(pattern, span);
         if matches!(subject, Ty::Unknown | Ty::Any) || matches!(actual, Ty::Unknown | Ty::Any) {
-            return;
+            return found;
         }
         let possible = match subject {
             Ty::Union(types) => types.iter().any(|expected| {
@@ -1242,6 +1595,112 @@ impl<'a> Analyzer<'a> {
                 "Паттерн match",
             );
         }
+        found
+    }
+    fn finite_domain_atoms(&self, ty: &Ty, out: &mut Vec<String>) -> bool {
+        match ty {
+            Ty::Bool => {
+                for atom in ["true", "false"] {
+                    if !out.iter().any(|x| x == atom) {
+                        out.push(atom.into());
+                    }
+                }
+                true
+            }
+            Ty::Null => {
+                if !out.iter().any(|x| x == "null") {
+                    out.push("null".into());
+                }
+                true
+            }
+            Ty::Named(name) => {
+                let Some(variants) = self.doc["enums"].get(name).and_then(V::as_array) else {
+                    return false;
+                };
+                for v in variants.iter().filter_map(V::as_str) {
+                    let atom = format!("{name}.{v}");
+                    if !out.iter().any(|x| x == &atom) {
+                        out.push(atom);
+                    }
+                }
+                true
+            }
+            Ty::Union(types) => types.iter().all(|t| self.finite_domain_atoms(t, out)),
+            _ => false,
+        }
+    }
+    fn collect_pattern_atoms(pattern: &V, covered: &mut Vec<String>) -> bool {
+        if pattern["expr"] == "_" {
+            return true;
+        }
+        if let Some(alternatives) = pattern["or"].as_array() {
+            let mut has_wildcard = false;
+            for alt in alternatives {
+                if Self::collect_pattern_atoms(alt, covered) {
+                    has_wildcard = true;
+                }
+            }
+            return has_wildcard;
+        }
+        let atom = if pattern.is_null() {
+            Some("null".to_string())
+        } else if let Some(b) = pattern.as_bool() {
+            Some(b.to_string())
+        } else if let Some(raw) = pattern["expr"].as_str() {
+            let (head, rest) = raw.split_once('.').unwrap_or((raw, ""));
+            if !rest.is_empty()
+                && !rest.contains('.')
+                && head.as_bytes().first().is_some_and(u8::is_ascii_uppercase)
+            {
+                Some(raw.to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(atom) = atom
+            && !covered.iter().any(|x| x == &atom)
+        {
+            covered.push(atom);
+        }
+        false
+    }
+    fn check_match_exhaustiveness(&mut self, subject_ty: &Ty, branches: &[V], span: Option<Span>) {
+        if branches.is_empty() {
+            return;
+        }
+        let mut required = Vec::new();
+        if !self.finite_domain_atoms(subject_ty, &mut required) || required.is_empty() {
+            return;
+        }
+        let mut covered = Vec::new();
+        for branch in branches {
+            if branch.get("guard").is_some() {
+                continue;
+            }
+            if Self::collect_pattern_atoms(&branch["pattern"], &mut covered) {
+                return;
+            }
+        }
+        let missing = required
+            .into_iter()
+            .filter(|req| !covered.iter().any(|c| c == req))
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            let covered_display = if covered.is_empty() {
+                "∅".into()
+            } else {
+                covered.join(" | ")
+            };
+            self.emit(
+                "non-exhaustive-match",
+                missing.join(" | "),
+                covered_display,
+                span,
+                "Неполный match",
+            );
+        }
     }
     fn infer_call(
         &mut self,
@@ -1249,7 +1708,29 @@ impl<'a> Analyzer<'a> {
         raw_args: &[V],
         args: &[Ty],
         spans: &[Option<Span>],
+        call_span: Option<Span>,
     ) -> Ty {
+        let Some((min_arity, max_arity, arity_label)) = pure_function_arity(name) else {
+            self.emit(
+                "unknown-function",
+                "чистая функция".into(),
+                name.into(),
+                call_span,
+                "Вызов функции",
+            );
+            return Ty::Unknown;
+        };
+        let arity_ok =
+            args.len() >= min_arity && max_arity.is_none_or(|max_len| args.len() <= max_len);
+        if !arity_ok {
+            self.emit(
+                "invalid-argument-count",
+                arity_label.into(),
+                args.len().to_string(),
+                call_span,
+                &format!("Вызов {name}"),
+            );
+        }
         let expected = |index: usize, ty: Ty| Some((index, ty));
         let mut requirements = Vec::new();
         let list_any = || Ty::List(Box::new(Ty::Any));
@@ -1309,7 +1790,12 @@ impl<'a> Analyzer<'a> {
                 {
                     let field_ty = match item.as_ref() {
                         Ty::Map(v) | Ty::Record(v) => union([(**v).clone(), Ty::Null]),
-                        other => self.member_type(other, field),
+                        other => self.resolve_member(
+                            other,
+                            field,
+                            false,
+                            spans.get(1).copied().flatten().or(call_span),
+                        ),
                     };
                     if field_ty == Ty::Unknown {
                         list_any()
@@ -1322,12 +1808,30 @@ impl<'a> Analyzer<'a> {
             }
             "groupBy" => {
                 requirements.extend([expected(0, list_any()), expected(1, Ty::String)]);
+                if let (Some(Ty::List(item)), Some(field)) =
+                    (args.first(), raw_args.get(1).and_then(V::as_str))
+                {
+                    self.check_struct_field(
+                        item,
+                        field,
+                        spans.get(1).copied().flatten().or(call_span),
+                    );
+                }
                 Ty::List(Box::new(Ty::Object))
             }
             "sortBy" | "unique" => {
                 requirements.push(expected(0, list_any()));
                 if args.len() > 1 {
                     requirements.push(expected(1, Ty::String));
+                    if let (Some(Ty::List(item)), Some(field)) =
+                        (args.first(), raw_args.get(1).and_then(V::as_str))
+                    {
+                        self.check_struct_field(
+                            item,
+                            field,
+                            spans.get(1).copied().flatten().or(call_span),
+                        );
+                    }
                 }
                 args.first().cloned().unwrap_or(Ty::Unknown)
             }
@@ -1354,9 +1858,38 @@ impl<'a> Analyzer<'a> {
                 for index in 0..args.len() {
                     requirements.push(expected(index, Ty::Number));
                 }
-                Ty::Number
+                if !args.is_empty() && args.iter().all(|t| *t == Ty::Int) {
+                    Ty::Int
+                } else {
+                    Ty::Number
+                }
             }
-            "clamp" | "lerp" => {
+            "clamp" => {
+                for index in 0..3 {
+                    requirements.push(expected(index, Ty::Number));
+                }
+                if arity_ok
+                    && let (Some(lo), Some(hi)) = (
+                        raw_args.get(1).and_then(V::as_f64),
+                        raw_args.get(2).and_then(V::as_f64),
+                    )
+                    && lo > hi
+                {
+                    self.emit(
+                        "invalid-range",
+                        format!("min <= max (получено {lo} > {hi})"),
+                        format!("{lo}..{hi}"),
+                        call_span,
+                        "clamp",
+                    );
+                }
+                if args.len() == 3 && args.iter().all(|t| *t == Ty::Int) {
+                    Ty::Int
+                } else {
+                    Ty::Number
+                }
+            }
+            "lerp" => {
                 for index in 0..3 {
                     requirements.push(expected(index, Ty::Number));
                 }
@@ -1366,13 +1899,40 @@ impl<'a> Analyzer<'a> {
                 for index in 0..5 {
                     requirements.push(expected(index, Ty::Number));
                 }
+                if arity_ok
+                    && let (Some(i0), Some(i1)) = (
+                        raw_args.get(1).and_then(V::as_f64),
+                        raw_args.get(2).and_then(V::as_f64),
+                    )
+                    && i0 == i1
+                {
+                    self.emit(
+                        "invalid-range",
+                        "inMin != inMax".into(),
+                        format!("{i0}..{i1}"),
+                        call_span,
+                        "remap",
+                    );
+                }
                 Ty::Number
             }
             "pow" => {
                 requirements.extend([expected(0, Ty::Number), expected(1, Ty::Number)]);
                 Ty::Number
             }
-            "sqrt" | "sign" | "abs" | "round" | "floor" | "ceil" => {
+            "round" | "floor" | "ceil" | "sign" => {
+                requirements.push(expected(0, Ty::Number));
+                Ty::Int
+            }
+            "abs" => {
+                requirements.push(expected(0, Ty::Number));
+                if args.first() == Some(&Ty::Int) {
+                    Ty::Int
+                } else {
+                    Ty::Number
+                }
+            }
+            "sqrt" => {
                 requirements.push(expected(0, Ty::Number));
                 Ty::Number
             }
@@ -1444,7 +2004,7 @@ impl<'a> Analyzer<'a> {
             }
             "range" => {
                 requirements.extend([expected(0, Ty::Number), expected(1, Ty::Number)]);
-                Ty::List(Box::new(Ty::Number))
+                Ty::List(Box::new(Ty::Int))
             }
             "formatNumber" => {
                 requirements.push(expected(0, Ty::Number));
@@ -1455,6 +2015,31 @@ impl<'a> Analyzer<'a> {
             }
             "find" => {
                 requirements.extend([expected(0, list_any()), expected(1, Ty::String)]);
+                if let (Some(Ty::List(item)), Some(field)) =
+                    (args.first(), raw_args.get(1).and_then(V::as_str))
+                {
+                    let field_ty = self.resolve_member(
+                        item,
+                        field,
+                        false,
+                        spans.get(1).copied().flatten().or(call_span),
+                    );
+                    if arity_ok
+                        && let Some(val_ty) = args.get(2)
+                        && !matches!(field_ty, Ty::Unknown | Ty::Any)
+                        && !matches!(val_ty, Ty::Unknown | Ty::Any)
+                        && compatible(val_ty, &field_ty) == Compatible::No
+                        && compatible(&field_ty, val_ty) == Compatible::No
+                    {
+                        self.emit(
+                            "incompatible-argument",
+                            field_ty.display(),
+                            val_ty.display(),
+                            spans.get(2).copied().flatten().or(call_span),
+                            "find: аргумент 3",
+                        );
+                    }
+                }
                 match args.first() {
                     Some(Ty::List(item)) => union([(**item).clone(), Ty::Null]),
                     _ => Ty::Unknown,
@@ -1483,7 +2068,15 @@ impl<'a> Analyzer<'a> {
             }
             "zip" => {
                 requirements.extend([expected(0, list_any()), expected(1, list_any())]);
-                list_any()
+                match (args.first(), args.get(1)) {
+                    (Some(Ty::List(a)), Some(Ty::List(b))) => {
+                        Ty::List(Box::new(Ty::List(Box::new(union([
+                            (**a).clone(),
+                            (**b).clone(),
+                        ])))))
+                    }
+                    _ => list_any(),
+                }
             }
             "first" | "last" => {
                 requirements.push(expected(0, list_any()));
@@ -1505,7 +2098,15 @@ impl<'a> Analyzer<'a> {
             }
             "entries" => {
                 requirements.push(expected(0, object()));
-                list_any()
+                match args.first() {
+                    Some(Ty::Map(item) | Ty::Record(item)) => {
+                        Ty::List(Box::new(Ty::List(Box::new(union([
+                            Ty::String,
+                            (**item).clone(),
+                        ])))))
+                    }
+                    _ => list_any(),
+                }
             }
             "fromEntries" => {
                 requirements.push(expected(0, list_any()));
@@ -1537,6 +2138,22 @@ impl<'a> Analyzer<'a> {
                     expected(0, object()),
                     expected(1, Ty::List(Box::new(Ty::String))),
                 ]);
+                if let Some(Ty::Named(struct_name)) = args.first()
+                    && let Some(keys) = raw_args.get(1).and_then(V::as_array)
+                {
+                    let base = Ty::Named(struct_name.clone());
+                    let key_parent = spans.get(1).copied().flatten().or(call_span);
+                    let mut prev_span = None;
+                    for key_val in keys {
+                        let key_span = self.child_after(key_val, key_parent, prev_span);
+                        if key_span.is_some() {
+                            prev_span = key_span;
+                        }
+                        if let Some(k) = key_val.as_str() {
+                            self.check_struct_field(&base, k, key_span.or(key_parent));
+                        }
+                    }
+                }
                 match args.first() {
                     Some(Ty::Map(v) | Ty::Record(v)) => Ty::Record(v.clone()),
                     Some(Ty::Named(struct_name)) if name == "pick" => {
@@ -1577,15 +2194,17 @@ impl<'a> Analyzer<'a> {
             }
             _ => Ty::Unknown,
         };
-        for (index, expected) in requirements.into_iter().flatten() {
-            if let Some(actual) = args.get(index) {
-                self.check(
-                    actual,
-                    &expected,
-                    "incompatible-argument",
-                    spans.get(index).copied().flatten(),
-                    format_args!("{name}: аргумент {}", index + 1),
-                );
+        if arity_ok {
+            for (index, expected) in requirements.into_iter().flatten() {
+                if let Some(actual) = args.get(index) {
+                    self.check(
+                        actual,
+                        &expected,
+                        "incompatible-argument",
+                        spans.get(index).copied().flatten().or(call_span),
+                        format_args!("{name}: аргумент {}", index + 1),
+                    );
+                }
             }
         }
         result
@@ -1610,9 +2229,9 @@ impl<'a> Analyzer<'a> {
         if let Some(bindings) = node["bindings"].as_object() {
             for (name, path) in bindings {
                 let Some(path) = path.as_str() else { continue };
-                let actual = self.infer_reference(path);
+                let range = ast_range(&node["statementRanges"][name]);
+                let actual = self.infer_reference(path, range);
                 if let Some(expected) = self.property_type(node_type, name) {
-                    let range = ast_range(&node["statementRanges"][name]);
                     let forward = compatible(&actual, &expected);
                     let backward = compatible(&expected, &actual);
                     if forward == Compatible::No || backward == Compatible::No {
@@ -1656,10 +2275,36 @@ impl<'a> Analyzer<'a> {
                 self.walk_node(&value["patch"]);
             }
         } else if value.get("match").is_some() {
-            self.infer_root(&value["match"], range);
-            for branch in value["branches"].as_array().into_iter().flatten() {
-                self.walk_slot_value(&branch["value"], range);
+            let match_span = root_span(self.spans, value, range).or(range);
+            let subject = &value["match"];
+            let subject_found = self.child(subject, match_span);
+            let subject_ty = self.infer(subject, subject_found.or(match_span));
+            let branches = value["branches"].as_array().map_or(&[][..], Vec::as_slice);
+            let mut cursor = subject_found;
+            for branch in branches {
+                let pat_found =
+                    self.check_pattern(&branch["pattern"], &subject_ty, match_span, cursor);
+                if pat_found.is_some() {
+                    cursor = pat_found;
+                }
+                if let Some(guard) = branch.get("guard") {
+                    let guard_found = self.child_after(guard, match_span, cursor);
+                    if guard_found.is_some() {
+                        cursor = guard_found;
+                    }
+                    let guard_span = guard_found.or(match_span);
+                    let guard_ty = self.infer(guard, guard_span);
+                    self.check(
+                        &guard_ty,
+                        &Ty::Bool,
+                        "incompatible-condition",
+                        guard_span,
+                        format_args!("Guard match"),
+                    );
+                }
+                self.walk_slot_value(&branch["value"], match_span);
             }
+            self.check_match_exhaustiveness(&subject_ty, branches, match_span);
         } else if value["type"].is_string() {
             self.walk_node(value);
         } else {
@@ -1685,13 +2330,37 @@ impl<'a> Analyzer<'a> {
                         .map(|types| types.iter().map(String::as_str).collect::<Vec<_>>())
                 })
             });
+        let arity_ok = if let Some(types) = &signature
+            && args.len() != types.len()
+        {
+            self.emit(
+                "invalid-argument-count",
+                types.len().to_string(),
+                args.len().to_string(),
+                range,
+                &format!("Вызов {action}"),
+            );
+            false
+        } else {
+            true
+        };
+        let mut prev_span = None;
         for (index, arg) in args.iter().enumerate() {
-            let span = root_span(self.spans, arg, range);
-            let actual = self.infer_root(arg, range);
-            if let Some(expected) = signature
-                .as_deref()
-                .and_then(|types| types.get(index))
-                .map(|ty| parse_type(ty))
+            let found = if range.is_some() {
+                self.child_after(arg, range, prev_span)
+            } else {
+                root_span(self.spans, arg, None)
+            };
+            if found.is_some() {
+                prev_span = found;
+            }
+            let span = found.or(range);
+            let actual = self.infer(arg, span);
+            if arity_ok
+                && let Some(expected) = signature
+                    .as_deref()
+                    .and_then(|types| types.get(index))
+                    .map(|ty| parse_type(ty))
             {
                 self.check(
                     &actual,
@@ -1705,21 +2374,39 @@ impl<'a> Analyzer<'a> {
     }
     fn walk_groups(&mut self, groups: &V, node_type: &str) {
         for group in groups.as_array().into_iter().flatten() {
+            let group_span = root_span(self.spans, group, None);
             let subject = &group["match"];
-            let subject_ty = self.infer_root(subject, None);
-            for branch in group["branches"].as_array().into_iter().flatten() {
-                self.check_pattern(
-                    &branch["pattern"],
-                    &subject_ty,
-                    root_span(self.spans, subject, None),
-                );
+            let subject_found = if group_span.is_some() {
+                self.child(subject, group_span)
+            } else {
+                root_span(self.spans, subject, None)
+            };
+            let subject_span = subject_found.or(group_span);
+            let subject_ty = self.infer(subject, subject_span);
+            let branches = group["branches"].as_array().map_or(&[][..], Vec::as_slice);
+            let mut cursor = subject_found;
+            for branch in branches {
+                let pat_found =
+                    self.check_pattern(&branch["pattern"], &subject_ty, group_span, cursor);
+                if pat_found.is_some() {
+                    cursor = pat_found;
+                }
                 if let Some(guard) = branch.get("guard") {
-                    let ty = self.infer_root(guard, None);
+                    let guard_found = if group_span.is_some() {
+                        self.child_after(guard, group_span, cursor)
+                    } else {
+                        root_span(self.spans, guard, None)
+                    };
+                    if guard_found.is_some() {
+                        cursor = guard_found;
+                    }
+                    let guard_span = guard_found.or(group_span);
+                    let ty = self.infer(guard, guard_span);
                     self.check(
                         &ty,
                         &Ty::Bool,
                         "incompatible-condition",
-                        root_span(self.spans, guard, None),
+                        guard_span,
                         format_args!("Guard match"),
                     );
                 }
@@ -1729,7 +2416,15 @@ impl<'a> Analyzer<'a> {
                     &branch["statementRanges"],
                     node_type,
                 );
+                if let Some(stmt_ranges) = branch["statementRanges"].as_object() {
+                    for r in stmt_ranges.values().filter_map(ast_range) {
+                        if cursor.is_none_or(|c| r.to > c.to) {
+                            cursor = Some(r);
+                        }
+                    }
+                }
             }
+            self.check_match_exhaustiveness(&subject_ty, branches, group_span);
         }
     }
     fn walk_props_fields(
@@ -1740,17 +2435,29 @@ impl<'a> Analyzer<'a> {
         node_type: &str,
     ) {
         if let Some(props) = props_val.as_object() {
+            let doc = self.doc;
+            let self_name = doc["name"].as_str().unwrap_or("");
             for (name, value) in props {
                 let range = ast_range(&prop_ranges[name]).or_else(|| ast_range(&stmt_ranges[name]));
+                let val_span = root_span(self.spans, value, range).or(range);
                 if let Some(expected) = self.property_type(node_type, name) {
                     let actual = self.infer_expected(value, expected.clone(), range);
-                    self.check(
+                    let ok = self.check(
                         &actual,
                         &expected,
                         "incompatible-binding",
-                        root_span(self.spans, value, range).or(range),
+                        val_span,
                         format_args!("Свойство {node_type}.{name}"),
                     );
+                    if ok && node_type == self_name {
+                        let constraints = &doc["propDefinitions"][name]["constraints"];
+                        self.check_static_constraints(
+                            value,
+                            constraints,
+                            val_span,
+                            &format!("Свойство {node_type}.{name}"),
+                        );
+                    }
                 } else {
                     self.infer_root(value, range);
                 }
@@ -1767,7 +2474,8 @@ impl<'a> Analyzer<'a> {
             }
             "If" => {
                 let condition = &node["condition"];
-                let span = root_span(self.spans, condition, node_range(node));
+                let span =
+                    root_span(self.spans, condition, node_range(node)).or_else(|| node_range(node));
                 let ty = self.infer(condition, span);
                 self.check(
                     &ty,
@@ -1781,7 +2489,8 @@ impl<'a> Analyzer<'a> {
             }
             "For" => {
                 let collection = &node["collection"];
-                let span = root_span(self.spans, collection, node_range(node));
+                let span = root_span(self.spans, collection, node_range(node))
+                    .or_else(|| node_range(node));
                 let ty = self.infer(collection, span);
                 self.check(
                     &ty,
@@ -1802,7 +2511,8 @@ impl<'a> Analyzer<'a> {
                     self.locals.insert(index.into(), Ty::Int);
                 }
                 if let Some(condition) = node.get("where") {
-                    let span = root_span(self.spans, condition, node_range(node));
+                    let span = root_span(self.spans, condition, node_range(node))
+                        .or_else(|| node_range(node));
                     let actual = self.infer(condition, span);
                     self.check(
                         &actual,
@@ -1813,7 +2523,8 @@ impl<'a> Analyzer<'a> {
                     );
                 }
                 let key = &node["key"];
-                let key_span = root_span(self.spans, key, node_range(node));
+                let key_span =
+                    root_span(self.spans, key, node_range(node)).or_else(|| node_range(node));
                 let key_ty = self.infer(key, key_span);
                 self.check(
                     &key_ty,
@@ -1827,13 +2538,25 @@ impl<'a> Analyzer<'a> {
                 self.walk_nodes(&node["emptyChildren"]);
             }
             "Match" => {
+                let match_span = node_range(node);
                 let subject = &node["match"];
-                let subject_span = root_span(self.spans, subject, node_range(node));
+                let subject_found = self.child(subject, match_span);
+                let subject_span = subject_found.or(match_span);
                 let subject_ty = self.infer(subject, subject_span);
-                for branch in node["branches"].as_array().into_iter().flatten() {
-                    self.check_pattern(&branch["pattern"], &subject_ty, subject_span);
+                let branches = node["branches"].as_array().map_or(&[][..], Vec::as_slice);
+                let mut cursor = subject_found;
+                for branch in branches {
+                    let pat_found =
+                        self.check_pattern(&branch["pattern"], &subject_ty, match_span, cursor);
+                    if pat_found.is_some() {
+                        cursor = pat_found;
+                    }
                     if let Some(guard) = branch.get("guard") {
-                        let span = root_span(self.spans, guard, node_range(node));
+                        let guard_found = self.child_after(guard, match_span, cursor);
+                        if guard_found.is_some() {
+                            cursor = guard_found;
+                        }
+                        let span = guard_found.or(match_span);
                         let ty = self.infer(guard, span);
                         self.check(
                             &ty,
@@ -1844,7 +2567,15 @@ impl<'a> Analyzer<'a> {
                         );
                     }
                     self.walk_nodes(&branch["children"]);
+                    if let Some(children) = branch["children"].as_array() {
+                        for child_node in children.iter().filter_map(node_range) {
+                            if cursor.is_none_or(|c| child_node.to > c.to) {
+                                cursor = Some(child_node);
+                            }
+                        }
+                    }
                 }
+                self.check_match_exhaustiveness(&subject_ty, branches, match_span);
             }
             node_type => {
                 self.walk_props(node, node_type);
@@ -1862,16 +2593,30 @@ impl<'a> Analyzer<'a> {
         if let Some(defaults) = doc["defaults"].as_object() {
             let node_type = doc["name"].as_str().unwrap_or("");
             for (name, value) in defaults {
+                if doc["lets"].get(name).is_some() {
+                    self.infer_let(name);
+                    continue;
+                }
                 let range = ast_range(&doc["defaultRanges"][name]);
+                let val_span = root_span(self.spans, value, range).or(range);
                 if let Some(expected) = self.property_type(node_type, name) {
                     let actual = self.infer_expected(value, expected.clone(), range);
-                    self.check(
+                    let ok = self.check(
                         &actual,
                         &expected,
                         "incompatible-binding",
-                        root_span(self.spans, value, range).or(range),
+                        val_span,
                         format_args!("Default {node_type}.{name}"),
                     );
+                    if ok {
+                        let constraints = &doc["propDefinitions"][name]["constraints"];
+                        self.check_static_constraints(
+                            value,
+                            constraints,
+                            val_span,
+                            &format!("Default {node_type}.{name}"),
+                        );
+                    }
                 } else {
                     self.infer_root(value, range);
                 }
@@ -1882,31 +2627,55 @@ impl<'a> Analyzer<'a> {
                 let range = ast_range(&doc["defaultRanges"][name]);
                 let expected = parse_type(definition["type"].as_str().unwrap_or(""));
                 let value = &definition["default"];
+                let val_span = root_span(self.spans, value, range).or(range);
                 let actual = self.infer_expected(value, expected.clone(), range);
                 self.check(
                     &actual,
                     &expected,
                     "incompatible-binding",
-                    root_span(self.spans, value, range).or(range),
+                    val_span,
                     format_args!("Default state.{name}"),
                 );
             }
         }
-        for section in ["lets", "tokens", "i18n"] {
+        if let Some(lets) = doc["lets"].as_object() {
+            for name in lets.keys() {
+                self.infer_let(name);
+            }
+        }
+        for section in ["tokens", "i18n"] {
             if let Some(values) = doc[section].as_object() {
-                for value in values.values() {
-                    self.infer_root(value, None);
+                for (key, value) in values {
+                    if value.is_object()
+                        && !value.as_object().unwrap().contains_key("expr")
+                        && !value.as_object().unwrap().contains_key("expression")
+                        && !value.as_object().unwrap().contains_key("interpolation")
+                        && !value.as_object().unwrap().contains_key("match")
+                        && values.keys().any(|other| {
+                            other
+                                .strip_prefix(key.as_str())
+                                .is_some_and(|rest| rest.starts_with('.'))
+                        })
+                    {
+                        continue;
+                    }
+                    let cache_key = format!("{section}.{key}");
+                    self.infer_dictionary(section, key, &cache_key);
                 }
             }
         }
         if let Some(styles) = doc["styles"].as_object() {
             for style in styles.values() {
-                self.walk_props_fields(
-                    &style["props"],
-                    &style["propertyRanges"],
-                    &style["statementRanges"],
-                    "*",
-                );
+                if style.get("props").is_some() {
+                    self.walk_props_fields(
+                        &style["props"],
+                        &style["propertyRanges"],
+                        &style["statementRanges"],
+                        "*",
+                    );
+                } else {
+                    self.walk_props_fields(style, &V::Null, &V::Null, "*");
+                }
             }
         }
     }
@@ -1915,11 +2684,9 @@ impl<'a> Analyzer<'a> {
         self.infer_declarations();
         self.walk_nodes(&doc["nodes"]);
         self.walk_groups(&doc["matches"], doc["name"].as_str().unwrap_or(""));
-        for section in ["slots", "slotDefinitions"] {
-            if let Some(values) = doc[section].as_object() {
-                for value in values.values() {
-                    self.walk_node(value);
-                }
+        if let Some(values) = doc["slots"].as_object() {
+            for value in values.values() {
+                self.walk_slot_value(value, None);
             }
         }
         for shortcut in doc["shortcuts"].as_array().into_iter().flatten() {
@@ -1950,7 +2717,9 @@ fn unit_type(raw: &str) -> Option<Ty> {
     }
     for (suffixes, ty) in [
         (
-            &["px", "%", "rem", "em", "vw", "vh", "ch", "fr"][..],
+            &[
+                "px", "%", "rem", "em", "vw", "vh", "vmin", "vmax", "ch", "fr",
+            ][..],
             Ty::Length,
         ),
         (&["ms", "s"][..], Ty::Duration),
