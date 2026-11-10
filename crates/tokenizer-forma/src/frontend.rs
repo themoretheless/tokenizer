@@ -151,8 +151,8 @@ fn tokenize_borrowed(source: &str) -> R<(Vec<BorrowedToken<'_>>, Vec<Comment<'_>
                 }
             }
             for unit in [
-                "turn", "rem", "deg", "rad", "ms", "px", "em", "vw", "vh", "ch", "fr", "s", "%",
-                "*",
+                "vmin", "vmax", "turn", "rem", "deg", "rad", "ms", "px", "em", "vw", "vh", "ch",
+                "fr", "s", "%", "*",
             ] {
                 if source[i..].starts_with(unit) {
                     let next = source[i + unit.len()..].chars().next();
@@ -362,7 +362,7 @@ fn path(s: &str) -> bool {
     !expect_start
 }
 #[inline]
-fn is_pure_function(s: &str) -> bool {
+pub(crate) fn is_pure_function(s: &str) -> bool {
     matches!(
         s,
         "min"
@@ -583,6 +583,16 @@ impl<'a> Parser<'a> {
         }
         Ok(s)
     }
+    #[inline]
+    fn record_span(&mut self, from: usize, to: usize, value: &V) {
+        if let Some(spans) = &mut self.spans {
+            spans.push(ExpressionSpan {
+                value: value.clone(),
+                from: from + self.span_base,
+                to: to + self.span_base,
+            });
+        }
+    }
     fn expression(&mut self, min: u8) -> R<V> {
         self.depth += 1;
         if self.depth > 32 {
@@ -593,21 +603,18 @@ impl<'a> Parser<'a> {
         self.depth -= 1;
         if let Ok(value) = &result {
             let to = self.end();
-            if let Some(spans) = &mut self.spans {
-                spans.push(ExpressionSpan {
-                    value: value.clone(),
-                    from: from + self.span_base,
-                    to: to + self.span_base,
-                });
-            }
+            self.record_span(from, to, value);
         }
         result
     }
     fn expression_inner(&mut self, min: u8) -> R<V> {
+        let from = self.pos();
         let mut left = self.primary()?;
+        let mut left_end = self.end();
         loop {
             let op = self.peek();
             if ["?.", ".", "["].contains(&op) {
+                self.record_span(from, left_end, &left);
                 self.i += 1;
                 let optional = op == "?.";
                 let computed = op == "[" || (optional && self.peek() == "[");
@@ -644,14 +651,23 @@ impl<'a> Parser<'a> {
                         self.take(")")?;
                         left = json!({"expression":{"kind":"call","name":prop_str,"args":args}});
                     } else {
-                        for (index, part) in prop_str.split('.').enumerate() {
-                            left = json!({"expression":{"kind":"member","object":left,"property":part,"optional":index==0&&optional,"computed":false}})
+                        let prop_end = self.end();
+                        let mut segments = prop_str.split('.').peekable();
+                        let mut index = 0usize;
+                        while let Some(part) = segments.next() {
+                            left = json!({"expression":{"kind":"member","object":left,"property":part,"optional":index==0&&optional,"computed":false}});
+                            if segments.peek().is_some() {
+                                self.record_span(from, prop_end, &left);
+                            }
+                            index += 1;
                         }
                     }
                 }
+                left_end = self.end();
                 continue;
             }
             if op == "|>" && min <= 1 {
+                self.record_span(from, left_end, &left);
                 self.i += 1;
                 let fn_name = self.take("")?;
                 if !is_pure_function(fn_name) {
@@ -669,14 +685,17 @@ impl<'a> Parser<'a> {
                     self.take(")")?;
                 }
                 left = json!({"expression":{"kind":"call","name":fn_name,"args":args}});
+                left_end = self.end();
                 continue;
             }
             if op == "?" && min == 0 {
+                self.record_span(from, left_end, &left);
                 self.i += 1;
                 let then = self.expression(0)?;
                 self.take(":")?;
                 let otherwise = self.expression(0)?;
                 left = json!({"expression":{"kind":"conditional","condition":left,"then":then,"else":otherwise}});
+                left_end = self.end();
                 continue;
             }
             let rank = match op {
@@ -692,8 +711,10 @@ impl<'a> Parser<'a> {
             if rank < min {
                 break;
             }
+            self.record_span(from, left_end, &left);
             self.i += 1;
             left = json!({"expression":{"kind":"binary","operator":op,"left":left,"right":self.expression(rank+1)?}});
+            left_end = self.end();
         }
         Ok(left)
     }
@@ -804,6 +825,17 @@ impl<'a> Parser<'a> {
                         .join(", ")
                 )));
             }
+            if let Some((receiver, method)) = token.rsplit_once('.')
+                && !receiver.is_empty()
+                && receiver.chars().all(|c| ident(c) || c == '.')
+                && is_pure_function(method)
+            {
+                let recv_val = json!({"expr": receiver});
+                let recv_end = token_start + receiver.encode_utf16().count();
+                self.record_span(token_start, recv_end, &recv_val);
+                args.insert(0, recv_val);
+                return Ok(json!({"expression":{"kind":"call","name":method,"args":args}}));
+            }
             if !is_pure_function(token) {
                 return self.err(format!("Неизвестная чистая функция {token}"));
             }
@@ -815,11 +847,18 @@ impl<'a> Parser<'a> {
         Ok(json!({"expr":token}))
     }
     fn sequence(&mut self) -> R<V> {
+        let from = self.pos();
         let mut a = vec![self.expression(0)?];
         while self.peek() != ";" {
             a.push(self.expression(0)?)
         }
-        Ok(if a.len() == 1 { a.remove(0) } else { json!(a) })
+        if a.len() == 1 {
+            Ok(a.remove(0))
+        } else {
+            let out = json!(a);
+            self.record_span(from, self.end(), &out);
+            Ok(out)
+        }
     }
     fn tuple(&mut self, pattern: bool) -> R<V> {
         if self.peek() != "(" {
@@ -829,6 +868,7 @@ impl<'a> Parser<'a> {
                 self.expression(0)
             };
         }
+        let from = self.pos();
         self.take("(")?;
         let mut a = vec![if pattern {
             self.pattern()?
@@ -844,15 +884,24 @@ impl<'a> Parser<'a> {
             })
         }
         self.take(")")?;
-        Ok(if a.len() == 1 { a.remove(0) } else { json!(a) })
+        if a.len() == 1 {
+            Ok(a.remove(0))
+        } else {
+            let out = json!(a);
+            self.record_span(from, self.end(), &out);
+            Ok(out)
+        }
     }
     fn single_pattern(&mut self) -> R<V> {
         if self.peek() == "(" {
             return self.tuple(true);
         }
         if ["<", "<=", ">", ">="].contains(&self.peek()) {
+            let from = self.pos();
             let op = self.take("")?;
-            return Ok(json!({"comparison":op,"value":self.expression(0)?}));
+            let out = json!({"comparison":op,"value":self.expression(0)?});
+            self.record_span(from, self.end(), &out);
+            return Ok(out);
         }
         let p = self.expression(0)?;
         if p.is_object()
@@ -865,6 +914,7 @@ impl<'a> Parser<'a> {
         Ok(p)
     }
     fn pattern(&mut self) -> R<V> {
+        let from = self.pos();
         let first = self.single_pattern()?;
         if self.peek() != "|" {
             return Ok(first);
@@ -874,7 +924,9 @@ impl<'a> Parser<'a> {
             self.i += 1;
             alts.push(self.single_pattern()?);
         }
-        Ok(json!({"or": alts}))
+        let out = json!({"or": alts});
+        self.record_span(from, self.end(), &out);
+        Ok(out)
     }
     fn is_markup_match(&self) -> bool {
         let mut j = self.i;
@@ -961,6 +1013,7 @@ impl<'a> Parser<'a> {
         Ok(n)
     }
     fn match_value(&mut self, group: bool) -> R<V> {
+        let from = self.pos();
         self.take("match")?;
         let subject = self.tuple(false)?;
         self.take("{")?;
@@ -1013,7 +1066,11 @@ impl<'a> Parser<'a> {
         if branches.is_empty() {
             return self.err("match требует хотя бы одну ветку");
         }
-        Ok(json!({"match":subject,"branches":branches}))
+        let out = json!({"match":subject,"branches":branches});
+        if group {
+            self.record_span(from, self.end(), &out);
+        }
+        Ok(out)
     }
     fn children(&mut self) -> R<(V, usize)> {
         self.take("{")?;
@@ -1985,7 +2042,7 @@ pub(crate) fn parse_with_span_table(source: &str) -> R<(V, SpanTable)> {
     entries.sort_by_key(|e| (e.from, e.to));
     Ok((document, SpanTable { entries }))
 }
-fn parse_for_lint(source: &str) -> R<(V, SpanTable, Vec<DictDecl>)> {
+fn parse_for_lint(source: &str) -> R<(V, SpanTable, LintDecls)> {
     let mut parser = Parser::new_spanned(source, 0)?;
     let document = parser.document(false)?;
     let has_body = !document["designBody"].is_null()
@@ -1993,14 +2050,10 @@ fn parse_for_lint(source: &str) -> R<(V, SpanTable, Vec<DictDecl>)> {
         || nonempty(&document["defaults"])
         || nonempty(&document["propDefinitions"])
         || nonempty(&document["stateDefinitions"]);
-    let dict_decls = if has_body {
-        dict_declarations_from_tokens(&parser.tokens)
-    } else {
-        Vec::new()
-    };
+    let lint_decls = lint_declarations_from_tokens(&parser.tokens, has_body);
     let mut entries = parser.spans.take().unwrap_or_default();
     entries.sort_by_key(|e| (e.from, e.to));
-    Ok((document, SpanTable { entries }, dict_decls))
+    Ok((document, SpanTable { entries }, lint_decls))
 }
 pub fn parse_expression(source: &str) -> R<V> {
     let mut p = Parser::new(source)?;
@@ -2124,7 +2177,8 @@ fn unit_literal(s: &str) -> bool {
         return false;
     }
     [
-        "turn", "rem", "deg", "rad", "px", "ms", "em", "vw", "vh", "ch", "fr", "s", "%",
+        "turn", "vmin", "vmax", "rem", "deg", "rad", "px", "ms", "em", "vw", "vh", "ch", "fr", "s",
+        "%",
     ]
     .iter()
     .any(|unit| {
@@ -2536,18 +2590,56 @@ struct DictDecl {
     start: usize,
     end: usize,
 }
-fn dict_declarations_from_tokens(tokens: &[BorrowedToken<'_>]) -> Vec<DictDecl> {
-    let mut out = Vec::new();
+struct LintDecls {
+    dicts: Vec<DictDecl>,
+    styles: std::collections::HashMap<String, (usize, usize)>,
+    applies: Vec<(String, usize, usize)>,
+}
+fn lint_declarations_from_tokens(tokens: &[BorrowedToken<'_>], has_body: bool) -> LintDecls {
+    let mut dicts = Vec::new();
+    let mut styles = std::collections::HashMap::new();
+    let mut applies = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
-        let i18n = match tokens[i].text {
-            "tokens" => false,
-            "i18n" => true,
+        match tokens[i].text {
+            "style"
+                if tokens.get(i + 1).is_some_and(|t| name(t.text))
+                    && tokens.get(i + 2).map(|t| t.text) == Some("{") =>
+            {
+                let tok = tokens[i + 1];
+                styles.insert(tok.text.into(), (tok.start, tok.end));
+                i += 2;
+                continue;
+            }
+            "apply"
+                if has_body
+                    && tokens
+                        .get(i + 1)
+                        .is_some_and(|t| !matches!(t.text, ":" | "<->" | "->")) =>
+            {
+                let mut j = i + 1;
+                while j < tokens.len() && tokens[j].text != ";" && tokens[j].text != "}" {
+                    let tok = tokens[j];
+                    if name(tok.text) {
+                        applies.push((tok.text.into(), tok.start, tok.end));
+                    }
+                    j += 1;
+                    if tokens.get(j).map(|t| t.text) == Some(",") {
+                        j += 1;
+                    } else {
+                        break;
+                    }
+                }
+                i = j;
+                continue;
+            }
+            "tokens" | "i18n" if has_body => {}
             _ => {
                 i += 1;
                 continue;
             }
-        };
+        }
+        let i18n = tokens[i].text == "i18n";
         let mut j = i + 1;
         let group = if tokens.get(j).map(|t| t.text) == Some("{") {
             None
@@ -2586,7 +2678,7 @@ fn dict_declarations_from_tokens(tokens: &[BorrowedToken<'_>]) -> Vec<DictDecl> 
             if j >= tokens.len() || tokens[j].text != ";" {
                 break;
             }
-            out.push(DictDecl {
+            dicts.push(DictDecl {
                 i18n,
                 key: match group {
                     Some(g) => format!("{g}.{}", key_tok.text),
@@ -2599,7 +2691,11 @@ fn dict_declarations_from_tokens(tokens: &[BorrowedToken<'_>]) -> Vec<DictDecl> 
         }
         i += 1;
     }
-    out
+    LintDecls {
+        dicts,
+        styles,
+        applies,
+    }
 }
 /// Does the `tokens.`/`i18n.` reference tail `r` keep the declared key `k`
 /// alive? Covers exact full paths (`tokens.color.brand`), group heads
@@ -2617,19 +2713,31 @@ pub fn lint_document(source: &str) -> R<V> {
     lint_document_with_context(source, &crate::typecheck::TypeContext::default())
 }
 pub fn lint_document_with_context(source: &str, context: &crate::typecheck::TypeContext) -> R<V> {
-    let (doc, expression_spans, dict_decls) = parse_for_lint(source)?;
+    let (doc, expression_spans, lint_decls) = parse_for_lint(source)?;
     let mut warnings = Vec::new();
     let mut usage = Usage::default();
 
-    fn check_matches(v: &V, warnings: &mut Vec<V>) {
+    fn check_matches(v: &V, spans: &SpanTable, warnings: &mut Vec<V>) {
         if let Some(branches) = v["branches"].as_array() {
+            let match_span = crate::typecheck::match_container_span(spans, v);
+            let mut prev_span = None;
             let mut wildcard_seen = false;
             for b in branches {
+                let pat_span =
+                    crate::typecheck::next_child_span(spans, &b["pattern"], match_span, prev_span);
+                if pat_span.is_some() {
+                    prev_span = pat_span;
+                }
                 if wildcard_seen {
-                    warnings.push(json!({
+                    let mut warning = json!({
                         "code": "unreachable-branch",
                         "message": "Недостижимая ветка match после шаблона _"
-                    }));
+                    });
+                    if let Some((from, to)) = pat_span {
+                        warning["from"] = json!(from);
+                        warning["to"] = json!(to);
+                    }
+                    warnings.push(warning);
                 }
                 if b["pattern"]["expr"] == "_" && b.get("guard").is_none() {
                     wildcard_seen = true;
@@ -2638,11 +2746,11 @@ pub fn lint_document_with_context(source: &str, context: &crate::typecheck::Type
         }
         if let Some(a) = v.as_array() {
             for item in a {
-                check_matches(item, warnings);
+                check_matches(item, spans, warnings);
             }
         } else if let Some(o) = v.as_object() {
             for val in o.values() {
-                check_matches(val, warnings);
+                check_matches(val, spans, warnings);
             }
         }
     }
@@ -2730,10 +2838,35 @@ pub fn lint_document_with_context(source: &str, context: &crate::typecheck::Type
     if let Some(styles) = doc["styles"].as_object() {
         for name in styles.keys() {
             if !usage.styles.contains(name.as_str()) {
-                warnings.push(json!({
+                let mut warning = json!({
                     "code": "unused-style",
                     "name": name,
                     "message": format!("Неиспользуемый стиль style {name}")
+                });
+                if let Some(&(from, to)) = lint_decls.styles.get(name) {
+                    warning["from"] = json!(from);
+                    warning["to"] = json!(to);
+                }
+                warnings.push(warning);
+            }
+        }
+    }
+    if doc["uses"].as_array().is_none_or(Vec::is_empty) && doc["base"].is_null() {
+        for (style_name, from, to) in &lint_decls.applies {
+            if !doc["styles"]
+                .as_object()
+                .is_some_and(|s| s.contains_key(style_name))
+            {
+                warnings.push(json!({
+                    "code": "unknown-style",
+                    "severity": "error",
+                    "name": style_name,
+                    "from": from,
+                    "to": to,
+                    "expected": "объявленный style",
+                    "actual": style_name,
+                    "context": "apply",
+                    "message": format!("Неизвестный стиль {style_name}"),
                 }));
             }
         }
@@ -2741,7 +2874,7 @@ pub fn lint_document_with_context(source: &str, context: &crate::typecheck::Type
 
     // Dead token/i18n keys. Keys of a shared module file (no component or
     // design body) are its public API, so the lints only fire with a body.
-    for decl in dict_decls {
+    for decl in lint_decls.dicts {
         let used = if decl.i18n {
             &usage.i18n
         } else {
@@ -2788,9 +2921,20 @@ pub fn lint_document_with_context(source: &str, context: &crate::typecheck::Type
         }
     }
 
-    check_matches(&doc["nodes"], &mut warnings);
-    check_matches(&doc["matches"], &mut warnings);
-    check_matches(&doc["defaults"], &mut warnings);
+    for section in [
+        "nodes",
+        "matches",
+        "defaults",
+        "stateDefinitions",
+        "styles",
+        "tokens",
+        "i18n",
+        "slots",
+        "entries",
+        "states",
+    ] {
+        check_matches(&doc[section], &expression_spans, &mut warnings);
+    }
 
     warnings.extend(crate::typecheck::analyze(&doc, &expression_spans, context).diagnostics);
     warnings.sort_by_key(|warning| warning["from"].as_u64().unwrap_or(u64::MAX));

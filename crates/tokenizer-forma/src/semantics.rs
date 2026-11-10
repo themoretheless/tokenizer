@@ -543,9 +543,11 @@ pub fn matches_type(value: &V, ty: &str, enums: &V) -> bool {
         "Length" => {
             raw.as_f64().is_some_and(|n| n.is_finite() && n >= 0.)
                 || raw.as_str().is_some_and(|s| {
-                    ["px", "%", "rem", "em", "vw", "vh", "ch", "fr"]
-                        .iter()
-                        .any(|u| unit(s, u))
+                    [
+                        "px", "%", "rem", "em", "vw", "vh", "vmin", "vmax", "ch", "fr",
+                    ]
+                    .iter()
+                    .any(|u| unit(s, u))
                 })
         }
         "Duration" => raw.as_str().is_some_and(|s| unit(s, "ms") || unit(s, "s")),
@@ -560,7 +562,7 @@ pub fn matches_type(value: &V, ty: &str, enums: &V) -> bool {
         _ => false,
     }
 }
-fn check_constraints(val: &V, constraints: &V, path_label: &str) -> R<()> {
+pub(crate) fn check_constraints(val: &V, constraints: &V, path_label: &str) -> R<()> {
     if val.is_null() {
         return Ok(());
     }

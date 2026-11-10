@@ -56,7 +56,9 @@ fn callback(f: &js_sys::Function, path: &str, optional: bool) -> Result<V, Diagn
     let s = js_sys::JSON::stringify(&value)
         .map_err(|_| Diagnostic::new("resolver-error", "Resolver returned non-serializable data"))?
         .as_string()
-        .ok_or_else(|| Diagnostic::new("resolver-error", "Resolver returned non-serializable data"))?;
+        .ok_or_else(|| {
+            Diagnostic::new("resolver-error", "Resolver returned non-serializable data")
+        })?;
     serde_json::from_str(&s).map_err(|e| Diagnostic::new("invalid-input", e.to_string()))
 }
 #[wasm_bindgen]
@@ -87,7 +89,28 @@ pub fn operation_json(
  "evaluate"=>s::evaluate_value(arg("value"),props,state,&v["stack"].as_array().map(|a|a.iter().filter_map(|v|v.as_str().map(String::from)).collect::<Vec<_>>()).unwrap_or_default(),v["expandElements"]!=false,env),
  "evaluateProperties"=>s::evaluate_properties(arg("node"),props,state,env),"selectedProperties"=>s::selected_properties(arg("groups"),props,state,env),"selectedPropertySources"=>s::selected_sources(arg("groups"),props,state,env),
  "expandStructure"=>{let track_origins=arg("options")["trackOrigins"]==true;s::expand_structure(arg("nodes"),props,state,env,arg("options"),&mut |node,environment|{
- let Some(r)=resolver.as_ref()else{return Ok(V::Null)};let n=js_sys::JSON::parse(&node.to_string()).map_err(|_|Diagnostic::new("conversion-error","Node conversion"))?;let env_js=if track_origins{js_sys::JSON::parse(&environment.to_string()).map_err(|_|Diagnostic::new("conversion-error","Environment conversion"))?}else{JsValue::NULL};let value=r.call2(&JsValue::NULL,&n,&env_js).map_err(|e|Diagnostic::new("resolver-error",js_sys::Reflect::get(&e,&"message".into()).ok().and_then(|v|v.as_string()).unwrap_or_else(||"Markup host hook failed".into())))?;let text=js_sys::JSON::stringify(&value).map_err(|_|Diagnostic::new("conversion-error","Annotation conversion"))?.as_string().unwrap_or_else(||"{}".into());serde_json::from_str(&text).map_err(|e|Diagnostic::new("invalid-input",e.to_string()))
+ let Some(r)=resolver.as_ref()else{return Ok(V::Null)};let n=js_sys::JSON::parse(&node.to_string()).map_err(|_|Diagnostic::new("conversion-error","Node conversion"))?;let value=if track_origins{
+  let matches=&node["matches"];
+  let has_matches=matches.as_array().is_some_and(|a|!a.is_empty());
+  let sources=if has_matches{s::selected_sources(matches,props,state,environment)?}else{json!({})};
+  let selected=if has_matches{s::selected_properties(matches,props,state,environment)?}else{json!({})};
+  let mut refs=serde_json::Map::new();
+  for source_map in [&selected,&node["props"]]{
+   if let Some(obj)=source_map.as_object(){
+    for (k,val) in obj{
+     if val.is_object()||val.is_array(){
+      refs.insert(k.clone(),json!(e::references(val)));
+     }
+    }
+   }
+  }
+  let meta=json!({"sources":sources,"properties":selected,"references":V::Object(refs)});
+  let env_js=js_sys::JSON::parse(&environment.to_string()).map_err(|_|Diagnostic::new("conversion-error","Environment conversion"))?;
+  let meta_js=js_sys::JSON::parse(&meta.to_string()).map_err(|_|Diagnostic::new("conversion-error","Origin metadata conversion"))?;
+  r.call3(&JsValue::NULL,&n,&env_js,&meta_js)
+ }else{
+  r.call2(&JsValue::NULL,&n,&JsValue::NULL)
+ }.map_err(|e|Diagnostic::new("resolver-error",js_sys::Reflect::get(&e,&"message".into()).ok().and_then(|v|v.as_string()).unwrap_or_else(||"Markup host hook failed".into())))?;let text=js_sys::JSON::stringify(&value).map_err(|_|Diagnostic::new("conversion-error","Annotation conversion"))?.as_string().unwrap_or_else(||"{}".into());serde_json::from_str(&text).map_err(|e|Diagnostic::new("invalid-input",e.to_string()))
  })},
  "validateDesign"=>{s::validate_design(arg("component"),arg("design"))?;Ok(V::Null)},
  "designStatePatch"=>s::design_state_patch(arg("design"),v["stateName"].as_str()),
@@ -97,5 +120,7 @@ pub fn operation_json(
  _=>Err(Diagnostic::new("unknown-operation",format!("Unknown Forma operation {operation}")))
  }
     })();
-    result.map(|v| v.to_string()).map_err(|e| diagnostic_to_js(&e))
+    result
+        .map(|v| v.to_string())
+        .map_err(|e| diagnostic_to_js(&e))
 }

@@ -3,8 +3,8 @@ import {operation} from './rust.js';
 import {evaluateExpression} from './expressions.js';
 import {propertyOrigins} from './property-origins.js';
 export const evaluate=(value,props,state,stack=[],expandElements=true,environment={})=>operation('evaluate',{value,props,state,stack,expandElements,environment});
-export const selectedProperties=(groups=[],props,state,environment={})=>operation('selectedProperties',{groups,props,state,environment});
-export const selectedPropertySources=(groups=[],props,state,environment={})=>operation('selectedPropertySources',{groups,props,state,environment});
+export const selectedProperties=(groups=[],props,state,environment={})=>groups?.length?operation('selectedProperties',{groups,props,state,environment}):{};
+export const selectedPropertySources=(groups=[],props,state,environment={})=>groups?.length?operation('selectedPropertySources',{groups,props,state,environment}):{};
 export const evaluateProperties=(node,props,state,environment={})=>operation('evaluateProperties',{node,props,state,environment});
 export const validateContract=(definitions={},values,enums={},label='component')=>operation('validateContract',{definitions,values,enums,label});
 export const validateTypeName=(type,enums={})=>operation('validateTypeName',{type,enums});
@@ -13,12 +13,16 @@ export const matchesType=(value,type,enums={})=>operation('matchesType',{value,t
 // Source annotations and component traversal remain host responsibilities.
 export function expandStructure(nodes,props,state,environment={},options={}){
  const needHook=Boolean(options.trackOrigins)||typeof options.recursive==='function';
- const result=operation('expandStructure',{nodes,props,state,environment,options},needHook?(node,env)=>{
+ const result=operation('expandStructure',{nodes,props,state,environment,options},needHook?(node,env,originMeta)=>{
   const annotation={recursive:typeof options.recursive==='function'?options.recursive(node):options.recursive!==false};
   if(options.trackOrigins){
-   const sources={...selectedPropertySources(node.matches,props,state,env),...node.propertySources};
-   const raw={...Object.fromEntries((node.forward??[]).map(key=>[key,{expr:`props.${key}`}])) ,...selectedProperties(node.matches,props,state,env),...node.props,...Object.fromEntries(Object.entries(node.bindings??{}).map(([key,path])=>[key,{expr:path}]))};
-   annotation.propertyOrigins=Object.fromEntries(Object.entries(raw).map(([key,value])=>[key,propertyOrigins(value,sources[key]?{...sources[key],label:`${node.type} · экземпляр`}:node.source,props,options.propertySources)]));
+   const sources={...(originMeta?.sources??selectedPropertySources(node.matches,props,state,env)),...node.propertySources};
+   const raw={...Object.fromEntries((node.forward??[]).map(key=>[key,{expr:`props.${key}`}])) ,...(originMeta?.properties??selectedProperties(node.matches,props,state,env)),...node.props,...Object.fromEntries(Object.entries(node.bindings??{}).map(([key,path])=>[key,{expr:path}]))};
+   const precomputedRefs=originMeta?.references??{};
+   annotation.propertyOrigins=Object.fromEntries(Object.entries(raw).map(([key,value])=>{
+    const knownRefs=(node.bindings&&Object.hasOwn(node.bindings,key))?[node.bindings[key]]:Object.hasOwn(precomputedRefs,key)?precomputedRefs[key]:(node.forward?.includes(key)&&!Object.hasOwn(node.props??{},key))?[`props.${key}`]:undefined;
+    return [key,propertyOrigins(value,sources[key]?{...sources[key],label:`${node.type} · экземпляр`}:node.source,props,options.propertySources,{},undefined,knownRefs)];
+   }));
   }
   return annotation;
  }:undefined);
