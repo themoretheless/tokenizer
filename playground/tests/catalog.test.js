@@ -71,9 +71,9 @@ test('only native grammars advertise validation', () => {
     .filter((engine) => engine.family === 'format')
     .map((engine) => engine.id)
     .sort()
-  assert.deepEqual(claimers, [...formats, 'rush'].sort(), 'only native grammars claim validate')
-  assert.equal(claimers.length, 21)
-  for (const engine of catalog.engines.filter((item) => item.family === 'language' && item.id !== 'rush')) {
+  assert.deepEqual(claimers, [...formats, 'rush', 'forma'].sort(), 'only native grammars claim validate')
+  assert.equal(claimers.length, 22)
+  for (const engine of catalog.engines.filter((item) => item.family === 'language' && item.id !== 'rush' && item.id !== 'forma')) {
     assert.equal(engine.capabilities.includes('validate'), false, engine.id)
     assert.deepEqual(engine.capabilities, ['lex', 'parse', 'semantic'], engine.id)
   }
@@ -134,7 +134,7 @@ test('a picker sample is a valid document, and the language fixtures track it', 
       `${lang.id}: fixture drifted from the picker sample — run npm run export:language-fixtures`,
     )
   }
-  assert.equal(quiet.length, 70)
+  assert.equal(quiet.length, 71)
 })
 
 test('format vocabulary depth is measurable per engine', () => {
