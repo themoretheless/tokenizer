@@ -1229,8 +1229,17 @@ impl<'s> Runtime<'_, 's> {
         {
             let values = if variant.is_none() {
                 let mut owned_args = arguments.into_owned();
-                let Some(Value::Record(mut supplied)) = owned_args.pop() else {
-                    return self.error(span, "Struct constructor requires a record");
+                let mut supplied = match owned_args.pop() {
+                    Some(Value::Record(supplied)) => supplied,
+                    Some(Value::UserData(data))
+                        if data.variant.is_none() && data.type_name == *type_name =>
+                    {
+                        match data.values.first() {
+                            Some(Value::Record(fields)) => fields.clone(),
+                            _ => return self.error(span, "Struct constructor requires a record"),
+                        }
+                    }
+                    _ => return self.error(span, "Struct constructor requires a record"),
                 };
                 if supplied.len() != fields.len()
                     || (!Rc::ptr_eq(supplied.shape(), shape) && supplied.keys_slice() != &**shape)
@@ -1247,6 +1256,7 @@ impl<'s> Runtime<'_, 's> {
                     *val = v.coerce_for_type(ty);
                 }
                 supplied.set_shape(shape.clone());
+                self.validate_struct_constraints(type_name, &supplied, span)?;
                 vec![Value::Record(supplied)]
             } else {
                 arguments

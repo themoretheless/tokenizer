@@ -66,6 +66,16 @@ fn expr_bytes(expr: &Expr<'_>) -> usize {
                     .map(|(key, value)| expr_bytes(key) + expr_bytes(value))
                     .sum::<usize>()
         }
+        ExprKind::RecordUpdate { entries } => {
+            entries.capacity() * std::mem::size_of::<RecordUpdateEntry>()
+                + entries
+                    .iter()
+                    .map(|entry| match entry {
+                        RecordUpdateEntry::Spread(expr) => expr_bytes(expr),
+                        RecordUpdateEntry::Field(key, value) => expr_bytes(key) + expr_bytes(value),
+                    })
+                    .sum::<usize>()
+        }
         ExprKind::Pipeline { input, stages } => {
             expr_bytes(input)
                 + stages.capacity() * std::mem::size_of::<Expr>()
@@ -113,8 +123,13 @@ fn stmt_bytes(stmt: &Stmt<'_>) -> usize {
     let kind = match &stmt.kind {
         StmtKind::Show(expr) | StmtKind::Yield(expr) | StmtKind::Expr(expr) => expr_bytes(expr),
         StmtKind::Struct { fields, .. } => {
-            fields.capacity() * std::mem::size_of::<(Name, Type)>()
-                + fields.iter().map(|(_, ty)| type_bytes(ty)).sum::<usize>()
+            fields.capacity() * std::mem::size_of::<StructField>()
+                + fields
+                    .iter()
+                    .map(|field| {
+                        type_bytes(&field.ty) + field.constraint.as_ref().map_or(0, expr_bytes)
+                    })
+                    .sum::<usize>()
         }
         StmtKind::Enum { variants, .. } => {
             variants.capacity() * std::mem::size_of::<(Name, Vec<Type>)>()
@@ -150,8 +165,15 @@ fn stmt_bytes(stmt: &Stmt<'_>) -> usize {
                 + result.as_ref().map_or(0, type_bytes)
                 + block_bytes(body)
         }
-        StmtKind::Declaration { ty, value, .. } => {
-            ty.as_ref().map_or(0, type_bytes) + expr_bytes(value)
+        StmtKind::Declaration {
+            ty,
+            value,
+            constraint,
+            ..
+        } => {
+            ty.as_ref().map_or(0, type_bytes)
+                + expr_bytes(value)
+                + constraint.as_ref().map_or(0, expr_bytes)
         }
         StmtKind::Return(value) => value.as_ref().map_or(0, expr_bytes),
         StmtKind::If {
@@ -241,6 +263,7 @@ pub(crate) fn run(source: &str, lexed: Lexed, valid: bool, limits: InputLimits) 
         roles: Vec::new(),
         ast_bytes: lexed.tokens.len() * std::mem::size_of::<LexToken>(),
         sequence_depth: 0,
+        stop_at_where: false,
     };
     let items = parser.sequence(None, Some(0));
     // The top-level statement vector and roles are retained alongside the
@@ -304,6 +327,8 @@ struct Parser<'s> {
     /// Nesting of `sequence` calls; per-statement charging happens only at
     /// the top level so nested blocks are counted exactly once.
     sequence_depth: usize,
+    /// Suppresses command-style argument consumption of a trailing `where` clause on `param`.
+    stop_at_where: bool,
 }
 
 impl<'s> Parser<'s> {
@@ -534,7 +559,20 @@ impl<'s> Parser<'s> {
                 variants.push((member, types));
             } else {
                 self.expect(":");
-                fields.push((member, self.ty()));
+                let ty = self.ty();
+                let constraint = if !self.at("}") && self.at("where") && self.text_at(1) != ":" {
+                    let where_span = self.span();
+                    self.bump();
+                    self.roles.push((where_span, "keyword"));
+                    Some(self.required_expr(false))
+                } else {
+                    None
+                };
+                fields.push(StructField {
+                    name: member,
+                    ty,
+                    constraint,
+                });
             }
             if self.pos == before {
                 self.bump();
@@ -650,7 +688,10 @@ impl<'s> Parser<'s> {
                     let name = self.inline_name("variable");
                     let ty = if self.eat(":") { Some(self.ty()) } else { None };
                     self.expect_inline("=");
+                    let outer_where =
+                        std::mem::replace(&mut self.stop_at_where, keyword == "param");
                     let value = self.required_expr(false);
+                    self.stop_at_where = outer_where;
                     if ty.is_none()
                         && matches!(keyword, "let" | "const" | "mut")
                         && self.at("else")
@@ -673,6 +714,15 @@ impl<'s> Parser<'s> {
                             else_block,
                         }
                     } else {
+                        let constraint =
+                            if keyword == "param" && !self.newline() && self.at("where") {
+                                let where_span = self.span();
+                                self.bump();
+                                self.roles.push((where_span, "keyword"));
+                                Some(self.required_expr(false))
+                            } else {
+                                None
+                            };
                         StmtKind::Declaration {
                             role: match keyword {
                                 "param" => DeclarationRole::Parameter,
@@ -683,6 +733,7 @@ impl<'s> Parser<'s> {
                             constant,
                             ty,
                             value,
+                            constraint,
                         }
                     }
                 }
@@ -1178,6 +1229,9 @@ impl<'s> Parser<'s> {
         left
     }
     fn argument_start(&self) -> bool {
+        if self.stop_at_where && self.at("where") {
+            return false;
+        }
         self.peek().is_some_and(|t| {
             matches!(
                 t.raw.kind,
@@ -1375,7 +1429,9 @@ impl<'s> Parser<'s> {
             };
         }
         if self.eat("(") {
+            let outer_where = std::mem::replace(&mut self.stop_at_where, false);
             if self.eat(")") {
+                self.stop_at_where = outer_where;
                 return Expr {
                     span: Span::new(span.start, self.end()),
                     kind: ExprKind::Tuple(vec![]),
@@ -1392,30 +1448,51 @@ impl<'s> Parser<'s> {
                     }
                 }
                 self.expect(")");
+                self.stop_at_where = outer_where;
                 return Expr {
                     span: Span::new(span.start, self.end()),
                     kind: ExprKind::Tuple(values),
                 };
             }
             self.expect(")");
+            self.stop_at_where = outer_where;
             value.span = Span::new(span.start, self.end().max(span.end));
             return value;
         }
         if self.eat("[") {
+            let outer_where = std::mem::replace(&mut self.stop_at_where, false);
             let elements = self.arguments("]");
+            self.stop_at_where = outer_where;
             return Expr {
                 span: Span::new(span.start, self.end().max(span.end)),
                 kind: ExprKind::List(elements),
             };
         }
         if self.eat("{") {
+            let outer_where = std::mem::replace(&mut self.stop_at_where, false);
             let mut entries = Vec::new();
+            let mut update_entries: Option<Vec<RecordUpdateEntry<'s>>> = None;
             while self.peek().is_some() && !self.at("}") {
                 let before = self.pos;
-                let key = self.expr(0, true, false);
-                self.expect(":");
-                let value = self.required_expr(true);
-                entries.push((key, value));
+                if self.eat("..") {
+                    let spread = self.required_expr(true);
+                    let list = update_entries.get_or_insert_with(|| {
+                        entries
+                            .drain(..)
+                            .map(|(k, v)| RecordUpdateEntry::Field(k, v))
+                            .collect()
+                    });
+                    list.push(RecordUpdateEntry::Spread(spread));
+                } else {
+                    let key = self.expr(0, true, false);
+                    self.expect(":");
+                    let value = self.required_expr(true);
+                    if let Some(list) = &mut update_entries {
+                        list.push(RecordUpdateEntry::Field(key, value));
+                    } else {
+                        entries.push((key, value));
+                    }
+                }
                 if self.pos == before {
                     self.bump();
                     break;
@@ -1425,9 +1502,14 @@ impl<'s> Parser<'s> {
                 }
             }
             self.expect("}");
+            self.stop_at_where = outer_where;
+            let kind = match update_entries {
+                Some(entries) => ExprKind::RecordUpdate { entries },
+                None => ExprKind::Map(entries),
+            };
             return Expr {
                 span: Span::new(span.start, self.end().max(span.end)),
-                kind: ExprKind::Map(entries),
+                kind,
             };
         }
         let kind = match self.peek().map(|t| t.raw.kind) {
@@ -1996,6 +2078,17 @@ fn offset_expr_spans(expr: &mut Expr<'_>, offset: usize) {
             for (k, v) in entries {
                 offset_expr_spans(k, offset);
                 offset_expr_spans(v, offset);
+            }
+        }
+        ExprKind::RecordUpdate { entries } => {
+            for entry in entries {
+                match entry {
+                    RecordUpdateEntry::Spread(expr) => offset_expr_spans(expr, offset),
+                    RecordUpdateEntry::Field(k, v) => {
+                        offset_expr_spans(k, offset);
+                        offset_expr_spans(v, offset);
+                    }
+                }
             }
         }
         ExprKind::Pipeline { input, stages } => {

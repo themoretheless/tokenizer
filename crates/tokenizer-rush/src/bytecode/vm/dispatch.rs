@@ -1,14 +1,25 @@
 //! Core bytecode instruction dispatch loop.
 use super::builtins::is_higher_order_builtin;
-use super::{CallFrame, Vm};
+use super::{CallFrame, StructVmContract, Vm};
 use crate::bytecode::iterator::BytecodeIterator;
 use crate::bytecode::opcode::{BytecodeClosure, Opcode, PathTarget, Upvalue};
 use crate::runtime::builtins::{eval_pure_builtin, lookup_builtin};
 use crate::runtime::ops::{format_value_for_display, is_truthy};
 use crate::{RecordMap, RuntimeError, UserData, Value};
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
+
+#[inline]
+fn contains_userdata(value: &Value<'static>) -> bool {
+    match value {
+        Value::UserData(_) => true,
+        Value::Record(fields) => fields.values_slice().iter().any(contains_userdata),
+        Value::List(items) | Value::Tuple(items) => items.iter().any(contains_userdata),
+        _ => false,
+    }
+}
 
 impl<'c> Vm<'c> {
     pub(super) fn execute_to_depth(
@@ -186,24 +197,59 @@ impl<'c> Vm<'c> {
                     let chunk = &self.frames[frame_idx].closure.function.chunk;
                     let field_name = Self::const_str(chunk, field_idx);
                     let ic_cell = &chunk.ic_slots[ip];
-                    let mut borrow = cell.borrow_mut();
-                    let err = match &mut *borrow {
-                        Upvalue::Open(s) => {
-                            let slot = *s;
-                            Self::mutate_member(
-                                &mut self.stack[slot],
-                                field_name,
-                                val.clone(),
-                                Some(ic_cell),
-                            )
-                        }
-                        Upvalue::Closed(c) => {
-                            Self::mutate_member(c, field_name, val.clone(), Some(ic_cell))
+                    let check_structs = !self.struct_contracts.is_empty();
+                    let mut backup = None;
+                    let err = {
+                        let mut borrow = cell.borrow_mut();
+                        match &mut *borrow {
+                            Upvalue::Open(s) => {
+                                let slot = *s;
+                                if check_structs && contains_userdata(&self.stack[slot]) {
+                                    backup = Some(self.stack[slot].clone());
+                                }
+                                Self::mutate_member(
+                                    &mut self.stack[slot],
+                                    field_name,
+                                    val.clone(),
+                                    Some(ic_cell),
+                                )
+                            }
+                            Upvalue::Closed(c) => {
+                                if check_structs && contains_userdata(c) {
+                                    backup = Some(c.clone());
+                                }
+                                Self::mutate_member(c, field_name, val.clone(), Some(ic_cell))
+                            }
                         }
                     };
-                    drop(borrow);
                     if let Some(msg) = err {
                         return Err(self.error(span, msg));
+                    }
+                    if let Some(prev) = backup {
+                        let mut container = {
+                            let borrow = cell.borrow();
+                            match &*borrow {
+                                Upvalue::Open(s) => self.stack[*s].clone(),
+                                Upvalue::Closed(c) => c.clone(),
+                            }
+                        };
+                        match self.validate_container_structs(&mut container, span) {
+                            Ok(()) => {
+                                let mut borrow = cell.borrow_mut();
+                                match &mut *borrow {
+                                    Upvalue::Open(s) => self.stack[*s] = container,
+                                    Upvalue::Closed(c) => *c = container,
+                                }
+                            }
+                            Err(e) => {
+                                let mut borrow = cell.borrow_mut();
+                                match &mut *borrow {
+                                    Upvalue::Open(s) => self.stack[*s] = prev,
+                                    Upvalue::Closed(c) => *c = prev,
+                                }
+                                return Err(e);
+                            }
+                        }
                     }
                     self.stack.push(val);
                 }
@@ -265,34 +311,98 @@ impl<'c> Vm<'c> {
                     let depth = depth as usize;
                     let keys_start = self.stack.len() - depth;
                     let keys: Vec<Value<'static>> = self.stack.drain(keys_start..).collect();
-                    let err = match target {
+                    let check_structs = !self.struct_contracts.is_empty();
+                    match target {
                         PathTarget::Local(slot) => {
                             let target_slot = self.frames[frame_idx].stack_base + slot as usize;
-                            Self::mutate_path_vm(
+                            let backup = (check_structs
+                                && contains_userdata(&self.stack[target_slot]))
+                            .then(|| self.stack[target_slot].clone());
+                            if let Some(msg) = Self::mutate_path_vm(
                                 &mut self.stack[target_slot],
                                 &keys,
                                 member_mask,
                                 0,
                                 val.clone(),
-                            )
+                            ) {
+                                if let Some(prev) = backup {
+                                    self.stack[target_slot] = prev;
+                                }
+                                return Err(self.error(span, msg));
+                            }
+                            if let Some(prev) = backup {
+                                let mut updated = self.stack[target_slot].clone();
+                                match self.validate_container_structs(&mut updated, span) {
+                                    Ok(()) => self.stack[target_slot] = updated,
+                                    Err(e) => {
+                                        self.stack[target_slot] = prev;
+                                        return Err(e);
+                                    }
+                                }
+                            }
                         }
                         PathTarget::Upvalue(upval_idx) => {
                             let cell =
                                 self.frames[frame_idx].closure.upvalues[upval_idx as usize].clone();
-                            let mut borrow = cell.borrow_mut();
-                            match &mut *borrow {
-                                Upvalue::Open(s) => {
-                                    let slot = *s;
-                                    Self::mutate_path_vm(
-                                        &mut self.stack[slot],
-                                        &keys,
-                                        member_mask,
-                                        0,
-                                        val.clone(),
-                                    )
+                            let mut backup = None;
+                            let err = {
+                                let mut borrow = cell.borrow_mut();
+                                match &mut *borrow {
+                                    Upvalue::Open(s) => {
+                                        let slot = *s;
+                                        if check_structs && contains_userdata(&self.stack[slot]) {
+                                            backup = Some(self.stack[slot].clone());
+                                        }
+                                        Self::mutate_path_vm(
+                                            &mut self.stack[slot],
+                                            &keys,
+                                            member_mask,
+                                            0,
+                                            val.clone(),
+                                        )
+                                    }
+                                    Upvalue::Closed(c) => {
+                                        if check_structs && contains_userdata(c) {
+                                            backup = Some(c.clone());
+                                        }
+                                        Self::mutate_path_vm(c, &keys, member_mask, 0, val.clone())
+                                    }
                                 }
-                                Upvalue::Closed(c) => {
-                                    Self::mutate_path_vm(c, &keys, member_mask, 0, val.clone())
+                            };
+                            if let Some(msg) = err {
+                                if let Some(prev) = backup {
+                                    let mut borrow = cell.borrow_mut();
+                                    match &mut *borrow {
+                                        Upvalue::Open(s) => self.stack[*s] = prev,
+                                        Upvalue::Closed(c) => *c = prev,
+                                    }
+                                }
+                                return Err(self.error(span, msg));
+                            }
+                            if let Some(prev) = backup {
+                                let mut container = {
+                                    let borrow = cell.borrow();
+                                    match &*borrow {
+                                        Upvalue::Open(s) => self.stack[*s].clone(),
+                                        Upvalue::Closed(c) => c.clone(),
+                                    }
+                                };
+                                match self.validate_container_structs(&mut container, span) {
+                                    Ok(()) => {
+                                        let mut borrow = cell.borrow_mut();
+                                        match &mut *borrow {
+                                            Upvalue::Open(s) => self.stack[*s] = container,
+                                            Upvalue::Closed(c) => *c = container,
+                                        }
+                                    }
+                                    Err(e) => {
+                                        let mut borrow = cell.borrow_mut();
+                                        match &mut *borrow {
+                                            Upvalue::Open(s) => self.stack[*s] = prev,
+                                            Upvalue::Closed(c) => *c = prev,
+                                        }
+                                        return Err(e);
+                                    }
                                 }
                             }
                         }
@@ -302,14 +412,35 @@ impl<'c> Vm<'c> {
                                 name_idx,
                             )
                             .to_string();
-                            let Some(root) = self.globals.get_mut(&name) else {
-                                return Err(self.error(span, format!("Unknown name: {name}")));
+                            let backup = {
+                                let Some(root) = self.globals.get_mut(&name) else {
+                                    return Err(self.error(span, format!("Unknown name: {name}")));
+                                };
+                                let bk = (check_structs && contains_userdata(root))
+                                    .then(|| root.clone());
+                                if let Some(msg) =
+                                    Self::mutate_path_vm(root, &keys, member_mask, 0, val.clone())
+                                {
+                                    if let Some(prev) = bk {
+                                        *root = prev;
+                                    }
+                                    return Err(self.error(span, msg));
+                                }
+                                bk
                             };
-                            Self::mutate_path_vm(root, &keys, member_mask, 0, val.clone())
+                            if let Some(prev) = backup {
+                                let mut updated = self.globals.get(&name).unwrap().clone();
+                                match self.validate_container_structs(&mut updated, span) {
+                                    Ok(()) => {
+                                        self.globals.insert(name, updated);
+                                    }
+                                    Err(e) => {
+                                        self.globals.insert(name, prev);
+                                        return Err(e);
+                                    }
+                                }
+                            }
                         }
-                    };
-                    if let Some(msg) = err {
-                        return Err(self.error(span, msg));
                     }
                     self.stack.push(val);
                 }
@@ -578,6 +709,9 @@ impl<'c> Vm<'c> {
                 Opcode::MemberSet(slot, field_idx) => {
                     let val = self.stack.pop().unwrap();
                     let target_slot = self.frames[frame_idx].stack_base + slot as usize;
+                    let backup = (!self.struct_contracts.is_empty()
+                        && matches!(self.stack[target_slot], Value::UserData(_)))
+                    .then(|| self.stack[target_slot].clone());
                     let chunk = &self.frames[frame_idx].closure.function.chunk;
                     let field_name = Self::const_str(chunk, field_idx);
                     let ic_cell = &chunk.ic_slots[ip];
@@ -589,11 +723,24 @@ impl<'c> Vm<'c> {
                     ) {
                         return Err(self.error(span, msg));
                     }
+                    if let Some(prev) = backup {
+                        let mut updated = self.stack[target_slot].clone();
+                        match self.validate_container_structs(&mut updated, span) {
+                            Ok(()) => self.stack[target_slot] = updated,
+                            Err(e) => {
+                                self.stack[target_slot] = prev;
+                                return Err(e);
+                            }
+                        }
+                    }
                     self.stack.push(val);
                 }
                 Opcode::StoreMemberSet(slot, field_idx) => {
                     let val = self.stack.pop().unwrap();
                     let target_slot = self.frames[frame_idx].stack_base + slot as usize;
+                    let backup = (!self.struct_contracts.is_empty()
+                        && matches!(self.stack[target_slot], Value::UserData(_)))
+                    .then(|| self.stack[target_slot].clone());
                     let chunk = &self.frames[frame_idx].closure.function.chunk;
                     let field_name = Self::const_str(chunk, field_idx);
                     let ic_cell = &chunk.ic_slots[ip];
@@ -604,6 +751,16 @@ impl<'c> Vm<'c> {
                         Some(ic_cell),
                     ) {
                         return Err(self.error(span, msg));
+                    }
+                    if let Some(prev) = backup {
+                        let mut updated = self.stack[target_slot].clone();
+                        match self.validate_container_structs(&mut updated, span) {
+                            Ok(()) => self.stack[target_slot] = updated,
+                            Err(e) => {
+                                self.stack[target_slot] = prev;
+                                return Err(e);
+                            }
+                        }
                     }
                 }
                 Opcode::Interpolate(count) => {
@@ -875,12 +1032,232 @@ impl<'c> Vm<'c> {
                     let type_name = Self::const_str(chunk, type_name_idx).to_string();
                     let variant = variant_idx.map(|idx| Self::const_str(chunk, idx).to_string());
                     let start = self.stack.len() - arity;
-                    let values = self.stack.drain(start..).collect();
+                    let mut values: Vec<Value<'static>> = self.stack.drain(start..).collect();
+                    if variant.is_none() {
+                        let mut rec = match values.pop() {
+                            Some(Value::Record(fields)) => fields,
+                            Some(Value::UserData(existing))
+                                if existing.variant.is_none()
+                                    && existing.type_name == type_name =>
+                            {
+                                let mut vs = existing.values;
+                                match vs.pop() {
+                                    Some(Value::Record(fields)) => fields,
+                                    _ => {
+                                        return Err(self
+                                            .error(span, "Struct constructor requires a record"));
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(
+                                    self.error(span, "Struct constructor requires a record")
+                                );
+                            }
+                        };
+                        self.validate_struct_record(&type_name, &mut rec, span)?;
+                        values = vec![Value::Record(rec)];
+                    }
                     self.stack.push(Value::UserData(Box::new(UserData {
                         type_name,
                         variant,
                         values,
                     })));
+                }
+                Opcode::AssertWhere(msg_idx) => {
+                    let cond = self.stack.pop().unwrap();
+                    match cond {
+                        Value::Bool(true) => {}
+                        Value::Bool(false) => {
+                            let msg = Self::const_str(
+                                &self.frames[frame_idx].closure.function.chunk,
+                                msg_idx,
+                            )
+                            .to_string();
+                            return Err(self.error(span, msg));
+                        }
+                        _ => {
+                            return Err(
+                                self.error(span, "Where constraint must evaluate to a boolean")
+                            );
+                        }
+                    }
+                }
+                Opcode::RegisterStruct {
+                    desc_idx,
+                    has_validator,
+                } => {
+                    let validator = if has_validator {
+                        match self.stack.pop().unwrap() {
+                            Value::BytecodeFunction(closure) => {
+                                self.has_struct_validators = true;
+                                Some(closure)
+                            }
+                            _ => return Err(self.error(span, "Expected struct validator closure")),
+                        }
+                    } else {
+                        None
+                    };
+                    let desc = self.frames[frame_idx]
+                        .closure
+                        .function
+                        .chunk
+                        .struct_descriptors[desc_idx as usize]
+                        .clone();
+                    let name = desc.type_name.clone();
+                    self.struct_contracts
+                        .insert(name, StructVmContract { desc, validator });
+                }
+                Opcode::RecordUpdate { count, spread_mask } => {
+                    let count = count as usize;
+                    let mut total_slots = 0usize;
+                    for i in 0..count {
+                        total_slots += if (spread_mask & (1u64 << i)) != 0 {
+                            1
+                        } else {
+                            2
+                        };
+                    }
+                    let start = self.stack.len() - total_slots;
+                    let raw_vec: Vec<Value<'static>> = self.stack.drain(start..).collect();
+                    let mut raw = raw_vec.into_iter();
+
+                    let first_is_spread = count > 0 && (spread_mask & 1) != 0;
+                    if first_is_spread {
+                        let first_val = raw.next().unwrap();
+                        match first_val {
+                            Value::UserData(data) if data.variant.is_none() => {
+                                let UserData {
+                                    type_name,
+                                    mut values,
+                                    ..
+                                } = *data;
+                                let Some(Value::Record(mut fields)) = values.pop() else {
+                                    return Err(self.error(span, "Invalid struct value"));
+                                };
+                                for i in 1..count {
+                                    if (spread_mask & (1u64 << i)) != 0 {
+                                        let other = raw.next().unwrap();
+                                        let overlay = match other {
+                                            Value::Record(rec) => rec,
+                                            Value::UserData(other_data)
+                                                if other_data.variant.is_none()
+                                                    && other_data.type_name == type_name =>
+                                            {
+                                                let mut vs = other_data.values;
+                                                let Some(Value::Record(rec)) = vs.pop() else {
+                                                    return Err(
+                                                        self.error(span, "Invalid struct value")
+                                                    );
+                                                };
+                                                rec
+                                            }
+                                            _ => {
+                                                return Err(self.error(
+                                                    span,
+                                                    "Struct update spread requires a record or matching struct",
+                                                ));
+                                            }
+                                        };
+                                        for (k, v) in overlay {
+                                            let Some(slot) = fields.get_mut(&k) else {
+                                                return Err(self.error(
+                                                    span,
+                                                    format!("Unknown struct field: {k}"),
+                                                ));
+                                            };
+                                            *slot = v;
+                                        }
+                                    } else {
+                                        let Value::String(k) = raw.next().unwrap() else {
+                                            return Err(self.error(
+                                                span,
+                                                "Record key must be a name or string",
+                                            ));
+                                        };
+                                        let v = raw.next().unwrap();
+                                        let Some(slot) = fields.get_mut(&k) else {
+                                            return Err(self.error(
+                                                span,
+                                                format!("Unknown struct field: {k}"),
+                                            ));
+                                        };
+                                        *slot = v;
+                                    }
+                                }
+                                drop(raw);
+                                self.validate_struct_record(&type_name, &mut fields, span)?;
+                                self.stack.push(Value::UserData(Box::new(UserData {
+                                    type_name,
+                                    variant: None,
+                                    values: vec![Value::Record(fields)],
+                                })));
+                                continue;
+                            }
+                            Value::Record(rec) => {
+                                let mut map: BTreeMap<String, Value<'static>> =
+                                    rec.into_iter().collect();
+                                for i in 1..count {
+                                    if (spread_mask & (1u64 << i)) != 0 {
+                                        let Value::Record(other) = raw.next().unwrap() else {
+                                            return Err(self.error(
+                                                span,
+                                                "Spread operand in record update must be a record",
+                                            ));
+                                        };
+                                        for (k, v) in other {
+                                            map.insert(k, v);
+                                        }
+                                    } else {
+                                        let Value::String(k) = raw.next().unwrap() else {
+                                            return Err(self.error(
+                                                span,
+                                                "Record key must be a name or string",
+                                            ));
+                                        };
+                                        let v = raw.next().unwrap();
+                                        map.insert(k, v);
+                                    }
+                                }
+                                drop(raw);
+                                let value = Value::Record(RecordMap::from_iter(map));
+                                self.charge_produced(&value, span)?;
+                                self.stack.push(value);
+                                continue;
+                            }
+                            _ => {
+                                return Err(self.error(
+                                    span,
+                                    "Spread operand in record update must be a record or struct",
+                                ));
+                            }
+                        }
+                    }
+
+                    let mut map: BTreeMap<String, Value<'static>> = BTreeMap::new();
+                    for i in 0..count {
+                        if (spread_mask & (1u64 << i)) != 0 {
+                            let Value::Record(other) = raw.next().unwrap() else {
+                                return Err(self.error(
+                                    span,
+                                    "Spread operand in record update must be a record",
+                                ));
+                            };
+                            for (k, v) in other {
+                                map.insert(k, v);
+                            }
+                        } else {
+                            let Value::String(k) = raw.next().unwrap() else {
+                                return Err(self.error(span, "Record key must be a name or string"));
+                            };
+                            let v = raw.next().unwrap();
+                            map.insert(k, v);
+                        }
+                    }
+                    drop(raw);
+                    let value = Value::Record(RecordMap::from_iter(map));
+                    self.charge_produced(&value, span)?;
+                    self.stack.push(value);
                 }
                 Opcode::IterInit(slot) => {
                     let val = self.stack.pop().unwrap();

@@ -104,28 +104,33 @@ pub(super) fn read_path<'s>(
                 }
             }
             Value::Vector(components) => {
-                let axis = match *field_name {
-                    "x" => 0,
-                    "y" => 1,
-                    "z" => 2,
-                    "w" => 3,
-                    _ => return Err(path_error(module, *step_span, "Unknown vector component")),
+                let Some(swizzle) = crate::catalog::parse_vector_swizzle(field_name) else {
+                    return Err(path_error(module, *step_span, "Unknown vector component"));
                 };
-                if axis >= components.len() {
+                if swizzle.max_index() >= components.len() {
                     return Err(path_error(
                         module,
                         *step_span,
                         "Vector component out of bounds",
                     ));
                 }
-                if rest.is_empty() {
-                    Ok(Value::Number(components[axis]))
-                } else {
-                    Err(path_error(
+                if !rest.is_empty() {
+                    return Err(path_error(
                         module,
                         *step_span,
                         "Vector components do not support nested access",
-                    ))
+                    ));
+                }
+                if swizzle.len == 1 {
+                    Ok(Value::Number(components[swizzle.indices[0] as usize]))
+                } else {
+                    let mut buf = [0.0f64; 4];
+                    for (i, slot) in buf.iter_mut().take(swizzle.len as usize).enumerate() {
+                        *slot = components[swizzle.indices[i] as usize];
+                    }
+                    Ok(Value::Vector(crate::InlineVec::from_slice(
+                        &buf[..swizzle.len as usize],
+                    )))
                 }
             }
             _ => Err(path_error(
@@ -358,21 +363,31 @@ pub(super) fn mutate_path<'s>(
                 }
             }
             Value::Vector(components) => {
-                let axis = match *field_name {
-                    "x" => 0,
-                    "y" => 1,
-                    "z" => 2,
-                    "w" => 3,
-                    _ => return Err(path_error(module, *step_span, "Unknown vector component")),
+                let Some(swizzle) = crate::catalog::parse_vector_swizzle(field_name) else {
+                    return Err(path_error(module, *step_span, "Unknown vector component"));
                 };
-                if axis >= components.len() {
+                if swizzle.max_index() >= components.len() {
                     return Err(path_error(
                         module,
                         *step_span,
                         "Vector component out of bounds",
                     ));
                 }
-                if rest.is_empty() {
+                if !rest.is_empty() {
+                    return Err(path_error(
+                        module,
+                        *step_span,
+                        "Vector components do not support nested access",
+                    ));
+                }
+                if swizzle.has_duplicates() {
+                    return Err(path_error(
+                        module,
+                        *step_span,
+                        "Vector swizzle assignment cannot repeat components",
+                    ));
+                }
+                if swizzle.len == 1 {
                     let Some(val) = assigned.as_f64() else {
                         return Err(path_error(
                             module,
@@ -383,14 +398,30 @@ pub(super) fn mutate_path<'s>(
                     if !val.is_finite() {
                         return Err(path_error(module, span, "Non-finite vector result"));
                     }
-                    components[axis] = val;
+                    components[swizzle.indices[0] as usize] = val;
                     Ok(())
                 } else {
-                    Err(path_error(
-                        module,
-                        *step_span,
-                        "Vector components do not support nested access",
-                    ))
+                    let Value::Vector(rhs) = assigned else {
+                        return Err(path_error(
+                            module,
+                            span,
+                            format!("Vector swizzle assignment requires vec{}", swizzle.len),
+                        ));
+                    };
+                    if rhs.len() != swizzle.len as usize {
+                        return Err(path_error(
+                            module,
+                            span,
+                            format!("Vector swizzle assignment requires vec{}", swizzle.len),
+                        ));
+                    }
+                    if rhs.iter().any(|v| !v.is_finite()) {
+                        return Err(path_error(module, span, "Non-finite vector result"));
+                    }
+                    for i in 0..swizzle.len as usize {
+                        components[swizzle.indices[i] as usize] = rhs[i];
+                    }
+                    Ok(())
                 }
             }
             _ => Err(path_error(
@@ -429,5 +460,46 @@ impl<'s> Runtime<'_, 's> {
             }
             _ => self.error(expr.span, "Assignment requires a variable, member or index"),
         }
+    }
+}
+
+pub(super) fn collect_mutated_structs<'s>(
+    current: &Value<'s>,
+    steps: &[AccessStep<'s>],
+    out: &mut Vec<(String, super::RecordMap<'s>)>,
+) {
+    if let Value::UserData(data) = current
+        && data.variant.is_none()
+        && let Some(Value::Record(fields)) = data.values.first()
+    {
+        out.push((data.type_name.clone(), fields.clone()));
+    }
+    let Some((head, rest)) = steps.split_first() else {
+        return;
+    };
+    match (head, current) {
+        (AccessStep::Index(idx, _), Value::List(items) | Value::Tuple(items)) => {
+            if let Some(i) = idx.as_usize_index().filter(|&i| i < items.len()) {
+                collect_mutated_structs(&items[i], rest, out);
+            }
+        }
+        (AccessStep::Index(Value::String(key), _), Value::Record(fields)) => {
+            if let Some(sub) = fields.get(key) {
+                collect_mutated_structs(sub, rest, out);
+            }
+        }
+        (AccessStep::Member(field, _), Value::Record(fields)) => {
+            if let Some(sub) = fields.get(field) {
+                collect_mutated_structs(sub, rest, out);
+            }
+        }
+        (AccessStep::Member(field, _), Value::UserData(data)) if data.variant.is_none() => {
+            if let Some(Value::Record(fields)) = data.values.first()
+                && let Some(sub) = fields.get(field)
+            {
+                collect_mutated_structs(sub, rest, out);
+            }
+        }
+        _ => {}
     }
 }

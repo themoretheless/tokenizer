@@ -84,8 +84,15 @@ legacy spellings. `Geometry`, `Row`, `T`, `print`, `where`, `select`, `count`,
   at compile time and runtime inside transactions); opt pure/read-only callbacks in
   with `HostRegistration::with_transactional(true)`.
 - Names, decimal numbers, strings, `true`, `false`, `null`, lists, maps,
-  calls, member access and indexing. A map uses `{key: value, ...}`.
-- Assignment to a name, member or index with `=`, `+=`, `-=`, `*=`, `/=`, `%=`.
+  functional record/struct spread updates (`{ ..base, key: value }`),
+  calls, member access, vector swizzles, and indexing. A map uses `{key: value, ...}`;
+  when one or more `..expr` spread entries appear, `{ ..base, a: 1 }` evaluates left-to-right
+  without mutating `base` (preserving nominal identity, field types, and `where` constraints
+  when the leading spread is a `struct` value).
+- Assignment to a name, member, vector swizzle (`v.xz = vec2(1, 2)`, `v.rgb *= 0.5`),
+  or index with `=`, `+=`, `-=`, `*=`, `/=`, `%=`. Vectors (`vec2`, `vec3`, `vec4`) support
+  WGSL-style `1..=4` swizzles in either `xyzw` or `rgba` namespace (never mixed); write
+  swizzles reject duplicate lanes (`swizzle-assignment`) at compile time and runtime.
   Assignment is a syntax node; const mutation and type compatibility require a
   later semantic pass.
 - Precedence from low to high: assignment; pipeline; `or`/`||`; `and`/`&&`;
@@ -122,7 +129,10 @@ let label = match status {
 
 A pipeline preserves an input expression and ordered stages. Each stage must
 be a function name, member or call. Runtime passes the input value once as the
-first argument of each successive stage; lists remain single values.
+first argument of each successive stage; lists remain single values. When a call
+stage contains one or more bare `_` arguments (for example `x | clamp(5, 0, _)`
+or `v | dot(_, _)`), the piped input is evaluated once and substituted into every
+bare `_` slot instead of prepending at index 0.
 
 A match contains a scrutinee and `pattern => expression` arms in braces.
 An arm value starts on the same line as `=>`; use parentheses for a multiline
@@ -1525,15 +1535,25 @@ per-collection and execution limits remain independent.
 ### User-defined data types
 
 ```rush
-struct Settings { enabled: bool, speed: number }
+struct Settings {
+    enabled: bool,
+    speed: number where speed >= 0 && speed <= 100,
+}
 enum State { Idle, Moving(vec3) }
 let settings = Settings({enabled: true, speed: 3})
+let faster = { ..settings, speed: 10 }
 let state = State.Moving(vec3(1, 2, 3))
-match state { State.Idle() => 0, State.Moving(v) => v.x * settings.speed }
+match state { State.Idle() => 0, State.Moving(v) => v.x * faster.speed }
 ```
 
 Module-level declarations introduce nominal types; constructors validate exact
-struct fields and typed enum payloads. Type annotations compose with list, tuple,
+struct fields, typed enum payloads, and optional field-level `where <bool-expr>`
+refinement constraints (including cross-field invariants and forward calls to
+module functions). Struct `where` constraints are enforced on `Struct({...})`
+construction, `{ ..instance, field: value }` functional updates, and mutable
+field writes (`s.field = ...`), rolling back the mutated slot atomically on
+violation. `where` remains a contextual keyword and can still be used as an
+ordinary identifier, field name, or pipeline function. Type annotations compose with list, tuple,
 Option and Result. `Program::compile` checks constructors, field access and
 exhaustive matches for known finite domains, including unused functions/branches.
 Guards and refutable payload patterns need additional covering arms. Unknown
@@ -1607,11 +1627,16 @@ bindings. Imported interfaces are checked before model initialization.
 ```rush
 node result = scale(3)
 fn scale(x: number) -> number { return x * width }
-param width: number = 2
+param width: number = 2 where width > 0 && width <= 100
 show result
 ```
 
 Run a model with `rush --model model.r width=4`. The result is `Number(12.0)`.
+`param` declarations support optional `where <bool-expr>` refinement constraints
+checked statically as `bool` and enforced on initial evaluation, host input
+overrides (`Program::instantiate`), Bytecode VM execution, and
+`ModelInstance::set_parameter` (which rolls back atomically before recomputing
+any dependent node if the constraint fails).
 The Rust API keeps a `ModelInstance` alive between updates:
 `set_parameter(name, value, limits)` returns the names recomputed in dependency
 order. Only transitive dependents run, including function declarations whose

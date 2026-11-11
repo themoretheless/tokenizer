@@ -68,14 +68,23 @@ impl<'c> Vm<'c> {
                 }
             }
             Value::Vector(v) => {
-                let val = match field_name {
-                    "x" if !v.is_empty() => v[0],
-                    "y" if v.len() > 1 => v[1],
-                    "z" if v.len() > 2 => v[2],
-                    "w" if v.len() > 3 => v[3],
-                    _ => return Err(format!("Vector field '{field_name}' not found")),
+                let Some(swizzle) = crate::catalog::parse_vector_swizzle(field_name) else {
+                    return Err(format!("Vector field '{field_name}' not found"));
                 };
-                Ok(Value::Number(val))
+                if swizzle.max_index() >= v.len() {
+                    return Err(format!("Vector field '{field_name}' out of bounds"));
+                }
+                if swizzle.len == 1 {
+                    Ok(Value::Number(v[swizzle.indices[0] as usize]))
+                } else {
+                    let mut buf = [0.0f64; 4];
+                    for (i, slot) in buf.iter_mut().take(swizzle.len as usize).enumerate() {
+                        *slot = v[swizzle.indices[i] as usize];
+                    }
+                    Ok(Value::Vector(crate::InlineVec::from_slice(
+                        &buf[..swizzle.len as usize],
+                    )))
+                }
             }
             _ => Err("Cannot access member on value".to_string()),
         }
@@ -175,24 +184,39 @@ impl<'c> Vm<'c> {
                 }
             }
             Value::Vector(components) => {
-                let axis = match field_name {
-                    "x" => 0,
-                    "y" => 1,
-                    "z" => 2,
-                    "w" => 3,
-                    _ => return Some("Unknown vector component"),
+                let Some(swizzle) = crate::catalog::parse_vector_swizzle(field_name) else {
+                    return Some("Unknown vector component");
                 };
-                if axis >= components.len() {
+                if swizzle.max_index() >= components.len() {
                     return Some("Vector component out of bounds");
                 }
-                let Some(num) = val.as_f64() else {
-                    return Some("Vector component must be a number");
-                };
-                if !num.is_finite() {
-                    return Some("Non-finite vector result");
+                if swizzle.has_duplicates() {
+                    return Some("Vector swizzle assignment cannot repeat components");
                 }
-                components[axis] = num;
-                None
+                if swizzle.len == 1 {
+                    let Some(num) = val.as_f64() else {
+                        return Some("Vector component must be a number");
+                    };
+                    if !num.is_finite() {
+                        return Some("Non-finite vector result");
+                    }
+                    components[swizzle.indices[0] as usize] = num;
+                    None
+                } else {
+                    let Value::Vector(rhs) = val else {
+                        return Some("Vector swizzle assignment requires matching vector");
+                    };
+                    if rhs.len() != swizzle.len as usize {
+                        return Some("Vector swizzle assignment requires matching vector");
+                    }
+                    if rhs.iter().any(|v| !v.is_finite()) {
+                        return Some("Non-finite vector result");
+                    }
+                    for i in 0..swizzle.len as usize {
+                        components[swizzle.indices[i] as usize] = rhs[i];
+                    }
+                    None
+                }
             }
             _ => Some("Member access requires a record, struct or vector"),
         }
@@ -225,20 +249,26 @@ impl<'c> Vm<'c> {
                     Self::read_path_vm(sub, rest, member_mask, step_idx + 1)
                 }
                 Value::Vector(components) => {
-                    let axis = match field_name.as_str() {
-                        "x" => 0,
-                        "y" => 1,
-                        "z" => 2,
-                        "w" => 3,
-                        _ => return Err("Unknown vector component"),
+                    let Some(swizzle) = crate::catalog::parse_vector_swizzle(field_name.as_str())
+                    else {
+                        return Err("Unknown vector component");
                     };
-                    if axis >= components.len() {
+                    if swizzle.max_index() >= components.len() {
                         return Err("Vector component out of bounds");
                     }
-                    if rest.is_empty() {
-                        Ok(Value::Number(components[axis]))
+                    if !rest.is_empty() {
+                        return Err("Vector components do not support nested access");
+                    }
+                    if swizzle.len == 1 {
+                        Ok(Value::Number(components[swizzle.indices[0] as usize]))
                     } else {
-                        Err("Vector components do not support nested access")
+                        let mut buf = [0.0f64; 4];
+                        for (i, slot) in buf.iter_mut().take(swizzle.len as usize).enumerate() {
+                            *slot = components[swizzle.indices[i] as usize];
+                        }
+                        Ok(Value::Vector(crate::InlineVec::from_slice(
+                            &buf[..swizzle.len as usize],
+                        )))
                     }
                 }
                 _ => Err("Member access requires a record, struct or vector"),

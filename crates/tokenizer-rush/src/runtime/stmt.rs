@@ -1,8 +1,8 @@
 use super::{
-    Binding, Closure, Environment, FunctionBody, RecordMap, Result, Runtime, RuntimeError, Value,
-    ValueType, memory,
+    Binding, Closure, Environment, FunctionBody, RecordMap, Result, Runtime, RuntimeError,
+    StructConstraint, Value, ValueType, memory,
 };
-use crate::{Expr, ExprKind, Name, Stmt, StmtKind};
+use crate::{DeclarationRole, Expr, ExprKind, Name, Stmt, StmtKind};
 use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
 
@@ -225,12 +225,33 @@ impl<'s> Runtime<'_, 's> {
             StmtKind::Struct { name, fields } => {
                 let id = format!("{}::{}", self.module.unwrap_or("<entry>"), name.text);
                 self.user_types.insert((self.module, name.text), id.clone());
+                let checks: Vec<(String, Expr<'s>)> = fields
+                    .iter()
+                    .filter_map(|f| {
+                        f.constraint
+                            .as_ref()
+                            .map(|c| (f.name.text.to_owned(), c.clone()))
+                    })
+                    .collect();
+                let field_names: Vec<&'s str> = fields.iter().map(|f| f.name.text).collect();
                 let fields = fields
                     .iter()
-                    .map(|(name, ty)| Ok((name.text.to_owned(), self.annotation(ty)?)))
+                    .map(|f| Ok((f.name.text.to_owned(), self.annotation(&f.ty)?)))
                     .collect::<Result<Vec<_>>>()?;
                 self.struct_fields
                     .insert(id.clone(), fields.iter().cloned().collect());
+                if !checks.is_empty() {
+                    let captured = self.capture(statement.span, environment)?;
+                    self.struct_constraints.insert(
+                        id.clone(),
+                        Rc::new(StructConstraint {
+                            module: self.module,
+                            environment: captured,
+                            field_names,
+                            checks,
+                        }),
+                    );
+                }
                 let constructor = self.constructor(name, id, None, fields, Vec::new())?;
                 environment
                     .insert(name.text, constructor)
@@ -459,6 +480,7 @@ impl<'s> Runtime<'_, 's> {
             environment
                 .insert(name.text, Value::Function(Rc::new(closure)))
                 .map_err(|e| self.environment_error(name.span, e))?;
+            self.refresh_struct_constraints(statements, environment)?;
             return Ok(());
         }
         let excluded_defs: Vec<Span> = fn_stmts
@@ -486,7 +508,100 @@ impl<'s> Runtime<'_, 's> {
                 .insert(name.text, Value::Function(Rc::new(closure)))
                 .map_err(|e| self.environment_error(name.span, e))?;
         }
+        self.refresh_struct_constraints(statements, environment)?;
         Ok(())
+    }
+
+    fn refresh_struct_constraints(
+        &mut self,
+        statements: &[Stmt<'s>],
+        environment: &Environment<'s>,
+    ) -> Result<()> {
+        if self.struct_constraints.is_empty() {
+            return Ok(());
+        }
+        for stmt in statements {
+            if let StmtKind::Struct { name, fields } = &stmt.kind
+                && fields.iter().any(|f| f.constraint.is_some())
+            {
+                let id = format!("{}::{}", self.module.unwrap_or("<entry>"), name.text);
+                if let Some(existing) = self.struct_constraints.get(&id).cloned() {
+                    let captured = self.capture(stmt.span, environment)?;
+                    self.struct_constraints.insert(
+                        id,
+                        Rc::new(StructConstraint {
+                            module: existing.module,
+                            environment: captured,
+                            field_names: existing.field_names.clone(),
+                            checks: existing.checks.clone(),
+                        }),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn check_where_constraint(
+        &mut self,
+        constraint: &Expr<'s>,
+        environment: &Environment<'s>,
+        violation_message: &str,
+    ) -> Result<()> {
+        match self.expr(constraint, environment)? {
+            Value::Bool(true) => Ok(()),
+            Value::Bool(false) => self.error(constraint.span, violation_message),
+            _ => self.error(
+                constraint.span,
+                "Where constraint must evaluate to a boolean",
+            ),
+        }
+    }
+
+    pub(super) fn validate_struct_constraints(
+        &mut self,
+        type_name: &str,
+        fields: &RecordMap<'s>,
+        span: Span,
+    ) -> Result<()> {
+        let Some(constraint) = self.struct_constraints.get(type_name).cloned() else {
+            return Ok(());
+        };
+        let mut scope = self.take_call_environment(&constraint.environment);
+        let prev_module = std::mem::replace(&mut self.module, constraint.module);
+        let result = (|| {
+            for &field_name in &constraint.field_names {
+                if let Some(v) = fields.get(field_name) {
+                    scope
+                        .insert(field_name, v.clone())
+                        .map_err(|e| self.environment_error(span, e))?;
+                }
+            }
+            for (field_name, expr) in &constraint.checks {
+                match self.expr(expr, &scope)? {
+                    Value::Bool(true) => {}
+                    Value::Bool(false) => {
+                        return Err(RuntimeError {
+                            stack: Vec::new(),
+                            location: None,
+                            module: prev_module.map(str::to_owned),
+                            span,
+                            message: format!(
+                                "Struct field '{field_name}' violates where constraint"
+                            ),
+                        });
+                    }
+                    _ => {
+                        return self
+                            .error(expr.span, "Where constraint must evaluate to a boolean");
+                    }
+                }
+            }
+            Ok(())
+        })();
+        self.module = prev_module;
+        self.recycle_call_environment(scope);
+        result
     }
 
     pub(super) fn hoist_scope_declarations(
@@ -652,13 +767,25 @@ impl<'s> Runtime<'_, 's> {
                     }
                 }
                 StmtKind::Declaration {
-                    role: _,
+                    role,
                     name,
                     constant,
                     value: expression,
                     ty,
+                    constraint,
                 } => {
-                    value = self.expr(expression, environment)?;
+                    let use_host_input = *role == DeclarationRole::Parameter
+                        && self.module.is_none()
+                        && self.depth == 0
+                        && self.host_inputs.remove(name.text);
+                    value = if use_host_input {
+                        match environment.get(name.text) {
+                            Some(Binding::Value(v)) => v.clone(),
+                            _ => self.expr(expression, environment)?,
+                        }
+                    } else {
+                        self.expr(expression, environment)?
+                    };
                     value = self.bind_declaration_value(
                         name,
                         *constant,
@@ -667,6 +794,13 @@ impl<'s> Runtime<'_, 's> {
                         expression.span,
                         environment,
                     )?;
+                    if let Some(constraint) = constraint {
+                        self.check_where_constraint(
+                            constraint,
+                            environment,
+                            &format!("Parameter '{}' violates where constraint", name.text),
+                        )?;
+                    }
                     if last_fn.is_some_and(|last| idx < last) {
                         self.hoist_scope_functions(statements, environment)?;
                     }

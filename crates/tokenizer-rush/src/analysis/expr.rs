@@ -1,8 +1,15 @@
 use super::shape::{disjoint, lvalue_root};
 use super::{Checker, MemberCompletion, NameReference, Shape};
-use crate::{Builtin, Expr, ExprKind, InterpolationPart, ValueType};
+use crate::{Builtin, Expr, ExprKind, InterpolationPart, RecordUpdateEntry, ValueType};
 use std::collections::HashMap;
 use themoretheless_tokenizer_core::Span;
+
+#[derive(Clone)]
+pub(super) enum PipeArg {
+    None,
+    Prepend(Span, Shape),
+    Placeholder(Shape),
+}
 
 impl<'s> Checker<'s> {
     pub(super) fn check_index(&mut self, object: &Expr<'s>, index: &Expr<'s>) {
@@ -166,18 +173,23 @@ impl<'s> Checker<'s> {
         &mut self,
         callee: &Expr<'s>,
         arguments: &[Expr<'s>],
-        implicit: Option<(Span, Shape)>,
+        pipe: PipeArg,
     ) -> Shape {
+        let is_prepend = matches!(pipe, PipeArg::Prepend(..));
+        let is_placeholder_pipe = matches!(pipe, PipeArg::Placeholder(_));
         // arena_run executes its callback inside an arena scope: analyze the
         // callback body as if it were a region body, so escapes lint as
         // region-escape (hard errors when the descriptor is a statically
         // known strict arena(...) literal).
         let arena_callback = if matches!(self.known_builtin(callee), Some(Builtin::ArenaRun)) {
-            1usize.checked_sub(usize::from(implicit.is_some()))
+            1usize.checked_sub(usize::from(is_prepend))
         } else {
             None
         };
         for (position, argument) in arguments.iter().enumerate() {
+            if is_placeholder_pipe && crate::catalog::is_pipeline_placeholder(argument) {
+                continue;
+            }
             if Some(position) == arena_callback {
                 let strict = position
                     .checked_sub(1)
@@ -196,6 +208,7 @@ impl<'s> Checker<'s> {
         // implicit call region will leak them out of the arena run too.
         if let Some(position) = arena_callback
             && let Some(callback) = arguments.get(position)
+            && !(is_placeholder_pipe && crate::catalog::is_pipeline_placeholder(callback))
             && let ExprKind::Name(name) = &callback.kind
         {
             let leaks = self
@@ -224,22 +237,35 @@ impl<'s> Checker<'s> {
                 "Suspending functions require spawn_coroutine instead of a synchronous call",
             );
         }
+        let supplied: Vec<(Span, Shape)> = match &pipe {
+            PipeArg::None => arguments
+                .iter()
+                .map(|arg| (arg.span, self.shape(arg)))
+                .collect(),
+            PipeArg::Prepend(span, shape) => std::iter::once((*span, shape.clone()))
+                .chain(arguments.iter().map(|arg| (arg.span, self.shape(arg))))
+                .collect(),
+            PipeArg::Placeholder(piped_shape) => arguments
+                .iter()
+                .map(|arg| {
+                    if crate::catalog::is_pipeline_placeholder(arg) {
+                        (arg.span, piped_shape.clone())
+                    } else {
+                        (arg.span, self.shape(arg))
+                    }
+                })
+                .collect(),
+        };
         if self.calls
             && let Some(builtin) = self.known_builtin(callee)
         {
-            let supplied = implicit
-                .iter()
-                .cloned()
-                .chain(arguments.iter().map(|arg| (arg.span, self.shape(arg))))
-                .collect::<Vec<_>>();
             self.check_math_arguments(builtin, &supplied);
         }
         let result_shape = self.applied_result_shape(
             callee,
-            &implicit
+            &supplied
                 .iter()
                 .map(|(_, shape)| shape.clone())
-                .chain(arguments.iter().map(|arg| self.shape(arg)))
                 .collect::<Vec<_>>(),
         );
         if self.calls
@@ -268,11 +294,7 @@ impl<'s> Checker<'s> {
                 }
             }
 
-            let supplied = implicit
-                .as_ref()
-                .map(|(_, shape)| shape.clone())
-                .or_else(|| arguments.first().map(|arg| self.shape(arg)));
-            if let Some(shape) = supplied {
+            if let Some((_, shape)) = supplied.first() {
                 if let Shape::Record(fields) = shape {
                     let expected = self.user_types[&name].fields.clone().unwrap_or_default();
                     if fields.keys().ne(expected.keys()) {
@@ -291,6 +313,9 @@ impl<'s> Checker<'s> {
                             );
                         }
                     }
+                } else if matches!(shape, Shape::Typed(ValueType::User(actual)) if actual == &name)
+                {
+                    // Same nominal struct (for example Point({ ..p, x: 0 })) is valid.
                 } else if !matches!(shape, Shape::Unknown) {
                     self.error(
                         callee.span,
@@ -311,41 +336,35 @@ impl<'s> Checker<'s> {
             && let Some(builtin) = self.known_builtin(callee)
         {
             for &(position, expected) in builtin.callback_arities() {
-                if let Some(index) = position.checked_sub(usize::from(implicit.is_some()))
+                if let Some(index) = position.checked_sub(usize::from(is_prepend))
                     && let Some(callback) = arguments.get(index)
-                    && self.known_suspending(callback)
+                    && !(is_placeholder_pipe && crate::catalog::is_pipeline_placeholder(callback))
                 {
-                    self.error(
-                        callback.span,
-                        "coroutine-call",
-                        "Synchronous callbacks cannot suspend",
-                    );
-                }
-
-                if let Some(index) = position.checked_sub(usize::from(implicit.is_some()))
-                    && let Some(callback) = arguments.get(index)
-                    && self.known_non_callable(callback)
-                {
-                    self.error(callback.span, "callback-type", "Callback must be callable");
-                }
-                if let Some(index) = position.checked_sub(usize::from(implicit.is_some()))
-                    && let Some(callback) = arguments.get(index)
-                    && let Some(arities) = self.known_arity(callback)
-                    && !arities.iter().any(|arity| arity.contains(&expected))
-                {
-                    self.error(
-                        callback.span,
-                        "callback-argument-count",
-                        "Callback argument count does not match operation",
-                    );
+                    if self.known_suspending(callback) {
+                        self.error(
+                            callback.span,
+                            "coroutine-call",
+                            "Synchronous callbacks cannot suspend",
+                        );
+                    }
+                    if self.known_non_callable(callback) {
+                        self.error(callback.span, "callback-type", "Callback must be callable");
+                    }
+                    if let Some(arities) = self.known_arity(callback)
+                        && !arities.iter().any(|arity| arity.contains(&expected))
+                    {
+                        self.error(
+                            callback.span,
+                            "callback-argument-count",
+                            "Callback argument count does not match operation",
+                        );
+                    }
                 }
             }
         }
         if self.calls
             && let Some(arity) = self.known_arity(callee)
-            && !arity
-                .iter()
-                .any(|range| range.contains(&(arguments.len() + usize::from(implicit.is_some()))))
+            && !arity.iter().any(|range| range.contains(&supplied.len()))
         {
             self.error(
                 callee.span,
@@ -357,15 +376,6 @@ impl<'s> Checker<'s> {
         if self.calls
             && let Some(parameters) = user_parameters
         {
-            let supplied = implicit
-                .iter()
-                .cloned()
-                .chain(
-                    arguments
-                        .iter()
-                        .map(|argument| (argument.span, self.shape(argument))),
-                )
-                .collect::<Vec<_>>();
             for ((span, shape), expected) in supplied.iter().zip(parameters) {
                 if let Some(expected) = expected
                     && shape.rejects(&expected)
@@ -389,14 +399,6 @@ impl<'s> Checker<'s> {
                     "Contextual host function has external side effects that cannot be rolled back by try",
                 );
             }
-            let supplied = implicit
-                .into_iter()
-                .chain(
-                    arguments
-                        .iter()
-                        .map(|argument| (argument.span, self.shape(argument))),
-                )
-                .collect::<Vec<_>>();
             for ((span, shape), expected) in supplied.iter().zip(&host.parameters) {
                 if shape.rejects(expected) {
                     self.error(
@@ -635,6 +637,48 @@ impl<'s> Checker<'s> {
                         "Cannot assign to an immutable binding",
                     );
                 }
+                if self.calls
+                    && let ExprKind::Member { object, field } = &target.kind
+                {
+                    let nested_on_vector = match &object.kind {
+                        ExprKind::Member { object: inner, .. }
+                        | ExprKind::Index { object: inner, .. } => {
+                            matches!(self.shape(inner), Shape::Typed(ValueType::Vector(_)))
+                        }
+                        _ => false,
+                    };
+                    if nested_on_vector {
+                        self.error(
+                            field.span,
+                            "vector-component",
+                            "Vector components do not support nested access",
+                        );
+                    } else if let Shape::Typed(ValueType::Vector(size)) = self.shape(object)
+                        && let Some(swizzle) = crate::catalog::parse_vector_swizzle(field.text)
+                        && swizzle.max_index() < size
+                    {
+                        if swizzle.has_duplicates() {
+                            self.error(
+                                field.span,
+                                "swizzle-assignment",
+                                "Vector swizzle assignment cannot repeat components",
+                            );
+                        } else if *operator == "=" {
+                            let expected = if swizzle.len == 1 {
+                                ValueType::Number
+                            } else {
+                                ValueType::Vector(swizzle.len as usize)
+                            };
+                            if self.shape(value).rejects(&expected) {
+                                self.error(
+                                    value.span,
+                                    "assignment-type",
+                                    "Assigned value type does not match vector swizzle",
+                                );
+                            }
+                        }
+                    }
+                }
                 if *operator != "=" {
                     let operation = match *operator {
                         "+=" => "+",
@@ -671,6 +715,26 @@ impl<'s> Checker<'s> {
                             "assignment-type",
                             "Compound assignment changes binding type",
                         );
+                    }
+                    if self.calls
+                        && let ExprKind::Member { object, field } = &target.kind
+                        && let Shape::Typed(ValueType::Vector(size)) = self.shape(object)
+                        && let Some(swizzle) = crate::catalog::parse_vector_swizzle(field.text)
+                        && swizzle.max_index() < size
+                        && !swizzle.has_duplicates()
+                    {
+                        let expected = if swizzle.len == 1 {
+                            ValueType::Number
+                        } else {
+                            ValueType::Vector(swizzle.len as usize)
+                        };
+                        if self.shape(&binary).rejects(&expected) {
+                            self.error(
+                                expr.span,
+                                "assignment-type",
+                                "Compound assignment changes vector swizzle type",
+                            );
+                        }
                     }
                     self.expr(&binary);
                 } else {
@@ -887,7 +951,7 @@ impl<'s> Checker<'s> {
                 {
                     self.move_call(expr.span, arguments);
                 } else {
-                    self.call(callee, arguments, None);
+                    self.call(callee, arguments, PipeArg::None);
                 }
             }
             ExprKind::Member { object, field } => {
@@ -950,14 +1014,9 @@ impl<'s> Checker<'s> {
                     );
                 }
                 if check_member && let Shape::Typed(ValueType::Vector(size)) = self.shape(object) {
-                    let axis = match field.text {
-                        "x" => Some(0),
-                        "y" => Some(1),
-                        "z" => Some(2),
-                        "w" => Some(3),
-                        _ => None,
-                    };
-                    if axis.is_none_or(|axis| axis >= size) {
+                    let valid = crate::catalog::parse_vector_swizzle(field.text)
+                        .is_some_and(|swizzle| swizzle.max_index() < size);
+                    if !valid {
                         self.error(
                             field.span,
                             "vector-component",
@@ -987,6 +1046,143 @@ impl<'s> Checker<'s> {
                     self.expr(value);
                 }
             }
+            ExprKind::RecordUpdate { entries } => {
+                let target_struct = entries.first().and_then(|entry| {
+                    let RecordUpdateEntry::Spread(first) = entry else {
+                        return None;
+                    };
+                    if let Shape::Typed(ValueType::User(id)) = self.shape(first)
+                        && self
+                            .user_types
+                            .get(&id)
+                            .and_then(|d| d.fields.as_ref())
+                            .is_some()
+                    {
+                        Some(id)
+                    } else {
+                        None
+                    }
+                });
+                for entry in entries {
+                    match entry {
+                        RecordUpdateEntry::Spread(spread) => {
+                            self.expr(spread);
+                            if self.calls {
+                                let shape = self.shape(spread);
+                                let is_struct = matches!(
+                                    &shape,
+                                    Shape::Typed(ValueType::User(id))
+                                        if self.user_types.get(id).and_then(|d| d.fields.as_ref()).is_some()
+                                );
+                                match (&target_struct, &shape) {
+                                    (_, Shape::Unknown) => {}
+                                    (Some(expected_id), Shape::Typed(ValueType::User(actual)))
+                                        if is_struct =>
+                                    {
+                                        if expected_id != actual {
+                                            self.error(
+                                                spread.span,
+                                                "spread-type",
+                                                "Cannot spread a different struct type into struct update",
+                                            );
+                                        }
+                                    }
+                                    (Some(expected_id), Shape::Record(rec_fields)) => {
+                                        if let Some(expected_fields) = self
+                                            .user_types
+                                            .get(expected_id)
+                                            .and_then(|d| d.fields.clone())
+                                        {
+                                            for (k, v_shape) in rec_fields {
+                                                if let Some(expected_ty) = expected_fields.get(k) {
+                                                    if v_shape.rejects(expected_ty) {
+                                                        self.error(
+                                                            spread.span,
+                                                            "struct-field-type",
+                                                            "Struct field type does not match declaration",
+                                                        );
+                                                    }
+                                                } else {
+                                                    self.error(
+                                                        spread.span,
+                                                        "unknown-record-field",
+                                                        "Unknown field in struct update",
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                    (None, Shape::Record(_)) => {}
+                                    (None, _) if is_struct => {
+                                        self.error(
+                                            spread.span,
+                                            "spread-type",
+                                            "Nominal struct spread must be the base of a struct update",
+                                        );
+                                    }
+                                    _ => {
+                                        self.error(
+                                            spread.span,
+                                            "spread-type",
+                                            "Spread operand in record update must be a record or struct",
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        RecordUpdateEntry::Field(key, value) => {
+                            if !matches!(key.kind, ExprKind::Name(_)) {
+                                self.expr(key);
+                            }
+                            self.expr(value);
+                            if let Some(ref struct_id) = target_struct
+                                && let Some(definition) = self.user_types.get(struct_id).cloned()
+                            {
+                                if let ExprKind::Name(field_name) = &key.kind {
+                                    if self.collect_members
+                                        && let Some(span) =
+                                            definition.field_spans.get(field_name.text)
+                                    {
+                                        self.references.push(NameReference {
+                                            usage: field_name.span,
+                                            definition: Some(*span),
+                                            definition_module: definition
+                                                .module
+                                                .clone()
+                                                .filter(|m| self.module.as_ref() != Some(m)),
+                                        });
+                                    }
+                                    if self.calls
+                                        && let Some(ref fields) = definition.fields
+                                    {
+                                        if let Some(expected_ty) = fields.get(field_name.text) {
+                                            if self.shape(value).rejects(expected_ty) {
+                                                self.error(
+                                                    value.span,
+                                                    "struct-field-type",
+                                                    "Struct field type does not match declaration",
+                                                );
+                                            }
+                                        } else {
+                                            self.error(
+                                                field_name.span,
+                                                "unknown-record-field",
+                                                "Unknown field in struct update",
+                                            );
+                                        }
+                                    }
+                                } else if self.calls {
+                                    self.error(
+                                        key.span,
+                                        "struct-fields",
+                                        "Struct update field key must be an identifier",
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             ExprKind::Pipeline { input, stages } => {
                 let shape = if self.calls {
                     self.shape(input)
@@ -998,9 +1194,17 @@ impl<'s> Checker<'s> {
                 for stage in stages {
                     let result = match &stage.kind {
                         ExprKind::Call { callee, arguments } => {
-                            self.call(callee, arguments, Some(supplied))
+                            if crate::catalog::has_pipeline_placeholder(arguments) {
+                                self.call(callee, arguments, PipeArg::Placeholder(supplied.1))
+                            } else {
+                                self.call(
+                                    callee,
+                                    arguments,
+                                    PipeArg::Prepend(supplied.0, supplied.1),
+                                )
+                            }
                         }
-                        _ => self.call(stage, &[], Some(supplied)),
+                        _ => self.call(stage, &[], PipeArg::Prepend(supplied.0, supplied.1)),
                     };
                     supplied = (stage.span, result);
                 }

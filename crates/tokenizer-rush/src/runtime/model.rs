@@ -76,6 +76,14 @@ impl<'s> ModelProgram<'s> {
         let mut dependencies = vec![Vec::new(); nodes.len()];
         for (index, node) in nodes.iter().enumerate() {
             let statement = &parsed.module.items[statements[index]];
+            let param_constraint_span = match &statement.kind {
+                StmtKind::Declaration {
+                    role: DeclarationRole::Parameter,
+                    constraint: Some(constraint),
+                    ..
+                } => Some(constraint.span),
+                _ => None,
+            };
             for reference in &details.references {
                 if reference.usage.start < node.span.start || reference.usage.end > node.span.end {
                     continue;
@@ -96,7 +104,12 @@ impl<'s> ModelProgram<'s> {
                 if reference.definition.is_some_and(|d| d != definition) {
                     continue;
                 }
-                if index == dependency && matches!(statement.kind, StmtKind::Function { .. }) {
+                if index == dependency
+                    && (matches!(statement.kind, StmtKind::Function { .. })
+                        || param_constraint_span.is_some_and(|cs| {
+                            reference.usage.start >= cs.start && reference.usage.end <= cs.end
+                        }))
+                {
                     continue;
                 }
                 if !dependencies[index].contains(&dependency) {
@@ -298,8 +311,10 @@ impl<'a, 's> ModelInstance<'a, 's> {
                 "Parameter value does not match its contract",
             ));
         }
+        let value = value.coerce_for_type(contract);
         self.script.coroutine_limits(limits)?;
         let unchanged = match (self.script.get(name), &value) {
+            (Some(Value::Int(a)), Value::Int(b)) => a == *b,
             (Some(Value::Number(a)), Value::Number(b)) => a == *b,
             (Some(Value::Bool(a)), Value::Bool(b)) => a == *b,
             (Some(Value::String(a)), Value::String(b)) => a == *b,
@@ -333,6 +348,19 @@ impl<'a, 's> ModelInstance<'a, 's> {
                 .environment
                 .insert(name, value)
                 .map_err(|e| self.script.runtime.environment_error(self.script.span, e))?;
+            let param_stmt =
+                &self.model.program.parsed.module.items[self.model.statements[parameter]];
+            if let StmtKind::Declaration {
+                constraint: Some(constraint),
+                ..
+            } = &param_stmt.kind
+            {
+                self.script.runtime.check_where_constraint(
+                    constraint,
+                    &self.script.environment,
+                    &format!("Parameter '{name}' violates where constraint"),
+                )?;
+            }
             let mut changed = Vec::new();
             for (index, node) in self.model.nodes.iter().enumerate() {
                 if index == parameter {
