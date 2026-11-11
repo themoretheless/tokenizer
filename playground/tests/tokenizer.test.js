@@ -128,8 +128,9 @@ for (const language of ALL_LANGUAGE_IDS) {
 // ─── Cross-cutting ──────────────────────────────────────────────────────────
 
 test('catalog covers every expected language id', () => {
-  // Keep in sync with the facade all-languages registry (70 engines).
+  // Keep in sync with the facade all-languages registry (71 engines).
   const expected = [
+    'forma',
     'json',
     'json5',
     'jsonl',

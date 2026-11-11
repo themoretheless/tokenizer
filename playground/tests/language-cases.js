@@ -754,7 +754,7 @@ export const LANGUAGE_CASES = {
         expectKinds: ['keyword', 'class', 'variable', 'property', 'string'],
       },
       { name: 'unclosed-brace', source: 'component Card {\n', expectValid: false },
-      { name: 'empty', source: '', expectValid: true, minTokens: 0 },
+      { name: 'empty', source: '', expectValid: false, minTokens: 0 },
     ],
   },
 }
