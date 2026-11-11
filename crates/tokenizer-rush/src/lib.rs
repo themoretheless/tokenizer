@@ -2,46 +2,66 @@
 //! See the crate README for the supported grammar. The experimental evaluator
 //! executes a bounded functional subset; parsing supports a broader grammar.
 
+#[cfg(feature = "runtime")]
 mod project;
+#[cfg(feature = "runtime")]
 pub use project::{
     ModuleEditorAnalysis, ProjectEdit, analyze_editor_project, import_completions,
     rename_project_symbol,
 };
+
 mod analysis;
 pub use analysis::{LexicalBinding, MemberCompletion, NameReference};
 mod ast;
+mod catalog;
+pub use catalog::{Builtin, ValueType, builtin_catalog};
 mod format;
-mod graphics;
-mod host_object;
 pub use format::{FormatError, format_source};
-pub use host_object::HostObject;
-mod matrix;
-mod mesh;
-mod noise;
-pub use mesh::Mesh;
-mod quaternion;
-pub use matrix::Matrix4;
-pub use quaternion::Quaternion;
 mod lexer;
-pub use graphics::Polygon;
 mod parser;
-mod runtime;
 mod string_literal;
 pub use ast::*;
+
+#[cfg(feature = "runtime")]
+mod graphics;
+#[cfg(feature = "runtime")]
+pub use graphics::Polygon;
+#[cfg(feature = "runtime")]
+mod host_object;
+#[cfg(feature = "runtime")]
+pub use host_object::HostObject;
+#[cfg(feature = "runtime")]
+mod matrix;
+#[cfg(feature = "runtime")]
+pub use matrix::Matrix4;
+#[cfg(feature = "runtime")]
+mod mesh;
+#[cfg(feature = "runtime")]
+pub use mesh::Mesh;
+#[cfg(feature = "runtime")]
+mod noise;
+#[cfg(feature = "runtime")]
+mod quaternion;
+#[cfg(feature = "runtime")]
+pub use quaternion::Quaternion;
+#[cfg(feature = "runtime")]
+mod runtime;
+#[cfg(feature = "runtime")]
 pub use runtime::{
-    Builtin, CallFrame, CancellationToken, Closure, CoroutineId, CoroutineScheduler,
-    CoroutineState, ExecutionLimits, HostCallback, HostFunction, HostRegistration, HostSequence,
+    CallFrame, CancellationToken, Closure, CoroutineId, CoroutineScheduler, CoroutineState,
+    ExecutionLimits, HostCallback, HostFunction, HostRegistration, HostSequence,
     HostSequenceIterator, InlineVec, ModelInstance, ModelNode, ModelProgram,
     OwnedCoroutineScheduler, OwnedScriptInstance, Program, RecordMap, RecordShape, RegionStats,
     RuntimeError, ScheduledState, ScheduledStep, ScriptInstance, ScriptState, Sequence,
-    SourceLocation, StateValue, UserData, Value, ValueType, WakeRequest, builtin_catalog, evaluate,
-    json_parse, json_stringify,
+    SourceLocation, StateValue, UserData, Value, WakeRequest, evaluate, json_parse, json_stringify,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "runtime", not(target_arch = "wasm32")))]
 pub mod repl;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "runtime", not(target_arch = "wasm32")))]
 pub use repl::{ReplCommand, ReplOutcome, ReplSession, is_input_complete, pretty_print_value};
+#[cfg(feature = "runtime")]
 pub mod bytecode;
+#[cfg(feature = "runtime")]
 pub use bytecode::{
     BytecodeClosure, BytecodeFunction, BytecodeIterator, BytecodeProgram, BytecodeSequence,
     evaluate_bytecode,
@@ -49,8 +69,8 @@ pub use bytecode::{
 
 use themoretheless_tokenizer_core::{
     Capabilities, Diagnostic, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage,
-    HostTokenization, InputLimits, LanguageDescriptor, LanguageId, Lexed, SemanticToken,
-    SemanticTokenization, Span, full_descriptor, require_default_dialect,
+    HostToken, HostTokenization, InputLimits, LanguageDescriptor, LanguageId, Lexed, SemanticToken,
+    SemanticTokenization, Span, TokenLayer, full_descriptor,
 };
 
 /// Lossless, case-sensitive Rush lexer using conservative resource limits.
@@ -111,37 +131,83 @@ pub fn analyze_with(source: &str, limits: InputLimits) -> Parse<'_> {
 }
 
 fn semantic(parsed: &Parse<'_>, syntax: bool) -> SemanticTokenization {
-    let tokens = if syntax || parsed.roles.is_empty() {
-        parsed
-            .lexed
-            .tokens
-            .iter()
-            .map(|token| SemanticToken {
+    let len = parsed.lexed.tokens.len();
+    let mut tokens = Vec::with_capacity(len);
+    if syntax || parsed.roles.is_empty() {
+        for token in &parsed.lexed.tokens {
+            tokens.push(SemanticToken {
                 span: token.span,
                 kind: token.kind.as_str(),
-            })
-            .collect()
-    } else {
-        let mut roles = std::collections::HashMap::with_capacity(parsed.roles.len());
-        for &(span, role) in &parsed.roles {
-            roles.insert(span, role);
+            });
         }
-        parsed
-            .lexed
-            .tokens
-            .iter()
-            .map(|token| SemanticToken {
+    } else {
+        let roles = parsed.roles.as_slice();
+        let mut cursor = 0usize;
+        for token in &parsed.lexed.tokens {
+            while cursor < roles.len()
+                && (roles[cursor].0.start, roles[cursor].0.end) < (token.span.start, token.span.end)
+            {
+                cursor += 1;
+            }
+            let kind = if cursor < roles.len() && roles[cursor].0 == token.span {
+                roles[cursor].1
+            } else {
+                token.kind.as_str()
+            };
+            tokens.push(SemanticToken {
                 span: token.span,
-                kind: roles
-                    .get(&token.span)
-                    .copied()
-                    .unwrap_or(token.kind.as_str()),
-            })
-            .collect()
-    };
+                kind,
+            });
+        }
+    }
     SemanticTokenization {
         tokens,
         diagnostics: parsed.diagnostics.clone(),
+    }
+}
+
+fn host_tokens_from_parse(parsed: &Parse<'_>, syntax: bool) -> HostTokenization {
+    use std::borrow::Cow;
+    let mut tokens = Vec::with_capacity(parsed.lexed.tokens.len());
+    if syntax || parsed.roles.is_empty() {
+        for token in &parsed.lexed.tokens {
+            tokens.push(HostToken {
+                span: token.span.into(),
+                kind: Cow::Borrowed(token.kind.as_str()),
+                error: token.kind == themoretheless_tokenizer_core::SyntaxKind::Error,
+            });
+        }
+    } else {
+        let roles = parsed.roles.as_slice();
+        let mut cursor = 0usize;
+        for token in &parsed.lexed.tokens {
+            while cursor < roles.len()
+                && (roles[cursor].0.start, roles[cursor].0.end) < (token.span.start, token.span.end)
+            {
+                cursor += 1;
+            }
+            let kind = if cursor < roles.len() && roles[cursor].0 == token.span {
+                roles[cursor].1
+            } else {
+                token.kind.as_str()
+            };
+            tokens.push(HostToken {
+                span: token.span.into(),
+                kind: Cow::Borrowed(kind),
+                error: kind == "error",
+            });
+        }
+    }
+    let diagnostics = parsed
+        .diagnostics
+        .iter()
+        .cloned()
+        .map(HostDiagnostic::from_diagnostic)
+        .collect();
+    HostTokenization {
+        tokens,
+        diagnostics,
+        valid: parsed.is_valid(),
     }
 }
 
@@ -176,41 +242,35 @@ pub static DESCRIPTOR: LanguageDescriptor = LanguageDescriptor {
     )
 };
 
-fn checked<'s>(source: &'s str, opts: &HostAnalysisOptions) -> Result<Parse<'s>, HostError> {
-    require_default_dialect(&DESCRIPTOR, opts.dialect.as_ref())?;
-    if opts.limits.exceeds_input_bytes(source.len()) {
-        return Err(HostError::InputTooLarge {
-            max: opts.limits.max_input_bytes,
-            actual: source.len(),
-        });
-    }
+fn checked<'s>(
+    host: &Host,
+    source: &'s str,
+    opts: &HostAnalysisOptions,
+) -> Result<Parse<'s>, HostError> {
+    host.check_entry(source, opts)?;
     Ok(parse_with(source, opts.limits))
 }
-fn host_tokens(parsed: Parse<'_>, syntax: bool) -> HostTokenization {
-    let mut result = semantic(&parsed, syntax).to_host();
-    result.valid = parsed.is_valid();
-    result
-}
+
 impl HostLanguage for Host {
     fn descriptor(&self) -> &'static LanguageDescriptor {
         &DESCRIPTOR
     }
     fn lex(&self, source: &str, opts: &HostAnalysisOptions) -> Result<HostTokenization, HostError> {
-        Ok(host_tokens(checked(source, opts)?, true))
+        Ok(host_tokens_from_parse(&checked(self, source, opts)?, true))
     }
     fn semantic_tokens(
         &self,
         source: &str,
         opts: &HostAnalysisOptions,
     ) -> Result<HostTokenization, HostError> {
-        Ok(host_tokens(checked(source, opts)?, false))
+        Ok(host_tokens_from_parse(&checked(self, source, opts)?, false))
     }
     fn diagnose(
         &self,
         source: &str,
         opts: &HostAnalysisOptions,
     ) -> Result<Vec<HostDiagnostic>, HostError> {
-        Ok(checked(source, opts)?
+        Ok(checked(self, source, opts)?
             .diagnostics
             .into_iter()
             .map(HostDiagnostic::from_diagnostic)
@@ -256,7 +316,67 @@ pub fn analyze_editor_details(source: &str) -> EditorAnalysis<'_> {
     }
 }
 
+/// Unified single-parse playground analysis returning host tokens, execution
+/// diagnostics, bindings, references, and member completions without re-lexing
+/// or re-parsing the source document.
+pub struct PlaygroundAnalysis {
+    pub host: HostTokenization,
+    pub execution_diagnostics: Vec<Diagnostic>,
+    pub references: Vec<NameReference>,
+    pub bindings: Vec<LexicalBinding>,
+    pub member_completions: Vec<MemberCompletion>,
+}
+
+/// Analyze Rush source in a single lex + parse pass for interactive editors and playgrounds.
+pub fn analyze_playground(
+    source: &str,
+    opts: &HostAnalysisOptions,
+    layer: TokenLayer,
+) -> Result<PlaygroundAnalysis, HostError> {
+    let mut parsed = checked(&ENGINE, source, opts)?;
+    let host = host_tokens_from_parse(&parsed, layer == TokenLayer::Syntax);
+    let grammar_diag_len = parsed.diagnostics.len();
+    let limit = opts.limits.max_diagnostics;
+
+    if parsed.is_valid() {
+        let (references, bindings, member_completions) =
+            analysis::editor_with_hosts(&mut parsed, limit, true, std::collections::HashMap::new());
+        check_external_names(&mut parsed, &references, &[], limit);
+        let mut execution_diagnostics = Vec::new();
+        for diag in parsed.diagnostics.drain(grammar_diag_len..) {
+            let key = (diag.code, diag.span);
+            if !execution_diagnostics
+                .iter()
+                .any(|d: &Diagnostic| (d.code, d.span) == key)
+                && !host
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.code.as_ref() == diag.code && d.span == diag.span.into())
+            {
+                execution_diagnostics.push(diag);
+            }
+        }
+        Ok(PlaygroundAnalysis {
+            host,
+            execution_diagnostics,
+            references,
+            bindings,
+            member_completions,
+        })
+    } else {
+        let (references, bindings, member_completions) = analysis::editor(&mut parsed, limit);
+        Ok(PlaygroundAnalysis {
+            host,
+            execution_diagnostics: Vec::new(),
+            references,
+            bindings,
+            member_completions,
+        })
+    }
+}
+
 /// Inspect explicit module interfaces without initializing modules or invoking host code.
+#[cfg(feature = "runtime")]
 pub fn analyze_editor_modules<'s>(
     source: &'s str,
     modules: &[(&str, &Program<'_>)],
@@ -293,11 +413,7 @@ fn check_external_names(
             continue;
         }
         let name = &parsed.source[reference.usage.start..reference.usage.end];
-        if builtin_catalog()
-            .iter()
-            .any(|(builtin, _)| *builtin == name)
-            || external_names.contains(&name)
-        {
+        if catalog::lookup_builtin(name).is_some() || external_names.contains(&name) {
             continue;
         }
         parsed.valid = false;
@@ -313,6 +429,7 @@ fn check_external_names(
 
 /// Editor output using the same host function objects as execution. Functions expose
 /// names, parameter types and result types for completion without invoking callbacks.
+#[cfg(feature = "runtime")]
 pub struct HostEditorAnalysis<'s> {
     pub parsed: Parse<'s>,
     pub references: Vec<NameReference>,
@@ -325,6 +442,7 @@ pub struct HostEditorAnalysis<'s> {
 /// metadata. Input names are separate from callable registrations, as in Program::run.
 /// Local bindings shadow registered functions. Only a missing final member name
 /// permits editor recovery; the source still cannot execute.
+#[cfg(feature = "runtime")]
 pub fn analyze_editor_with_host<'s>(
     source: &'s str,
     input_names: &[&str],
@@ -334,7 +452,16 @@ pub fn analyze_editor_with_host<'s>(
     let limit = InputLimits::conservative().max_diagnostics;
     let signatures = functions
         .iter()
-        .map(|f| (f.name.to_owned(), f.clone()))
+        .map(|f| {
+            (
+                f.name.to_owned(),
+                std::rc::Rc::new(analysis::HostSignature {
+                    parameters: f.parameters.clone(),
+                    result: f.result.clone(),
+                    transactional: true,
+                }),
+            )
+        })
         .collect();
     let (references, bindings, member_completions) =
         analysis::editor_with_hosts(&mut parsed, limit, true, signatures);
@@ -382,6 +509,7 @@ pub fn analyze_calls(source: &str) -> Parse<'_> {
 /// Check arity and provably incompatible argument types using runtime registrations.
 /// Literals and known host results propagate through direct calls, aliases and pipes.
 /// Unknown values remain runtime checks; lexical bindings shadow host names.
+#[cfg(feature = "runtime")]
 pub fn analyze_host_calls<'s>(
     source: &'s str,
     functions: &[std::rc::Rc<HostFunction>],
@@ -389,7 +517,16 @@ pub fn analyze_host_calls<'s>(
     let mut parsed = parse(source);
     let signatures = functions
         .iter()
-        .map(|function| (function.name.to_owned(), function.clone()))
+        .map(|function| {
+            (
+                function.name.to_owned(),
+                std::rc::Rc::new(analysis::HostSignature {
+                    parameters: function.parameters.clone(),
+                    result: function.result.clone(),
+                    transactional: true,
+                }),
+            )
+        })
         .collect();
     analysis::check_host_calls(
         &mut parsed,
@@ -400,5 +537,5 @@ pub fn analyze_host_calls<'s>(
     parsed
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "runtime", not(target_arch = "wasm32")))]
 pub mod sys;

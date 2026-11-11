@@ -497,6 +497,13 @@ export const LANGUAGES = [
     modes: ['default'],
     sample: '// demo\nmodule m;\n  wire x;\nendmodule\n',
   },
+  {
+    id: 'forma',
+    label: 'Forma',
+    group: 'markup',
+    modes: ['default'],
+    sample: "// UI card\ncomponent Card {\n  prop title: String = 'Hello';\n  Text { content: props.title; }\n}\n",
+  },
 ]
 
 /** @type {{ id: string, label: string }[]} */

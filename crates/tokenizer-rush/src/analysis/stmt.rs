@@ -16,8 +16,8 @@ impl<'s> Checker<'s> {
             ExprKind::Name(name) if name.text != "_" => {
                 out.insert(name.text);
             }
-            ExprKind::Tuple(items) => {
-                for item in items {
+            ExprKind::Call { arguments, .. } | ExprKind::Tuple(arguments) => {
+                for item in arguments {
                     Self::collect_pattern_names(item, out);
                 }
             }
@@ -30,7 +30,7 @@ impl<'s> Checker<'s> {
         }
     }
 
-    fn bind_pattern_silent(&mut self, pattern: &Expr<'s>, ids: &mut Vec<usize>) {
+    pub(super) fn bind_pattern_silent(&mut self, pattern: &Expr<'s>, ids: &mut Vec<usize>) {
         match &pattern.kind {
             ExprKind::Name(name) if name.text != "_" => {
                 let scope = self.scopes.last_mut().unwrap();
@@ -39,8 +39,8 @@ impl<'s> Checker<'s> {
                     ids.push(name.span.start);
                 }
             }
-            ExprKind::Tuple(items) => {
-                for item in items {
+            ExprKind::Call { arguments, .. } | ExprKind::Tuple(arguments) => {
+                for item in arguments {
                     self.bind_pattern_silent(item, ids);
                 }
             }
@@ -58,7 +58,7 @@ impl<'s> Checker<'s> {
             .iter()
             .any(|(n, _)| *n == name.text)
             || matches!(name.text, "Option" | "Result" | "list" | "tuple")
-            || ValueType::annotation(&crate::Type {
+            || ValueType::parse_annotation(&crate::Type {
                 name: name.clone(),
                 path: vec![name.clone()],
                 arguments: Vec::new(),
@@ -77,7 +77,7 @@ impl<'s> Checker<'s> {
                 StmtKind::Declaration { name, .. } => {
                     claimed.insert(name.text);
                 }
-                StmtKind::Destructure { pattern, .. } => {
+                StmtKind::Destructure { pattern, .. } | StmtKind::LetElse { pattern, .. } => {
                     Self::collect_pattern_names(pattern, &mut claimed);
                 }
                 StmtKind::Import(name) => {
@@ -194,7 +194,7 @@ impl<'s> Checker<'s> {
                     let fields = fields
                         .iter()
                         .filter_map(|(name, ty)| {
-                            ValueType::annotation_with(ty, &|n| self.resolve_type(n))
+                            ValueType::parse_annotation_with(ty, &|n| self.resolve_type(n))
                                 .ok()
                                 .map(|ty| (name.text.to_owned(), ty))
                         })
@@ -222,7 +222,7 @@ impl<'s> Checker<'s> {
                         let types = types
                             .iter()
                             .filter_map(|ty| {
-                                ValueType::annotation_with(ty, &|n| self.resolve_type(n)).ok()
+                                ValueType::parse_annotation_with(ty, &|n| self.resolve_type(n)).ok()
                             })
                             .collect();
                         contracts.insert(variant.text.to_owned(), types);
@@ -254,17 +254,16 @@ impl<'s> Checker<'s> {
                 ..
             } = &statements[idx].kind
             {
-                if let Some(ty) = result
-                    .as_ref()
-                    .and_then(|ty| ValueType::annotation_with(ty, &|n| self.resolve_type(n)).ok())
-                {
+                if let Some(ty) = result.as_ref().and_then(|ty| {
+                    ValueType::parse_annotation_with(ty, &|n| self.resolve_type(n)).ok()
+                }) {
                     self.function_results.insert(name.span.start, ty);
                 }
                 let parameter_types = parameters
                     .iter()
                     .map(|p| {
                         p.ty.as_ref().and_then(|ty| {
-                            ValueType::annotation_with(ty, &|n| self.resolve_type(n)).ok()
+                            ValueType::parse_annotation_with(ty, &|n| self.resolve_type(n)).ok()
                         })
                     })
                     .collect();
@@ -291,7 +290,7 @@ impl<'s> Checker<'s> {
                         continue;
                     };
                     let explicit_result = result.as_ref().and_then(|ty| {
-                        ValueType::annotation_with(ty, &|n| self.resolve_type(n)).ok()
+                        ValueType::parse_annotation_with(ty, &|n| self.resolve_type(n)).ok()
                     });
                     let mut seed = explicit_result
                         .clone()
@@ -303,8 +302,9 @@ impl<'s> Checker<'s> {
                     for parameter in parameters {
                         self.bind_pattern_silent(&parameter.pattern, &mut temp_ids);
                         if let Some(annotation) = &parameter.ty
-                            && let Ok(ty) =
-                                ValueType::annotation_with(annotation, &|n| self.resolve_type(n))
+                            && let Ok(ty) = ValueType::parse_annotation_with(annotation, &|n| {
+                                self.resolve_type(n)
+                            })
                         {
                             self.pattern_type(&parameter.pattern, &ty);
                         }
@@ -342,7 +342,8 @@ impl<'s> Checker<'s> {
                         .map(|p| {
                             p.ty.as_ref()
                                 .and_then(|t| {
-                                    ValueType::annotation_with(t, &|n| self.resolve_type(n)).ok()
+                                    ValueType::parse_annotation_with(t, &|n| self.resolve_type(n))
+                                        .ok()
                                 })
                                 .or_else(|| {
                                     if let ExprKind::Name(n) = &p.pattern.kind {
@@ -399,12 +400,24 @@ impl<'s> Checker<'s> {
             StmtKind::Declaration { value, .. } | StmtKind::Destructure { value, .. } => {
                 Self::expr_calls_suspending(value, scopes, suspending)
             }
+            StmtKind::LetElse {
+                value, else_block, ..
+            } => {
+                Self::expr_calls_suspending(value, scopes, suspending)
+                    || Self::body_calls_suspending(&else_block.stmts, scopes, suspending)
+            }
             StmtKind::If {
-                condition,
+                condition: scrutinee,
                 then_block,
                 else_block,
+            }
+            | StmtKind::IfLet {
+                value: scrutinee,
+                then_block,
+                else_block,
+                ..
             } => {
-                Self::expr_calls_suspending(condition, scopes, suspending)
+                Self::expr_calls_suspending(scrutinee, scopes, suspending)
                     || Self::body_calls_suspending(&then_block.stmts, scopes, suspending)
                     || else_block
                         .as_ref()
@@ -474,16 +487,25 @@ impl<'s> Checker<'s> {
             | ExprKind::Member { object: value, .. } => {
                 Self::expr_calls_suspending(value, scopes, suspending)
             }
+            ExprKind::TryBlock(body) => {
+                Self::body_calls_suspending(&body.stmts, scopes, suspending)
+            }
             ExprKind::Index { object, index } => {
                 Self::expr_calls_suspending(object, scopes, suspending)
                     || Self::expr_calls_suspending(index, scopes, suspending)
             }
             ExprKind::If {
-                condition,
+                condition: scrutinee,
                 then_value,
                 else_value,
+            }
+            | ExprKind::IfLet {
+                value: scrutinee,
+                then_value,
+                else_value,
+                ..
             } => {
-                Self::expr_calls_suspending(condition, scopes, suspending)
+                Self::expr_calls_suspending(scrutinee, scopes, suspending)
                     || Self::expr_calls_suspending(then_value, scopes, suspending)
                     || Self::expr_calls_suspending(else_value, scopes, suspending)
             }
@@ -509,10 +531,27 @@ impl<'s> Checker<'s> {
     pub(super) fn contains_yield(statements: &[Stmt<'s>]) -> bool {
         statements.iter().any(|statement| match &statement.kind {
             StmtKind::Yield(_) => true,
-            StmtKind::Expr(expression) => {
+            StmtKind::Expr(expression)
+            | StmtKind::Declaration {
+                value: expression, ..
+            }
+            | StmtKind::Destructure {
+                value: expression, ..
+            }
+            | StmtKind::Return(Some(expression)) => {
                 matches!(&expression.kind, ExprKind::Await(_))
             }
+            StmtKind::LetElse {
+                value, else_block, ..
+            } => {
+                matches!(&value.kind, ExprKind::Await(_)) || Self::contains_yield(&else_block.stmts)
+            }
             StmtKind::If {
+                then_block,
+                else_block,
+                ..
+            }
+            | StmtKind::IfLet {
                 then_block,
                 else_block,
                 ..
@@ -810,7 +849,10 @@ impl<'s> Checker<'s> {
                             .ty
                             .as_ref()
                             .and_then(|ty| {
-                                ValueType::annotation_with(ty, &|name| self.resolve_type(name)).ok()
+                                ValueType::parse_annotation_with(ty, &|name| {
+                                    self.resolve_type(name)
+                                })
+                                .ok()
                             })
                             .or_else(|| {
                                 pre_inferred_params
@@ -888,7 +930,8 @@ impl<'s> Checker<'s> {
                         .map(|p| {
                             p.ty.as_ref()
                                 .and_then(|t| {
-                                    ValueType::annotation_with(t, &|n| self.resolve_type(n)).ok()
+                                    ValueType::parse_annotation_with(t, &|n| self.resolve_type(n))
+                                        .ok()
                                 })
                                 .or_else(|| {
                                     if let ExprKind::Name(n) = &p.pattern.kind {
@@ -914,7 +957,21 @@ impl<'s> Checker<'s> {
                         break;
                     }
                 }
+                // Analyze the body under its implicit per-call region: escapes
+                // of the function's own cells are recorded (for `arena_run`
+                // call-site lints), not reported — returning or storing
+                // closures is legitimate for ordinary calls.
+                let previous_recording = self
+                    .record_cell_leaks
+                    .replace((name.span.start, self.region_depth));
+                let saved_try = std::mem::take(&mut self.try_blocks);
+                self.region_depth += 1;
+                self.region_strict.push(false);
                 self.statements(&body.stmts);
+                self.region_strict.pop();
+                self.region_depth -= 1;
+                self.try_blocks = saved_try;
+                self.record_cell_leaks = previous_recording;
                 let mut returns = self.inferred_returns.pop().unwrap();
                 if result_type.is_none() {
                     if BlockExits::inspect(&body.stmts).next {
@@ -1088,6 +1145,24 @@ impl<'s> Checker<'s> {
             StmtKind::Show(value) | StmtKind::Yield(value) | StmtKind::Expr(value) => {
                 self.expr(value)
             }
+            StmtKind::LetElse {
+                pattern,
+                value,
+                else_block,
+            } => {
+                self.expr(value);
+                let shape = self.shape(value);
+                self.block(else_block);
+                if BlockExits::inspect(&else_block.stmts).next {
+                    self.error(
+                        else_block.span,
+                        "let-else-must-diverge",
+                        "let-else fallback block must diverge (e.g. return, break, continue, or ?)",
+                    );
+                }
+                self.match_bindings(pattern, statement.span.end);
+                self.match_pattern_types(pattern, &shape);
+            }
             StmtKind::If {
                 condition,
                 then_block,
@@ -1095,6 +1170,25 @@ impl<'s> Checker<'s> {
             } => {
                 self.condition(condition);
                 self.block(then_block);
+                if let Some(block) = else_block {
+                    self.block(block);
+                }
+            }
+            StmtKind::IfLet {
+                pattern,
+                value,
+                then_block,
+                else_block,
+            } => {
+                self.expr(value);
+                let shape = self.shape(value);
+                self.scopes.push(HashMap::new());
+                self.scope_spans.push(then_block.span);
+                self.match_bindings(pattern, then_block.span.start);
+                self.match_pattern_types(pattern, &shape);
+                self.statements(&then_block.stmts);
+                self.scopes.pop();
+                self.scope_spans.pop();
                 if let Some(block) = else_block {
                     self.block(block);
                 }

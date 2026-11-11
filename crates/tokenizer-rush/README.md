@@ -61,10 +61,28 @@ legacy spellings. `Geometry`, `Row`, `T`, `print`, `where`, `select`, `count`,
 - `let` / `const name [: Type] = expression` creates an immutable binding;
   `mut name` or `let mut name` explicitly permits reassignment in analysis.
   Initializers are required.
+- `let <pattern> = expression else { ... }` unwraps refutable patterns (`Some(x)`,
+  `Ok(v)`, enum variants, nested tuples/records) or runs a diverging `else` block
+  (`return`, `break`, `continue`, or `?`, enforced statically via `let-else-must-diverge`).
+  `if let <pattern> = expression { ... } [else ...]` works in both statement and
+  expression positions (including `else if let` chains and Bytecode VM execution).
 - Functions, `if` / `else if` / `else`, `while`, and `for name in expression`.
   `foreach` is retained as an alias of `for`.
 - `return [expression]` inside a function; `yield expression` inside a function
   or loop (suspension executes only through the coroutine API); `break` / `continue` inside a loop.
+- Postfix `expr?` unwraps `Some(v)` / `Ok(v)` and propagates `None()` / `Err(e)`
+  to the innermost enclosing `try { ... }` block or function returning `Option` /
+  `Result`. A `try { ... }` expression block acts as a local transactional failure
+  scope backed by a lazy `O(dirty)` write-barrier undo log: if `?` short-circuits
+  on `None` / `Err` (or the block evaluates to `None` / `Err`), dirty `mut` cells,
+  newly spawned coroutines, and newly cached modules are rolled back atomically
+  (`await`, `import`, and `export` inside `try { ... }` are rejected statically;
+  Bytecode VM explicitly rejects `try { ... }`). Host callers can also invoke
+  functions transactionally via `ScriptInstance::call_transactional`
+  (`OwnedScriptInstance::call_transactional` / `call_values_transactional`).
+  Contextual `HostRegistration` callbacks default to non-transactional (`non-transactional-host`
+  at compile time and runtime inside transactions); opt pure/read-only callbacks in
+  with `HostRegistration::with_transactional(true)`.
 - Names, decimal numbers, strings, `true`, `false`, `null`, lists, maps,
   calls, member access and indexing. A map uses `{key: value, ...}`.
 - Assignment to a name, member or index with `=`, `+=`, `-=`, `*=`, `/=`, `%=`.
@@ -80,8 +98,12 @@ legacy spellings. `Geometry`, `Row`, `T`, `print`, `where`, `select`, `count`,
 - `async fn` and `async (x) => expr` declare task functions: calling them
   spawns a coroutine task and returns an opaque task handle. Async closures
   also accept `async => expr` and `async x => expr`, and capture their
-  environment like ordinary lambdas. Statement, `let` and `return` positions
-  support `await Wait.After(..)` / `await Wait.Event(..)` and `await task`;
+  environment like ordinary lambdas. Statement, `let` (including destructuring
+  and `let ... else`), and `return` positions support `await Wait.After(..)` /
+  `await Wait.Event(..)`, `await task`, and structured concurrency combinators
+  `await task_all([...])` (`WakeRequest::All`, returning a `list` in input order
+  and cancelling siblings on failure) and `await task_race([...])`
+  (`WakeRequest::Race`, returning the first winner and cancelling losers);
   awaiting any other value returns it immediately. Event payloads are delivered
   by `CoroutineScheduler::emit_with_payload`; `emit` supplies `null`. `await`
   outside an async body is a parse error (`await-outside-async`). Bytecode
@@ -255,6 +277,41 @@ makes arenas easy to store, pass around and even construct by hand. Like
 `map`/`filter` callbacks, an `arena_run` callback is driven synchronously and
 therefore must not `yield`; analysis rejects suspending callbacks at compile
 time, while non-suspending runs compose with coroutines freely.
+
+Arenas can also **persist**: `arena(name, budget?, true)` parks its frame
+between runs instead of sweeping it — cells captured by escaping closures
+keep the arena's stamp and their values across separate `arena_run` calls,
+the budget bounds the total parked live cells (not just one run), and
+`arena_stats` gains a `live` field showing the current parked count:
+
+```text
+const cache = arena("cache", 1024, true)
+arena_run(cache, () => warm_up())    // survivors stay in the arena
+arena_run(cache, () => use_cache())  // ...and are visible here
+arena_reset(cache)                   // holders observe null, budget frees up
+```
+
+`arena_reset(handle)` retires the parked frame: every surviving cell is
+emptied in place, so closures holding them observe `null` — exactly like a
+`move()` — and the arena starts empty on the next run. Resetting a scratch
+arena is a harmless no-op.
+
+Finally, `arena(name, budget?, persistent?, strict?)` with `strict = true`
+turns retention into an error, mirroring `strict region` blocks: a scratch
+run fails with `Strict arena cells escaped the run` if any cell would
+promote out, and a persistent run fails with `Strict arena retained new
+cells` if its parked live count grew during the run (mutating already-parked
+cells stays legal). Use strict arenas for hot paths that must not leak
+allocations into longer-lived scopes.
+
+Analysis knows about arena runs too: a callback whose body can let captured
+cells escape its implicit per-call region (an outer assignment or a returned
+closure) is reported at the `arena_run` site with the `arena-escape` lint —
+a hard error when the descriptor is a statically visible strict
+`arena(name, .., true)` literal. Ordinary calls of the same function stay
+clean: escaping a call region is only suspicious when a region was meant to
+bound it. Escapes through explicit `region` blocks inside the callback keep
+reporting as `region-escape` exactly as before.
 
 ## Rust API and compatibility
 

@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/tokenizer-core",
+    "crates/tokenizer-languages",
     "crates/tokenizer-json",
     "crates/tokenizer-url",
     "crates/tokenizer-xml",
@@ -16,58 +17,9 @@ members = [
     "crates/tokenizer-edn",
     "crates/tokenizer-ics",
     "crates/tokenizer-srt",
-    "crates/tokenizer-sql",
-    "crates/tokenizer-mongo",
-    "crates/tokenizer-bash",
     "crates/tokenizer-rush",
     "crates/rush-lang",
     "crates/tokenizer-forma",
-    "crates/tokenizer-powershell",
-    "crates/tokenizer-javascript",
-    "crates/tokenizer-typescript",
-    "crates/tokenizer-python",
-    "crates/tokenizer-java",
-    "crates/tokenizer-csharp",
-    "crates/tokenizer-go",
-    "crates/tokenizer-php",
-    "crates/tokenizer-ruby",
-    "crates/tokenizer-c",
-    "crates/tokenizer-cpp",
-    "crates/tokenizer-rust",
-    "crates/tokenizer-kotlin",
-    "crates/tokenizer-swift",
-    "crates/tokenizer-dart",
-    "crates/tokenizer-r",
-    "crates/tokenizer-visualbasic",
-    "crates/tokenizer-fortran",
-    "crates/tokenizer-matlab",
-    "crates/tokenizer-delphi",
-    "crates/tokenizer-scala",
-    "crates/tokenizer-lua",
-    "crates/tokenizer-perl",
-    "crates/tokenizer-objectivec",
-    "crates/tokenizer-julia",
-    "crates/tokenizer-assembly",
-    "crates/tokenizer-groovy",
-    "crates/tokenizer-haskell",
-    "crates/tokenizer-elixir",
-    "crates/tokenizer-erlang",
-    "crates/tokenizer-clojure",
-    "crates/tokenizer-fsharp",
-    "crates/tokenizer-ocaml",
-    "crates/tokenizer-lisp",
-    "crates/tokenizer-scheme",
-    "crates/tokenizer-solidity",
-    "crates/tokenizer-zig",
-    "crates/tokenizer-nim",
-    "crates/tokenizer-dlang",
-    "crates/tokenizer-cobol",
-    "crates/tokenizer-ada",
-    "crates/tokenizer-prolog",
-    "crates/tokenizer-abap",
-    "crates/tokenizer-vhdl",
-    "crates/tokenizer-verilog",
-    "crates/tokenizer-graphql",
     "wasm",
 ]
 resolver = "3"
@@ -91,8 +43,9 @@ name = "themoretheless_tokenizer"
 path = "src/lib.rs"
 
 [dependencies]
-themoretheless-tokenizer-forma = { path = "crates/tokenizer-forma", version = "0.8.0", optional = true }
 themoretheless-tokenizer-core = { path = "crates/tokenizer-core", version = "0.8.0" }
+themoretheless-tokenizer-languages = { path = "crates/tokenizer-languages", version = "0.8.0", optional = true }
+themoretheless-tokenizer-forma = { path = "crates/tokenizer-forma", version = "0.8.0", optional = true }
 themoretheless-tokenizer-json = { path = "crates/tokenizer-json", version = "0.8.0", optional = true }
 themoretheless-tokenizer-url = { path = "crates/tokenizer-url", version = "0.8.0", optional = true }
 themoretheless-tokenizer-xml = { path = "crates/tokenizer-xml", version = "0.8.0", optional = true }
@@ -108,60 +61,11 @@ themoretheless-tokenizer-hcl = { path = "crates/tokenizer-hcl", version = "0.8.0
 themoretheless-tokenizer-edn = { path = "crates/tokenizer-edn", version = "0.8.0", optional = true }
 themoretheless-tokenizer-ics = { path = "crates/tokenizer-ics", version = "0.8.0", optional = true }
 themoretheless-tokenizer-srt = { path = "crates/tokenizer-srt", version = "0.8.0", optional = true }
-themoretheless-tokenizer-sql = { path = "crates/tokenizer-sql", version = "0.8.0", optional = true }
-themoretheless-tokenizer-mongo = { path = "crates/tokenizer-mongo", version = "0.8.0", optional = true }
-themoretheless-tokenizer-bash = { path = "crates/tokenizer-bash", version = "0.8.0", optional = true }
 themoretheless-tokenizer-rush = { path = "crates/tokenizer-rush", version = "0.8.0", optional = true }
-themoretheless-tokenizer-powershell = { path = "crates/tokenizer-powershell", version = "0.8.0", optional = true }
-themoretheless-tokenizer-javascript = { path = "crates/tokenizer-javascript", version = "0.8.0", optional = true }
-themoretheless-tokenizer-typescript = { path = "crates/tokenizer-typescript", version = "0.8.0", optional = true }
-themoretheless-tokenizer-python = { path = "crates/tokenizer-python", version = "0.8.0", optional = true }
-themoretheless-tokenizer-java = { path = "crates/tokenizer-java", version = "0.8.0", optional = true }
-themoretheless-tokenizer-csharp = { path = "crates/tokenizer-csharp", version = "0.8.0", optional = true }
-themoretheless-tokenizer-go = { path = "crates/tokenizer-go", version = "0.8.0", optional = true }
-themoretheless-tokenizer-php = { path = "crates/tokenizer-php", version = "0.8.0", optional = true }
-themoretheless-tokenizer-ruby = { path = "crates/tokenizer-ruby", version = "0.8.0", optional = true }
-themoretheless-tokenizer-c = { path = "crates/tokenizer-c", version = "0.8.0", optional = true }
-themoretheless-tokenizer-cpp = { path = "crates/tokenizer-cpp", version = "0.8.0", optional = true }
-themoretheless-tokenizer-rust = { path = "crates/tokenizer-rust", version = "0.8.0", optional = true }
-themoretheless-tokenizer-kotlin = { path = "crates/tokenizer-kotlin", version = "0.8.0", optional = true }
-themoretheless-tokenizer-swift = { path = "crates/tokenizer-swift", version = "0.8.0", optional = true }
-themoretheless-tokenizer-dart = { path = "crates/tokenizer-dart", version = "0.8.0", optional = true }
-themoretheless-tokenizer-r = { path = "crates/tokenizer-r", version = "0.8.0", optional = true }
-themoretheless-tokenizer-visualbasic = { path = "crates/tokenizer-visualbasic", version = "0.8.0", optional = true }
-themoretheless-tokenizer-fortran = { path = "crates/tokenizer-fortran", version = "0.8.0", optional = true }
-themoretheless-tokenizer-matlab = { path = "crates/tokenizer-matlab", version = "0.8.0", optional = true }
-themoretheless-tokenizer-delphi = { path = "crates/tokenizer-delphi", version = "0.8.0", optional = true }
-themoretheless-tokenizer-scala = { path = "crates/tokenizer-scala", version = "0.8.0", optional = true }
-themoretheless-tokenizer-lua = { path = "crates/tokenizer-lua", version = "0.8.0", optional = true }
-themoretheless-tokenizer-perl = { path = "crates/tokenizer-perl", version = "0.8.0", optional = true }
-themoretheless-tokenizer-objectivec = { path = "crates/tokenizer-objectivec", version = "0.8.0", optional = true }
-themoretheless-tokenizer-julia = { path = "crates/tokenizer-julia", version = "0.8.0", optional = true }
-themoretheless-tokenizer-assembly = { path = "crates/tokenizer-assembly", version = "0.8.0", optional = true }
-themoretheless-tokenizer-groovy = { path = "crates/tokenizer-groovy", version = "0.8.0", optional = true }
-themoretheless-tokenizer-haskell = { path = "crates/tokenizer-haskell", version = "0.8.0", optional = true }
-themoretheless-tokenizer-elixir = { path = "crates/tokenizer-elixir", version = "0.8.0", optional = true }
-themoretheless-tokenizer-erlang = { path = "crates/tokenizer-erlang", version = "0.8.0", optional = true }
-themoretheless-tokenizer-clojure = { path = "crates/tokenizer-clojure", version = "0.8.0", optional = true }
-themoretheless-tokenizer-fsharp = { path = "crates/tokenizer-fsharp", version = "0.8.0", optional = true }
-themoretheless-tokenizer-ocaml = { path = "crates/tokenizer-ocaml", version = "0.8.0", optional = true }
-themoretheless-tokenizer-lisp = { path = "crates/tokenizer-lisp", version = "0.8.0", optional = true }
-themoretheless-tokenizer-scheme = { path = "crates/tokenizer-scheme", version = "0.8.0", optional = true }
-themoretheless-tokenizer-solidity = { path = "crates/tokenizer-solidity", version = "0.8.0", optional = true }
-themoretheless-tokenizer-zig = { path = "crates/tokenizer-zig", version = "0.8.0", optional = true }
-themoretheless-tokenizer-nim = { path = "crates/tokenizer-nim", version = "0.8.0", optional = true }
-themoretheless-tokenizer-dlang = { path = "crates/tokenizer-dlang", version = "0.8.0", optional = true }
-themoretheless-tokenizer-cobol = { path = "crates/tokenizer-cobol", version = "0.8.0", optional = true }
-themoretheless-tokenizer-ada = { path = "crates/tokenizer-ada", version = "0.8.0", optional = true }
-themoretheless-tokenizer-prolog = { path = "crates/tokenizer-prolog", version = "0.8.0", optional = true }
-themoretheless-tokenizer-abap = { path = "crates/tokenizer-abap", version = "0.8.0", optional = true }
-themoretheless-tokenizer-vhdl = { path = "crates/tokenizer-vhdl", version = "0.8.0", optional = true }
-themoretheless-tokenizer-verilog = { path = "crates/tokenizer-verilog", version = "0.8.0", optional = true }
-themoretheless-tokenizer-graphql = { path = "crates/tokenizer-graphql", version = "0.8.0", optional = true }
 
 [features]
-forma = ["dep:themoretheless-tokenizer-forma"]
 default = ["json", "url"]
+forma = ["dep:themoretheless-tokenizer-forma"]
 json = ["dep:themoretheless-tokenizer-json"]
 url = ["dep:themoretheless-tokenizer-url"]
 xml = ["dep:themoretheless-tokenizer-xml"]
@@ -182,56 +86,59 @@ srt = ["dep:themoretheless-tokenizer-srt"]
 vtt = ["srt"]
 json5 = ["json"]
 jsonl = ["json"]
-sql = ["dep:themoretheless-tokenizer-sql"]
-mongo = ["dep:themoretheless-tokenizer-mongo"]
-bash = ["dep:themoretheless-tokenizer-bash"]
 rush = ["dep:themoretheless-tokenizer-rush"]
-powershell = ["dep:themoretheless-tokenizer-powershell"]
-javascript = ["dep:themoretheless-tokenizer-javascript"]
-typescript = ["dep:themoretheless-tokenizer-typescript"]
-python = ["dep:themoretheless-tokenizer-python"]
-java = ["dep:themoretheless-tokenizer-java"]
-csharp = ["dep:themoretheless-tokenizer-csharp"]
-go = ["dep:themoretheless-tokenizer-go"]
-php = ["dep:themoretheless-tokenizer-php"]
-ruby = ["dep:themoretheless-tokenizer-ruby"]
-c = ["dep:themoretheless-tokenizer-c"]
-cpp = ["dep:themoretheless-tokenizer-cpp"]
-rust = ["dep:themoretheless-tokenizer-rust"]
-kotlin = ["dep:themoretheless-tokenizer-kotlin"]
-swift = ["dep:themoretheless-tokenizer-swift"]
-dart = ["dep:themoretheless-tokenizer-dart"]
-r = ["dep:themoretheless-tokenizer-r"]
-visualbasic = ["dep:themoretheless-tokenizer-visualbasic"]
-fortran = ["dep:themoretheless-tokenizer-fortran"]
-matlab = ["dep:themoretheless-tokenizer-matlab"]
-delphi = ["dep:themoretheless-tokenizer-delphi"]
-scala = ["dep:themoretheless-tokenizer-scala"]
-lua = ["dep:themoretheless-tokenizer-lua"]
-perl = ["dep:themoretheless-tokenizer-perl"]
-objectivec = ["dep:themoretheless-tokenizer-objectivec"]
-julia = ["dep:themoretheless-tokenizer-julia"]
-assembly = ["dep:themoretheless-tokenizer-assembly"]
-groovy = ["dep:themoretheless-tokenizer-groovy"]
-haskell = ["dep:themoretheless-tokenizer-haskell"]
-elixir = ["dep:themoretheless-tokenizer-elixir"]
-erlang = ["dep:themoretheless-tokenizer-erlang"]
-clojure = ["dep:themoretheless-tokenizer-clojure"]
-fsharp = ["dep:themoretheless-tokenizer-fsharp"]
-ocaml = ["dep:themoretheless-tokenizer-ocaml"]
-lisp = ["dep:themoretheless-tokenizer-lisp"]
-scheme = ["dep:themoretheless-tokenizer-scheme"]
-solidity = ["dep:themoretheless-tokenizer-solidity"]
-zig = ["dep:themoretheless-tokenizer-zig"]
-nim = ["dep:themoretheless-tokenizer-nim"]
-dlang = ["dep:themoretheless-tokenizer-dlang"]
-cobol = ["dep:themoretheless-tokenizer-cobol"]
-ada = ["dep:themoretheless-tokenizer-ada"]
-prolog = ["dep:themoretheless-tokenizer-prolog"]
-abap = ["dep:themoretheless-tokenizer-abap"]
-vhdl = ["dep:themoretheless-tokenizer-vhdl"]
-verilog = ["dep:themoretheless-tokenizer-verilog"]
-graphql = ["dep:themoretheless-tokenizer-graphql"]
+
+# Consolidated table-driven programming & query languages (`crates/tokenizer-languages`)
+sql = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/sql"]
+mongo = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/mongo"]
+bash = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/bash"]
+powershell = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/powershell"]
+javascript = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/javascript"]
+typescript = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/typescript"]
+python = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/python"]
+java = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/java"]
+csharp = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/csharp"]
+go = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/go"]
+php = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/php"]
+ruby = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/ruby"]
+c = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/c"]
+cpp = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/cpp"]
+rust = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/rust"]
+kotlin = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/kotlin"]
+swift = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/swift"]
+dart = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/dart"]
+r = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/r"]
+visualbasic = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/visualbasic"]
+fortran = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/fortran"]
+matlab = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/matlab"]
+delphi = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/delphi"]
+scala = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/scala"]
+lua = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/lua"]
+perl = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/perl"]
+objectivec = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/objectivec"]
+julia = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/julia"]
+assembly = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/assembly"]
+groovy = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/groovy"]
+haskell = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/haskell"]
+elixir = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/elixir"]
+erlang = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/erlang"]
+clojure = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/clojure"]
+fsharp = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/fsharp"]
+ocaml = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/ocaml"]
+lisp = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/lisp"]
+scheme = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/scheme"]
+solidity = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/solidity"]
+zig = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/zig"]
+nim = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/nim"]
+dlang = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/dlang"]
+cobol = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/cobol"]
+ada = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/ada"]
+prolog = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/prolog"]
+abap = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/abap"]
+vhdl = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/vhdl"]
+verilog = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/verilog"]
+graphql = ["dep:themoretheless-tokenizer-languages", "themoretheless-tokenizer-languages/graphql"]
+
 wave1 = ["xml", "html", "css", "yaml", "toml", "markdown"]
 wave2 = ["sql", "mongo", "bash", "powershell"]
 wave3 = ["javascript", "typescript"]

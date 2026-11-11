@@ -157,11 +157,9 @@ impl SysHost {
             } else {
                 vec![string.clone()]
             };
-            registrations.push(HostRegistration::new(
-                name,
-                parameters,
-                outcome(ty),
-                move |args, _| {
+            let read_only = matches!(kind, 0 | 2 | 7);
+            registrations.push(
+                HostRegistration::new(name, parameters, outcome(ty), move |args, _| {
                     let path = context.borrow().cwd.join(text(&args[0]));
                     let operation = (|| -> Result<Value<'_>, String> {
                         Ok(match kind {
@@ -235,15 +233,13 @@ impl SysHost {
                         })
                     })();
                     Ok(result(operation))
-                },
-            ));
+                })
+                .with_transactional(read_only),
+            );
         }
         let ctx = context.clone();
-        registrations.push(HostRegistration::new(
-            "__sys_args",
-            vec![],
-            list,
-            move |_, _| {
+        registrations.push(
+            HostRegistration::new("__sys_args", vec![], list, move |_, _| {
                 Ok(Value::List(
                     ctx.borrow()
                         .args
@@ -252,8 +248,9 @@ impl SysHost {
                         .map(Value::String)
                         .collect(),
                 ))
-            },
-        ));
+            })
+            .with_transactional(true),
+        );
         let bytes = limits.bytes;
         let timeout = limits.timeout;
         registrations.push(HostRegistration::new(
@@ -280,24 +277,27 @@ impl SysHost {
             ));
         }
         let ctx = context.clone();
-        registrations.push(HostRegistration::new(
-            "__sys_env",
-            vec![string.clone()],
-            ValueType::Option(Box::new(string.clone())),
-            move |args, _| {
-                let key = text(&args[0]);
-                let value = ctx
-                    .borrow()
-                    .env
-                    .get(key)
-                    .cloned()
-                    .or_else(|| std::env::var(key).ok());
-                Ok(match value {
-                    Some(s) => Value::Variant("Some", vec![Value::String(s)]),
-                    None => Value::Variant("None", vec![]),
-                })
-            },
-        ));
+        registrations.push(
+            HostRegistration::new(
+                "__sys_env",
+                vec![string.clone()],
+                ValueType::Option(Box::new(string.clone())),
+                move |args, _| {
+                    let key = text(&args[0]);
+                    let value = ctx
+                        .borrow()
+                        .env
+                        .get(key)
+                        .cloned()
+                        .or_else(|| std::env::var(key).ok());
+                    Ok(match value {
+                        Some(s) => Value::Variant("Some", vec![Value::String(s)]),
+                        None => Value::Variant("None", vec![]),
+                    })
+                },
+            )
+            .with_transactional(true),
+        );
         let ctx = context.clone();
         let limit = limits.bytes;
         registrations.push(HostRegistration::new(
@@ -329,11 +329,8 @@ impl SysHost {
                 Ok(result(Ok(Value::Bool(true))))
             },
         ));
-        registrations.push(HostRegistration::new(
-            "__sys_cwd",
-            vec![],
-            string,
-            move |_, _| {
+        registrations.push(
+            HostRegistration::new("__sys_cwd", vec![], string, move |_, _| {
                 Ok(Value::String(
                     context
                         .borrow()
@@ -342,8 +339,9 @@ impl SysHost {
                         .ok_or("Non-UTF-8 working directory")?
                         .to_owned(),
                 ))
-            },
-        ));
+            })
+            .with_transactional(true),
+        );
         Self { registrations }
     }
 }

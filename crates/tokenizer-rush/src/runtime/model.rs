@@ -317,17 +317,9 @@ impl<'a, 's> ModelInstance<'a, 's> {
             .try_clone()
             .map_err(|e| self.script.runtime.environment_error(self.script.span, e))?;
         let old_output = self.script.initial_value.clone();
-        // Pin live mutable captures so collection cannot recycle their slots during
-        // an update, and save their values for rollback (including imported state).
-        let mut cells = memory::Slots::new(&self.script.runtime.memory, 0)
-            .map_err(|e| self.script.runtime.environment_error(self.script.span, e))?;
-        for (index, id) in self.script.runtime.cell_ids.iter().enumerate() {
-            if let Some(id) = id.upgrade() {
-                cells
-                    .push((index, self.script.runtime.cells[index].clone(), id))
-                    .map_err(|e| self.script.runtime.environment_error(self.script.span, e))?;
-            }
-        }
+        // Record mutable cell writes lazily so failed updates roll back cleanly
+        // (including imported module state).
+        self.script.runtime.begin_transaction(self.script.span)?;
         let mut dirty = vec![false; self.model.nodes.len()];
         let parameter = self
             .model
@@ -375,12 +367,11 @@ impl<'a, 's> ModelInstance<'a, 's> {
         if result.is_err() {
             self.script.environment = snapshot;
             self.script.initial_value = old_output;
-            for (index, value, _) in cells.iter() {
-                self.script.runtime.cells[*index] = value.clone();
-            }
+            self.script.runtime.rollback_transaction();
+        } else {
+            self.script.runtime.commit_transaction(self.script.span)?;
+            self.script.runtime.reclaim_cells();
         }
-        drop(cells);
-        self.script.runtime.reclaim_cells();
         result.map_err(|e| {
             if e.location.is_some() {
                 return e;

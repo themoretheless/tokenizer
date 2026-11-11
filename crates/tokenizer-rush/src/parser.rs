@@ -18,11 +18,23 @@ struct Token {
 fn expr_bytes(expr: &Expr<'_>) -> usize {
     let kind = match &expr.kind {
         ExprKind::Try(inner) => expr_bytes(inner),
+        ExprKind::TryBlock(body) => block_bytes(body),
         ExprKind::If {
             condition,
             then_value,
             else_value,
         } => expr_bytes(condition) + expr_bytes(then_value) + expr_bytes(else_value),
+        ExprKind::IfLet {
+            pattern,
+            value,
+            then_value,
+            else_value,
+        } => {
+            expr_bytes(pattern)
+                + expr_bytes(value)
+                + expr_bytes(then_value)
+                + expr_bytes(else_value)
+        }
         ExprKind::Lambda {
             parameters, body, ..
         } => {
@@ -117,6 +129,11 @@ fn stmt_bytes(stmt: &Stmt<'_>) -> usize {
         StmtKind::Export(names) => names.capacity() * std::mem::size_of::<Name>(),
         StmtKind::Import(_) => 0,
         StmtKind::Destructure { pattern, value } => expr_bytes(pattern) + expr_bytes(value),
+        StmtKind::LetElse {
+            pattern,
+            value,
+            else_block,
+        } => expr_bytes(pattern) + expr_bytes(value) + block_bytes(else_block),
         StmtKind::Function {
             parameters,
             result,
@@ -143,6 +160,17 @@ fn stmt_bytes(stmt: &Stmt<'_>) -> usize {
             else_block,
         } => {
             expr_bytes(condition)
+                + block_bytes(then_block)
+                + else_block.as_ref().map_or(0, block_bytes)
+        }
+        StmtKind::IfLet {
+            pattern,
+            value,
+            then_block,
+            else_block,
+        } => {
+            expr_bytes(pattern)
+                + expr_bytes(value)
                 + block_bytes(then_block)
                 + else_block.as_ref().map_or(0, block_bytes)
         }
@@ -207,6 +235,7 @@ pub(crate) fn run(source: &str, lexed: Lexed, valid: bool, limits: InputLimits) 
         limits,
         depth: 0,
         functions: 0,
+        try_blocks: 0,
         async_fns: 0,
         loops: 0,
         roles: Vec::new(),
@@ -227,6 +256,19 @@ pub(crate) fn run(source: &str, lexed: Lexed, valid: bool, limits: InputLimits) 
                 "Parse output byte limit exceeded",
             ));
         }
+    }
+    if parser.roles.len() > 1 {
+        parser.roles.sort_by_key(|(span, _)| (span.start, span.end));
+        let mut write = 0usize;
+        for read in 1..parser.roles.len() {
+            if parser.roles[write].0 == parser.roles[read].0 {
+                parser.roles[write] = parser.roles[read];
+            } else {
+                write += 1;
+                parser.roles[write] = parser.roles[read];
+            }
+        }
+        parser.roles.truncate(write + 1);
     }
     Parse {
         source,
@@ -250,6 +292,8 @@ struct Parser<'s> {
     limits: InputLimits,
     depth: usize,
     functions: usize,
+    /// Nesting of `try { ... }` failure blocks; `?` is legal inside a function or try block.
+    try_blocks: usize,
     /// Nesting of async function/closure bodies; `await` is legal only inside one.
     async_fns: usize,
     loops: usize,
@@ -421,8 +465,11 @@ impl<'s> Parser<'s> {
                     | StmtKind::Enum { .. }
                     | StmtKind::Function { .. }
                     | StmtKind::If { .. }
+                    | StmtKind::IfLet { .. }
+                    | StmtKind::LetElse { .. }
                     | StmtKind::While { .. }
                     | StmtKind::For { .. }
+                    | StmtKind::Region { .. }
             );
             stmts.push(stmt);
             if charge {
@@ -532,6 +579,13 @@ impl<'s> Parser<'s> {
                 self.function(token.indent, true)
             }
             "export" => {
+                if self.try_blocks > 0 {
+                    self.error_at(
+                        token.raw.span,
+                        "export-inside-try",
+                        "export is not allowed inside a try block",
+                    );
+                }
                 self.bump();
                 let mut names = vec![self.inline_name("export")];
                 while self.eat(",") {
@@ -540,6 +594,13 @@ impl<'s> Parser<'s> {
                 StmtKind::Export(names)
             }
             "import" => {
+                if self.try_blocks > 0 {
+                    self.error_at(
+                        token.raw.span,
+                        "import-inside-try",
+                        "import is not allowed inside a try block",
+                    );
+                }
                 self.bump();
                 StmtKind::Import(self.inline_name("module"))
             }
@@ -551,32 +612,78 @@ impl<'s> Parser<'s> {
                 } else {
                     keyword != "mut"
                 };
-                if self.at("(") || self.at("{") {
+                let is_pattern = matches!(keyword, "let" | "const" | "mut")
+                    && !self.newline()
+                    && (self.at("(")
+                        || self.at("{")
+                        || (self.peek().is_some_and(|t| {
+                            matches!(t.raw.kind, SyntaxKind::Identifier | SyntaxKind::TypeIdent)
+                        }) && matches!(self.text_at(1), "(" | "."))
+                        || self.peek().is_some_and(|t| {
+                            matches!(t.raw.kind, SyntaxKind::NumberLit | SyntaxKind::StringLit)
+                        })
+                        || matches!(self.text(), "true" | "false" | "null" | "-" | "+"));
+                if is_pattern {
                     if !constant {
                         self.error(
                             "immutable-pattern",
                             "Destructuring bindings must be immutable",
                         );
                     }
-                    let pattern = self.expr(1, false, false);
+                    let pattern = self.match_pattern();
                     self.expect_inline("=");
                     let value = self.required_expr(false);
-                    StmtKind::Destructure { pattern, value }
+                    if self.at("else")
+                        && (!self.newline() || self.peek().unwrap().indent == token.indent)
+                    {
+                        self.bump();
+                        let else_block = self.block(token.indent);
+                        StmtKind::LetElse {
+                            pattern,
+                            value,
+                            else_block,
+                        }
+                    } else {
+                        StmtKind::Destructure { pattern, value }
+                    }
                 } else {
                     let name = self.inline_name("variable");
                     let ty = if self.eat(":") { Some(self.ty()) } else { None };
                     self.expect_inline("=");
                     let value = self.required_expr(false);
-                    StmtKind::Declaration {
-                        role: match keyword {
-                            "param" => DeclarationRole::Parameter,
-                            "node" => DeclarationRole::Node,
-                            _ => DeclarationRole::Binding,
-                        },
-                        name,
-                        constant,
-                        ty,
-                        value,
+                    if ty.is_none()
+                        && matches!(keyword, "let" | "const" | "mut")
+                        && self.at("else")
+                        && (!self.newline() || self.peek().unwrap().indent == token.indent)
+                    {
+                        if !constant {
+                            self.error(
+                                "immutable-pattern",
+                                "Destructuring bindings must be immutable",
+                            );
+                        }
+                        self.bump();
+                        let else_block = self.block(token.indent);
+                        StmtKind::LetElse {
+                            pattern: Expr {
+                                span: name.span,
+                                kind: ExprKind::Name(name),
+                            },
+                            value,
+                            else_block,
+                        }
+                    } else {
+                        StmtKind::Declaration {
+                            role: match keyword {
+                                "param" => DeclarationRole::Parameter,
+                                "node" => DeclarationRole::Node,
+                                _ => DeclarationRole::Binding,
+                            },
+                            name,
+                            constant,
+                            ty,
+                            value,
+                        }
                     }
                 }
             }
@@ -711,12 +818,15 @@ impl<'s> Parser<'s> {
             None
         };
         let old_loops = self.loops;
+        let old_try = self.try_blocks;
         self.loops = 0;
+        self.try_blocks = 0;
         self.functions += 1;
         let outer_async = std::mem::replace(&mut self.async_fns, usize::from(is_async));
         let body = self.block(indent);
         self.async_fns = outer_async;
         self.functions -= 1;
+        self.try_blocks = old_try;
         self.loops = old_loops;
         StmtKind::Function {
             name,
@@ -836,7 +946,14 @@ impl<'s> Parser<'s> {
     }
     fn if_stmt(&mut self, indent: usize) -> StmtKind<'s> {
         self.bump();
-        let condition = self.required_expr(false);
+        let let_pattern = if self.eat("let") {
+            let pattern = self.match_pattern();
+            self.expect_inline("=");
+            Some(pattern)
+        } else {
+            None
+        };
+        let condition_or_value = self.required_expr(false);
         let then_block = self.block(indent);
         let else_block =
             if self.at("else") && (!self.newline() || self.peek().unwrap().indent == indent) {
@@ -856,10 +973,19 @@ impl<'s> Parser<'s> {
             } else {
                 None
             };
-        StmtKind::If {
-            condition,
-            then_block,
-            else_block,
+        if let Some(pattern) = let_pattern {
+            StmtKind::IfLet {
+                pattern,
+                value: condition_or_value,
+                then_block,
+                else_block,
+            }
+        } else {
+            StmtKind::If {
+                condition: condition_or_value,
+                then_block,
+                else_block,
+            }
         }
     }
     fn required_expr(&mut self, multiline: bool) -> Expr<'s> {
@@ -904,11 +1030,11 @@ impl<'s> Parser<'s> {
                 let operator_span = self.span();
                 self.bump();
                 chain += 1;
-                if self.functions == 0 {
+                if self.functions == 0 && self.try_blocks == 0 {
                     self.error_at(
                         operator_span,
                         "try-outside-function",
-                        "? requires a function with an Option or Result return type",
+                        "? requires a try block or a function with an Option or Result return type",
                     );
                 }
                 left = Expr {
@@ -1146,7 +1272,11 @@ impl<'s> Parser<'s> {
             self.expect("=>");
             // Await belongs to the innermost async function or closure body.
             let outer_async = std::mem::replace(&mut self.async_fns, usize::from(is_async));
+            let outer_functions = std::mem::replace(&mut self.functions, 0);
+            let outer_try = std::mem::replace(&mut self.try_blocks, 0);
             let body = self.required_expr(multiline);
+            self.try_blocks = outer_try;
+            self.functions = outer_functions;
             self.async_fns = outer_async;
             return Expr {
                 span: Span::new(span.start, body.span.end.max(span.end)),
@@ -1158,7 +1288,14 @@ impl<'s> Parser<'s> {
             };
         }
         if self.eat("if") {
-            let condition = self.expr(0, multiline, false);
+            let let_pattern = if self.eat("let") {
+                let pattern = self.match_pattern();
+                self.expect("=");
+                Some(pattern)
+            } else {
+                None
+            };
+            let condition_or_value = self.expr(0, multiline, false);
             self.expect("{");
             let then_value = self.required_expr(true);
             self.expect("}");
@@ -1171,17 +1308,56 @@ impl<'s> Parser<'s> {
                 self.expect("}");
                 value
             };
-            return Expr {
-                span: Span::new(span.start, self.end()),
-                kind: ExprKind::If {
-                    condition: Box::new(condition),
+            let kind = if let Some(pattern) = let_pattern {
+                ExprKind::IfLet {
+                    pattern: Box::new(pattern),
+                    value: Box::new(condition_or_value),
                     then_value: Box::new(then_value),
                     else_value: Box::new(else_value),
-                },
+                }
+            } else {
+                ExprKind::If {
+                    condition: Box::new(condition_or_value),
+                    then_value: Box::new(then_value),
+                    else_value: Box::new(else_value),
+                }
+            };
+            return Expr {
+                span: Span::new(span.start, self.end()),
+                kind,
             };
         }
         if text == "match" {
             return self.match_expr(multiline);
+        }
+        if self.eat("try") {
+            let block_start = self.span().start;
+            let outer_functions = std::mem::replace(&mut self.functions, 0);
+            let outer_loops = std::mem::replace(&mut self.loops, 0);
+            let outer_async = std::mem::replace(&mut self.async_fns, 0);
+            self.try_blocks += 1;
+            let body = if self.eat("{") {
+                let stmts = self.sequence(Some("}"), None);
+                self.expect("}");
+                Block {
+                    span: Span::new(block_start, self.end().max(block_start)),
+                    stmts: std::rc::Rc::new(stmts),
+                }
+            } else {
+                self.error("expected-block", "Expected a brace block after try");
+                Block {
+                    span: Span::new(block_start, block_start),
+                    stmts: std::rc::Rc::new(vec![]),
+                }
+            };
+            self.try_blocks -= 1;
+            self.async_fns = outer_async;
+            self.loops = outer_loops;
+            self.functions = outer_functions;
+            return Expr {
+                span: Span::new(span.start, self.end().max(span.start)),
+                kind: ExprKind::TryBlock(body),
+            };
         }
         if matches!(text, "-" | "+" | "!" | "not" | "~") {
             self.bump();
@@ -1741,12 +1917,36 @@ fn offset_expr_spans(expr: &mut Expr<'_>, offset: usize) {
     expr.span.end += offset;
     match &mut expr.kind {
         ExprKind::Try(sub) => offset_expr_spans(sub, offset),
+        ExprKind::TryBlock(body) => {
+            body.span.start += offset;
+            body.span.end += offset;
+            if let Some(stmts) = std::rc::Rc::get_mut(&mut body.stmts) {
+                for stmt in stmts {
+                    stmt.span.start += offset;
+                    stmt.span.end += offset;
+                    if let StmtKind::Expr(sub) = &mut stmt.kind {
+                        offset_expr_spans(sub, offset);
+                    }
+                }
+            }
+        }
         ExprKind::If {
             condition,
             then_value,
             else_value,
         } => {
             offset_expr_spans(condition, offset);
+            offset_expr_spans(then_value, offset);
+            offset_expr_spans(else_value, offset);
+        }
+        ExprKind::IfLet {
+            pattern,
+            value,
+            then_value,
+            else_value,
+        } => {
+            offset_expr_spans(pattern, offset);
+            offset_expr_spans(value, offset);
             offset_expr_spans(then_value, offset);
             offset_expr_spans(else_value, offset);
         }

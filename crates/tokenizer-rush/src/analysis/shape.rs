@@ -1,5 +1,6 @@
 use super::Checker;
-use crate::{Builtin, Expr, ExprKind, HostFunction, Name, ValueType};
+use crate::analysis::HostSignature;
+use crate::{Builtin, Expr, ExprKind, Name, ValueType};
 use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
@@ -154,10 +155,10 @@ impl<'s> Checker<'s> {
     pub(super) fn literal_number(expression: &Expr<'_>) -> Option<f64> {
         match &expression.kind {
             ExprKind::Number(text) => {
-                if crate::runtime::is_int_literal(text) {
-                    crate::runtime::parse_int_literal(text).map(|i| i as f64)
+                if crate::catalog::is_int_literal(text) {
+                    crate::catalog::parse_int_literal(text).map(|i| i as f64)
                 } else {
-                    crate::runtime::parse_f64_literal(text)
+                    crate::catalog::parse_f64_literal(text)
                 }
             }
             ExprKind::Unary {
@@ -218,9 +219,14 @@ impl<'s> Checker<'s> {
                 {
                     return self.builtin_aliases.get(&binding.1.start).copied();
                 }
-                crate::runtime::builtins::lookup_builtin(name.text)
+                crate::catalog::lookup_builtin(name.text)
             }
             ExprKind::If {
+                then_value,
+                else_value,
+                ..
+            }
+            | ExprKind::IfLet {
                 then_value,
                 else_value,
                 ..
@@ -275,6 +281,11 @@ impl<'s> Checker<'s> {
                 then_value,
                 else_value,
                 ..
+            }
+            | ExprKind::IfLet {
+                then_value,
+                else_value,
+                ..
             } => {
                 let mut alternatives = self.known_arity(then_value)?;
                 for arity in self.known_arity(else_value)? {
@@ -288,7 +299,7 @@ impl<'s> Checker<'s> {
         }
     }
 
-    pub(super) fn known_host(&self, expression: &Expr<'s>) -> Option<Rc<HostFunction>> {
+    pub(super) fn known_host(&self, expression: &Expr<'s>) -> Option<Rc<HostSignature>> {
         if self.host_functions.is_empty() {
             return None;
         }
@@ -479,6 +490,50 @@ impl<'s> Checker<'s> {
         }
     }
 
+    /// Check whether an expression is statically known to produce an `Option`
+    /// (`Some(true)`), a `Result` (`Some(false)`), or an unknown/dynamic value
+    /// (`None`). Returns `Err(())` if it is statically known to be neither
+    /// `Option` nor `Result`.
+    pub(super) fn try_family(&self, expression: &Expr<'s>) -> Result<Option<bool>, ()> {
+        if let ExprKind::Call { callee, arguments } = &expression.kind
+            && let Some(builtin) = self.known_builtin(callee)
+        {
+            match (builtin, arguments.len()) {
+                (Builtin::Some, 1) | (Builtin::None, 0) => return Ok(Some(true)),
+                (Builtin::Ok | Builtin::Err, 1) => return Ok(Some(false)),
+                _ => {}
+            }
+        }
+        match self.shape(expression) {
+            Shape::Typed(ValueType::Option(_)) => Ok(Some(true)),
+            Shape::Typed(ValueType::Result(_, _)) => Ok(Some(false)),
+            Shape::Unknown => Ok(None),
+            Shape::Alternatives(shapes) => {
+                let mut family = None;
+                for shape in shapes {
+                    match shape {
+                        Shape::Typed(ValueType::Option(_)) => {
+                            if family == Some(false) {
+                                return Err(());
+                            }
+                            family = Some(true);
+                        }
+                        Shape::Typed(ValueType::Result(_, _)) => {
+                            if family == Some(true) {
+                                return Err(());
+                            }
+                            family = Some(false);
+                        }
+                        Shape::Unknown => {}
+                        _ => return Err(()),
+                    }
+                }
+                Ok(family)
+            }
+            _ => Err(()),
+        }
+    }
+
     pub(super) fn shape(&self, expression: &Expr<'s>) -> Shape {
         if let Some(shape) = self
             .expression_shapes
@@ -489,8 +544,64 @@ impl<'s> Checker<'s> {
         match &expression.kind {
             ExprKind::Await(inner) => match &inner.kind {
                 // `await make()` yields the async function's annotated result;
-                // a bare handle or a plain value has no further contract.
+                // `await task_all([...])` / `await task_race([...])` propagate element shapes.
                 ExprKind::Call { callee, arguments } => {
+                    match self.known_builtin(callee) {
+                        Some(Builtin::TaskAll) => {
+                            if let Some(Expr {
+                                kind: ExprKind::List(items) | ExprKind::Tuple(items),
+                                ..
+                            }) = arguments.first()
+                            {
+                                let item_shapes: Vec<Shape> = items
+                                    .iter()
+                                    .map(|item| {
+                                        self.shape(&Expr {
+                                            span: item.span,
+                                            kind: ExprKind::Await(Box::new(item.clone())),
+                                        })
+                                    })
+                                    .collect();
+                                if let Some(Shape::Typed(first_ty)) = item_shapes.first()
+                                    && item_shapes
+                                        .iter()
+                                        .all(|s| s == &Shape::Typed(first_ty.clone()))
+                                {
+                                    return Shape::Typed(ValueType::List(Box::new(
+                                        first_ty.clone(),
+                                    )));
+                                }
+                                return Shape::List(item_shapes);
+                            }
+                            return Shape::Unknown;
+                        }
+                        Some(Builtin::TaskRace) => {
+                            if let Some(Expr {
+                                kind: ExprKind::List(items) | ExprKind::Tuple(items),
+                                ..
+                            }) = arguments.first()
+                                && !items.is_empty()
+                            {
+                                let item_shapes: Vec<Shape> = items
+                                    .iter()
+                                    .map(|item| {
+                                        self.shape(&Expr {
+                                            span: item.span,
+                                            kind: ExprKind::Await(Box::new(item.clone())),
+                                        })
+                                    })
+                                    .collect();
+                                return if item_shapes.iter().all(|s| Some(s) == item_shapes.first())
+                                {
+                                    item_shapes.into_iter().next().unwrap_or(Shape::Unknown)
+                                } else {
+                                    Shape::Alternatives(item_shapes)
+                                };
+                            }
+                            return Shape::Unknown;
+                        }
+                        _ => {}
+                    }
                     match self.user_constructor(callee) {
                         Some((name, Some(variant)))
                             if name.ends_with("Wait") && variant == "Event" =>
@@ -518,6 +629,10 @@ impl<'s> Checker<'s> {
                 Shape::Typed(ValueType::Option(ty) | ValueType::Result(ty, _)) => Shape::Typed(*ty),
                 _ => Shape::Unknown,
             },
+            ExprKind::TryBlock(body) => match body.stmts.last().map(|stmt| &stmt.kind) {
+                Some(crate::StmtKind::Expr(last) | crate::StmtKind::Show(last)) => self.shape(last),
+                _ => Shape::Typed(ValueType::Null),
+            },
             ExprKind::Name(name) => self
                 .scopes
                 .iter()
@@ -525,7 +640,7 @@ impl<'s> Checker<'s> {
                 .find_map(|scope| scope.get(name.text))
                 .map_or(Shape::Unknown, |binding| self.binding_shape(binding)),
             ExprKind::Number(text) => {
-                if crate::runtime::is_int_literal(text) {
+                if crate::catalog::is_int_literal(text) {
                     Shape::Typed(ValueType::Int)
                 } else {
                     Shape::Typed(ValueType::Number)
@@ -713,6 +828,11 @@ impl<'s> Checker<'s> {
                 }
             }
             ExprKind::If {
+                then_value,
+                else_value,
+                ..
+            }
+            | ExprKind::IfLet {
                 then_value,
                 else_value,
                 ..

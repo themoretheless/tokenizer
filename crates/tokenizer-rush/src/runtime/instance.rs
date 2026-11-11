@@ -241,6 +241,24 @@ impl OwnedScriptInstance {
             StateValue::from_value(&value).map_err(|e| instance.state_error(e))
         })
     }
+    /// Invoke a named callable transactionally with automatic state rollback on
+    /// `RuntimeError` or `None` / `Err` variant return.
+    pub fn call_transactional(
+        &mut self,
+        name: &str,
+        arguments: &[StateValue],
+        limits: ExecutionLimits,
+    ) -> Result<StateValue> {
+        self.with_instance(|instance| {
+            let arguments = arguments
+                .iter()
+                .map(StateValue::to_value)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| instance.state_error(e))?;
+            let value = instance.call_transactional(name, &arguments, limits)?;
+            StateValue::from_value(&value).map_err(|e| instance.state_error(e))
+        })
+    }
     pub fn export_state(&mut self, names: &[&str]) -> Result<ScriptState> {
         self.with_instance(|i| i.export_state(names))
     }
@@ -394,6 +412,13 @@ impl Runtime<'_, '_> {
         }
         for task in self.coroutines.values() {
             usage.value(&Value::Function(task.function.clone()));
+            for value in task
+                .pending_wake
+                .iter()
+                .chain(task.pending_all.iter().flatten())
+            {
+                usage.value(value);
+            }
             usage.add(
                 task.frames
                     .capacity()
@@ -556,6 +581,19 @@ impl OwnedScriptInstance {
     ) -> Result<Value<'static>> {
         self.with_instance(|instance| {
             owned_value(instance.call(name, arguments, limits)?)
+                .map_err(|e| instance.state_error(e))
+        })
+    }
+    /// Transactional variant of `call_values`: rolls back mutable cell bindings on
+    /// `RuntimeError` or `None` / `Err` result.
+    pub fn call_values_transactional(
+        &mut self,
+        name: &str,
+        arguments: &[Value<'static>],
+        limits: ExecutionLimits,
+    ) -> Result<Value<'static>> {
+        self.with_instance(|instance| {
+            owned_value(instance.call_transactional(name, arguments, limits)?)
                 .map_err(|e| instance.state_error(e))
         })
     }

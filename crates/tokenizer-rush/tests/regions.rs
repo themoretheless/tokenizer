@@ -895,3 +895,110 @@ fn arena_reset_empties_surviving_cells() {
         Value::Number(1.0)
     );
 }
+
+#[test]
+fn strict_scratch_arena_rejects_escaping_cells() {
+    // Same code passes without the strict flag...
+    assert_eq!(
+        evaluate(
+            "const a = arena(\"s\")\nmut keep = () => 0\nfn body() { mut n = 7\nkeep = () => n\nreturn 1 }\narena_run(a, body)\nkeep()",
+            2000
+        )
+        .unwrap(),
+        Value::Number(7.0)
+    );
+    // ...but a strict arena fails the run when cells escape it.
+    assert!(
+        evaluate(
+            "const a = arena(\"s\", null, false, true)\nmut keep = () => 0\nfn body() { mut n = 7\nkeep = () => n\nreturn 1 }\narena_run(a, body)",
+            2000
+        )
+        .is_err()
+    );
+    // Pure scratch still passes under strict.
+    assert_eq!(
+        evaluate(
+            "const a = arena(\"s\", null, false, true)\nfn body() { mut t = 5\nreturn t + 1 }\narena_run(a, body)",
+            2000
+        )
+        .unwrap(),
+        Value::Number(6.0)
+    );
+}
+
+#[test]
+fn strict_persistent_arena_rejects_growth() {
+    // A strict persistent arena must not grow its parked live cells per run.
+    assert!(
+        evaluate(
+            "const a = arena(\"cache\", null, true, true)\nmut keep = () => 0\nfn body() { mut n = 1\nkeep = () => n }\narena_run(a, body)",
+            2000
+        )
+        .is_err()
+    );
+    // Reading and mutating existing parked cells is fine; only growth fails.
+    assert_eq!(
+        evaluate(
+            "const a = arena(\"cache\", null, true, true)\nmut get = () => 0\nmut bump = () => 0\nfn first() { mut n = 10\nget = () => n\nbump = () => n += 1 }\nconst lax = arena(\"cache\", null, true)\narena_run(lax, first)\nfn second() { return bump() }\narena_run(a, second)\nget()",
+            2000
+        )
+        .unwrap(),
+        Value::Number(11.0)
+    );
+}
+
+#[test]
+fn arena_run_callback_escapes_lint_statically() {
+    // A callback whose body stores a captured local into an outer binding
+    // leaks cells out of the run: linted at the arena_run site.
+    let result = analyze(
+        "mut keep = () => 0\nfn body() { mut n = 1\nkeep = () => n }\narena_run(arena(\"s\"), body)",
+    );
+    assert!(result.is_valid(), "{:?}", result.diagnostics);
+    assert!(
+        result.diagnostics.iter().any(|d| d.code == "arena-escape"),
+        "{:?}",
+        result.diagnostics
+    );
+    // Returning a captured closure leaks just the same.
+    let result = analyze("fn body() { mut n = 1\nreturn () => n }\narena_run(arena(\"s\"), body)");
+    assert!(
+        result.diagnostics.iter().any(|d| d.code == "arena-escape"),
+        "{:?}",
+        result.diagnostics
+    );
+    // Scalar copies move freely.
+    let result =
+        analyze("mut keep = 0\nfn body() { mut n = 1\nkeep = n }\narena_run(arena(\"s\"), body)");
+    assert!(
+        result.is_valid() && result.diagnostics.is_empty(),
+        "{:?}",
+        result.diagnostics
+    );
+    // A statically strict arena literal turns the leak into a hard error.
+    let result = analyze(
+        "mut keep = () => 0\nfn body() { mut n = 1\nkeep = () => n }\narena_run(arena(\"s\", null, false, true), body)",
+    );
+    assert!(!result.is_valid(), "{:?}", result.diagnostics);
+    assert!(
+        result.diagnostics.iter().any(|d| d.code == "arena-escape"),
+        "{:?}",
+        result.diagnostics
+    );
+    // Ordinary calls of the same function stay clean: escaping a call region
+    // is legitimate there.
+    let result = analyze("fn make() { mut n = 1\nreturn () => n }\nconst f = make()");
+    assert!(
+        result.is_valid() && result.diagnostics.is_empty(),
+        "{:?}",
+        result.diagnostics
+    );
+    // Explicit-region escapes inside function bodies still report normally.
+    let result =
+        analyze("mut keep = () => 0\nfn f() { region r { mut n = 1\nkeep = () => n } }\nf()");
+    assert!(
+        result.diagnostics.iter().any(|d| d.code == "region-escape"),
+        "{:?}",
+        result.diagnostics
+    );
+}

@@ -248,6 +248,18 @@ impl<'s> Writer<'s> {
                 self.text(" = ");
                 self.expr(value, 0);
             }
+            StmtKind::LetElse {
+                pattern,
+                value,
+                else_block,
+            } => {
+                self.text("let ");
+                self.pattern(pattern);
+                self.text(" = ");
+                self.expr(value, 0);
+                self.text(" else ");
+                self.block(else_block);
+            }
             StmtKind::Declaration {
                 role,
                 name,
@@ -325,6 +337,23 @@ impl<'s> Writer<'s> {
                     self.block(block);
                 }
             }
+            StmtKind::IfLet {
+                pattern,
+                value,
+                then_block,
+                else_block,
+            } => {
+                self.text("if let ");
+                self.pattern(pattern);
+                self.text(" = ");
+                self.expr(value, 0);
+                self.text(" ");
+                self.block(then_block);
+                if let Some(block) = else_block {
+                    self.text(" else ");
+                    self.block(block);
+                }
+            }
             StmtKind::While { condition, body } => {
                 self.text("while ");
                 self.expr(condition, 0);
@@ -378,6 +407,8 @@ impl<'s> Writer<'s> {
             statement.kind,
             StmtKind::Function { .. }
                 | StmtKind::If { .. }
+                | StmtKind::IfLet { .. }
+                | StmtKind::LetElse { .. }
                 | StmtKind::While { .. }
                 | StmtKind::For { .. }
                 | StmtKind::Region { .. }
@@ -437,6 +468,7 @@ impl<'s> Writer<'s> {
             ExprKind::Assign { .. }
             | ExprKind::Lambda { .. }
             | ExprKind::If { .. }
+            | ExprKind::IfLet { .. }
             | ExprKind::Match { .. } => 0,
             ExprKind::Pipeline { .. } => 1,
             ExprKind::Binary { operator, .. } => crate::parser::binding(operator).unwrap().0,
@@ -452,7 +484,13 @@ impl<'s> Writer<'s> {
             .iter()
             .take_while(|c| c.span.start < expression.span.end)
             .any(|c| {
-                c.span.start >= expression.span.start
+                let inside_try_block = matches!(
+                    &expression.kind,
+                    ExprKind::TryBlock(body)
+                        if c.span.start >= body.span.start && c.span.end <= body.span.end
+                );
+                !inside_try_block
+                    && c.span.start >= expression.span.start
                     && c.span.end <= expression.span.end
                     && (c.line || c.text.contains('\n'))
             });
@@ -468,6 +506,10 @@ impl<'s> Writer<'s> {
             ExprKind::Try(value) => {
                 self.expr(value, 22);
                 self.text("?");
+            }
+            ExprKind::TryBlock(body) => {
+                self.text("try ");
+                self.block(body);
             }
             ExprKind::Unary { operator, value } => {
                 self.text(operator);
@@ -568,6 +610,22 @@ impl<'s> Writer<'s> {
             } => {
                 self.text("if ");
                 self.expr(condition, 0);
+                self.text(" { ");
+                self.expr(then_value, 0);
+                self.text(" } else { ");
+                self.expr(else_value, 0);
+                self.text(" }");
+            }
+            ExprKind::IfLet {
+                pattern,
+                value,
+                then_value,
+                else_value,
+            } => {
+                self.text("if let ");
+                self.pattern(pattern);
+                self.text(" = ");
+                self.expr(value, 0);
                 self.text(" { ");
                 self.expr(then_value, 0);
                 self.text(" } else { ");

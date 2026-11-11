@@ -50,8 +50,8 @@ use std::borrow::Cow;
 
 use themoretheless_tokenizer_core::{
     Capabilities, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan,
-    HostToken, HostTokenization, LanguageDescriptor, LanguageId, Severity, language_descriptor,
-    require_default_dialect,
+    HostToken, HostTokenization, LanguageDescriptor, LanguageId, Severity, check_host_entry,
+    is_ascii_decimal, is_ascii_integer, language_descriptor,
 };
 
 /// Real engine surface: no CST, cursor navigation or visitor API exists here.
@@ -102,48 +102,13 @@ fn classify_bare_field(text: &str) -> Option<&'static str> {
     if text.eq_ignore_ascii_case("true") || text.eq_ignore_ascii_case("false") {
         return Some("boolean-field");
     }
-    if is_integer(text) {
+    if is_ascii_integer(text) {
         return Some("integer-field");
     }
-    if is_decimal(text) {
+    if is_ascii_decimal(text) {
         return Some("decimal-field");
     }
     None
-}
-
-/// `-?` followed by at least one digit and nothing else.
-fn is_integer(text: &str) -> bool {
-    let digits = text.strip_prefix('-').unwrap_or(text);
-    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-/// Optional sign, digits with at least one `.` and/or an exponent — anything
-/// numeric that [`is_integer`] did not already claim.
-fn is_decimal(text: &str) -> bool {
-    let body = text.strip_prefix(['-', '+']).unwrap_or(text);
-    let (mantissa, exponent) = match body.split_once(['e', 'E']) {
-        Some((mantissa, exponent)) => (mantissa, Some(exponent)),
-        None => (body, None),
-    };
-    let mantissa_ok = if mantissa.contains('.') {
-        let mut parts = mantissa.split('.');
-        let head = parts.next().unwrap_or_default();
-        let tail = parts.next().unwrap_or_default();
-        parts.next().is_none()
-            && (head.is_empty() || head.bytes().all(|byte| byte.is_ascii_digit()))
-            && (tail.is_empty() || tail.bytes().all(|byte| byte.is_ascii_digit()))
-            && !(head.is_empty() && tail.is_empty())
-    } else {
-        !mantissa.is_empty() && mantissa.bytes().all(|byte| byte.is_ascii_digit())
-    };
-    if !mantissa_ok || !(mantissa.contains('.') || exponent.is_some()) {
-        return false; // a bare integer is not a decimal
-    }
-    let Some(exponent) = exponent else {
-        return true;
-    };
-    let digits = exponent.strip_prefix(['-', '+']).unwrap_or(exponent);
-    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn tokenization(parsed: &Parse<'_>, semantic: bool) -> HostTokenization {
@@ -191,13 +156,7 @@ fn analyze(
     host: &HostAnalysisOptions,
     semantic: bool,
 ) -> Result<HostTokenization, HostError> {
-    require_default_dialect(descriptor, host.dialect.as_ref())?;
-    if host.limits.exceeds_input_bytes(source.len()) {
-        return Err(HostError::InputTooLarge {
-            max: host.limits.max_input_bytes,
-            actual: source.len(),
-        });
-    }
+    let _ = check_host_entry(descriptor, source, host)?;
     Ok(tokenization(&parse(source, options), semantic))
 }
 

@@ -59,6 +59,11 @@ fn count_expr(expr: &Expr<'_>, nodes: &mut usize) {
     *nodes += 1;
     match &expr.kind {
         ExprKind::Try(inner) => count_expr(inner, nodes),
+        ExprKind::TryBlock(body) => {
+            for statement in body.stmts.iter() {
+                count_stmt(statement, nodes);
+            }
+        }
         ExprKind::If {
             condition,
             then_value,

@@ -12,6 +12,8 @@ pub(super) struct RegionFrame {
     pub(super) live: usize,
     /// Index into `Runtime::region_stats` for this region's name.
     pub(super) stats: usize,
+    /// True while this frame backs an active persistent arena run.
+    pub(super) persistent: bool,
     /// Cell slots stamped to this region, so exit sweeps only its own cells
     /// instead of scanning the whole table. May hold stale entries (freed or
     /// re-stamped slots); the exit pass re-checks the stamp and liveness.
@@ -114,6 +116,7 @@ impl<'s> Runtime<'_, 's> {
             budget,
             live: 0,
             stats,
+            persistent: false,
             cells: Vec::new(),
         }
     }
@@ -129,8 +132,8 @@ impl<'s> Runtime<'_, 's> {
 
     /// Close a region frame: cells no longer referenced after scope release
     /// are swept in bulk; escaping values promote to the parent region and
-    /// count against its budget.
-    pub(super) fn exit_region(&mut self, region: u32, span: Span) -> Result<()> {
+    /// count against its budget. Returns how many cells were promoted.
+    pub(super) fn exit_region(&mut self, region: u32, span: Span) -> Result<usize> {
         let frame = self.region_stack.pop().expect("region frame");
         debug_assert_eq!(frame.id, region);
         self.reclaim_cells();
@@ -162,6 +165,6 @@ impl<'s> Runtime<'_, 's> {
                 return self.error(span, "Region cell budget exceeded");
             }
         }
-        Ok(())
+        Ok(promoted)
     }
 }

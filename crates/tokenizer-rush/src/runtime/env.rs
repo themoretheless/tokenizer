@@ -366,7 +366,15 @@ impl<'s> Runtime<'_, 's> {
         };
         match binding {
             Binding::Value(_) => self.error(name.span, "move requires a mutable binding"),
-            Binding::Cell(id) => Ok(std::mem::replace(&mut self.cells[id.index].0, Value::Null)),
+            Binding::Cell(id) => {
+                let index = self.cell_index(id, name.span)?;
+                let log_undo = self.reserve_cell_undo(index, name.span)?;
+                let previous = std::mem::replace(&mut self.cells[index].0, Value::Null);
+                if log_undo {
+                    self.commit_cell_undo(index, previous.clone());
+                }
+                Ok(previous)
+            }
         }
     }
 

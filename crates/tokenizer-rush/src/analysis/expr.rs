@@ -168,8 +168,54 @@ impl<'s> Checker<'s> {
         arguments: &[Expr<'s>],
         implicit: Option<(Span, Shape)>,
     ) -> Shape {
-        for argument in arguments {
-            self.expr(argument);
+        // arena_run executes its callback inside an arena scope: analyze the
+        // callback body as if it were a region body, so escapes lint as
+        // region-escape (hard errors when the descriptor is a statically
+        // known strict arena(...) literal).
+        let arena_callback = if matches!(self.known_builtin(callee), Some(Builtin::ArenaRun)) {
+            1usize.checked_sub(usize::from(implicit.is_some()))
+        } else {
+            None
+        };
+        for (position, argument) in arguments.iter().enumerate() {
+            if Some(position) == arena_callback {
+                let strict = position
+                    .checked_sub(1)
+                    .and_then(|index| arguments.get(index))
+                    .is_some_and(|descriptor| self.is_strict_arena_literal(descriptor));
+                self.region_depth += 1;
+                self.region_strict.push(strict);
+                self.expr(argument);
+                self.region_strict.pop();
+                self.region_depth -= 1;
+            } else {
+                self.expr(argument);
+            }
+        }
+        // A named callback whose body is known to leak cells out of its
+        // implicit call region will leak them out of the arena run too.
+        if let Some(position) = arena_callback
+            && let Some(callback) = arguments.get(position)
+            && let ExprKind::Name(name) = &callback.kind
+        {
+            let leaks = self
+                .scopes
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name.text))
+                .is_some_and(|binding| self.cell_leaking_functions.contains(&binding.1.start));
+            if leaks {
+                let strict = position
+                    .checked_sub(1)
+                    .and_then(|index| arguments.get(index))
+                    .is_some_and(|descriptor| self.is_strict_arena_literal(descriptor));
+                let message = "Callback may leak captured cells out of the arena run; drop or move() them before the run ends";
+                if strict {
+                    self.error(callback.span, "arena-escape", message);
+                } else {
+                    self.warn(callback.span, "arena-escape", message);
+                }
+            }
         }
         if self.calls && self.known_suspending(callee) {
             self.error(
@@ -336,6 +382,13 @@ impl<'s> Checker<'s> {
         if self.calls
             && let Some(host) = &host
         {
+            if !host.transactional && !self.try_blocks.is_empty() {
+                self.error(
+                    callee.span,
+                    "non-transactional-host",
+                    "Contextual host function has external side effects that cannot be rolled back by try",
+                );
+            }
             let supplied = implicit
                 .into_iter()
                 .chain(
@@ -376,22 +429,121 @@ impl<'s> Checker<'s> {
             ExprKind::Try(value) => {
                 if self.calls {
                     let operand = self.shape(value);
-                    let result = self.return_types.last().cloned().flatten();
-                    match (&operand, result.as_ref()) {
-                        (Shape::Typed(ValueType::Option(_)), Some(ValueType::Option(_))) => {}
-                        (
-                            Shape::Typed(ValueType::Result(_, error)),
-                            Some(ValueType::Result(_, expected)),
-                        ) if !disjoint(error, expected) => {}
-                        (Shape::Unknown, Some(ValueType::Option(_) | ValueType::Result(_, _))) => {}
-                        _ => self.error(
-                            expr.span,
-                            "try-type",
-                            "? requires Option or Result compatible with the enclosing function return type",
-                        ),
+                    if !self.try_blocks.is_empty() {
+                        match self.try_family(value) {
+                            Ok(_) => {}
+                            Err(()) => self.error(
+                                expr.span,
+                                "try-type",
+                                "? requires an Option or Result value",
+                            ),
+                        }
+                        let family_shape = match (&operand, self.try_family(value)) {
+                            (Shape::Typed(ValueType::Option(_) | ValueType::Result(_, _)), _) => {
+                                operand
+                            }
+                            (_, Ok(Some(true))) => {
+                                Shape::Typed(ValueType::Option(Box::new(ValueType::Null)))
+                            }
+                            (_, Ok(Some(false))) => Shape::Typed(ValueType::Result(
+                                Box::new(ValueType::Null),
+                                Box::new(ValueType::Null),
+                            )),
+                            _ => operand,
+                        };
+                        self.try_blocks
+                            .last_mut()
+                            .unwrap()
+                            .push((expr.span, family_shape));
+                    } else {
+                        let result = self.return_types.last().cloned().flatten();
+                        match (&operand, result.as_ref()) {
+                            (Shape::Typed(ValueType::Option(_)), Some(ValueType::Option(_))) => {}
+                            (
+                                Shape::Typed(ValueType::Result(_, error)),
+                                Some(ValueType::Result(_, expected)),
+                            ) if !disjoint(error, expected) => {}
+                            (
+                                Shape::Unknown,
+                                Some(ValueType::Option(_) | ValueType::Result(_, _)),
+                            ) => {}
+                            _ => self.error(
+                                expr.span,
+                                "try-type",
+                                "? requires Option or Result compatible with the enclosing function return type",
+                            ),
+                        }
                     }
                 }
                 self.expr(value);
+            }
+            ExprKind::TryBlock(body) => {
+                self.try_blocks.push(Vec::new());
+                self.region_depth += 1;
+                self.region_strict.push(false);
+                self.block(body);
+                self.region_strict.pop();
+                self.region_depth -= 1;
+                let propagated = self.try_blocks.pop().unwrap_or_default();
+                let tail_expr = match body.stmts.last().map(|stmt| &stmt.kind) {
+                    Some(crate::StmtKind::Expr(last) | crate::StmtKind::Show(last)) => Some(last),
+                    _ => None,
+                };
+                let tail_shape =
+                    tail_expr.map_or(Shape::Typed(ValueType::Null), |last| self.shape(last));
+                let tail_family = tail_expr.map_or(Err(()), |last| self.try_family(last));
+                if self.calls {
+                    if tail_family.is_err() {
+                        self.error(
+                            expr.span,
+                            "try-type",
+                            "try block must evaluate to an Option or Result value",
+                        );
+                    }
+                    let mut expected_family: Option<ValueType> = match (&tail_shape, tail_family) {
+                        (
+                            Shape::Typed(ty @ (ValueType::Option(_) | ValueType::Result(_, _))),
+                            _,
+                        ) => Some(ty.clone()),
+                        (_, Ok(Some(true))) => Some(ValueType::Option(Box::new(ValueType::Null))),
+                        (_, Ok(Some(false))) => Some(ValueType::Result(
+                            Box::new(ValueType::Null),
+                            Box::new(ValueType::Null),
+                        )),
+                        _ => None,
+                    };
+                    for (span, op_shape) in &propagated {
+                        match (&op_shape, &expected_family) {
+                            (Shape::Typed(ValueType::Option(_)), Some(ValueType::Option(_))) => {}
+                            (
+                                Shape::Typed(ValueType::Result(_, err_a)),
+                                Some(ValueType::Result(_, err_b)),
+                            ) if *err_a == Box::new(ValueType::Null)
+                                || *err_b == Box::new(ValueType::Null)
+                                || !disjoint(err_a, err_b) => {}
+                            (
+                                Shape::Typed(ty @ (ValueType::Option(_) | ValueType::Result(_, _))),
+                                None,
+                            ) => {
+                                expected_family = Some(ty.clone());
+                            }
+                            (Shape::Unknown, _) => {}
+                            (
+                                Shape::Typed(ValueType::Option(_) | ValueType::Result(_, _)),
+                                Some(_),
+                            ) => {
+                                self.error(
+                                    *span,
+                                    "try-type",
+                                    "? inside try block must match the block's Option or Result type",
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                self.expression_shapes
+                    .insert((expr.span.start, expr.span.end), tail_shape);
             }
             ExprKind::If {
                 condition,
@@ -402,17 +554,45 @@ impl<'s> Checker<'s> {
                 self.expr(then_value);
                 self.expr(else_value);
             }
+            ExprKind::IfLet {
+                pattern,
+                value,
+                then_value,
+                else_value,
+            } => {
+                self.expr(value);
+                let shape = self.shape(value);
+                self.scopes.push(HashMap::new());
+                self.scope_spans.push(then_value.span);
+                self.match_bindings(pattern, then_value.span.start);
+                self.match_pattern_types(pattern, &shape);
+                self.expr(then_value);
+                let left = self.shape(then_value);
+                self.scopes.pop();
+                self.scope_spans.pop();
+                self.expr(else_value);
+                let right = self.shape(else_value);
+                let result = if left == right {
+                    left
+                } else {
+                    Shape::Alternatives(vec![left, right])
+                };
+                self.expression_shapes
+                    .insert((expr.span.start, expr.span.end), result);
+            }
             ExprKind::Lambda {
                 parameters, body, ..
             } => {
                 self.return_types.push(None);
                 self.inferred_returns.push(Vec::new());
+                let saved_try = std::mem::take(&mut self.try_blocks);
                 self.scopes.push(HashMap::new());
                 self.scope_spans.push(body.span);
                 for parameter in parameters {
                     self.pattern(parameter, body.span.start);
                 }
                 self.expr(body);
+                self.try_blocks = saved_try;
                 self.return_types.pop();
                 self.inferred_returns.pop();
                 self.scopes.pop();

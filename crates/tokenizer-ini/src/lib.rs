@@ -77,12 +77,11 @@ pub use themoretheless_tokenizer_core::{Diagnostic, Span};
 // ─── Host adapters ───────────────────────────────────────────────────────────
 
 use std::borrow::Cow;
-use std::collections::HashSet;
 
 use themoretheless_tokenizer_core::{
     Capabilities, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan,
-    HostToken, HostTokenization, LanguageDescriptor, LanguageId, Severity, language_descriptor,
-    require_default_dialect,
+    HostToken, HostTokenization, LanguageDescriptor, LanguageId, Severity, check_host_entry,
+    is_ascii_decimal, is_ascii_integer, language_descriptor,
 };
 
 /// Real engine surface: no CST, cursor navigation or visitor API exists here.
@@ -111,22 +110,15 @@ fn lex_host_kind(kind: SyntaxKind) -> &'static str {
     }
 }
 
-/// The value spans a value region may be read from: exactly one unquoted,
-/// unflagged span per entry. The semantic layer may type only these.
-fn typeable_values(parsed: &Parse<'_>) -> HashSet<Span> {
-    parsed
-        .entries()
-        .iter()
-        .filter(|entry| !entry.has_error && !entry.value_quoted)
-        .filter_map(|entry| entry.value)
-        .collect()
-}
-
 /// Semantic layer: a quoted span becomes `quoted-key` or `quoted-value`, and a
 /// value region that is one complete unquoted span is re-tagged by what it
-/// holds. Section, key, separator, comment, continuation, padding and break
-/// kinds keep their syntax-layer name, and the span never moves.
-fn semantic_host_kind(token: LexToken, source: &str, typeable: &HashSet<Span>) -> &'static str {
+/// holds using a monotonic cursor over `parsed.entries()` (`O(N + E)`, zero HashSet).
+fn semantic_host_kind(
+    token: LexToken,
+    source: &str,
+    entries: &[Entry],
+    entry_cursor: &mut usize,
+) -> &'static str {
     if token.has_error() {
         return "error";
     }
@@ -137,8 +129,24 @@ fn semantic_host_kind(token: LexToken, source: &str, typeable: &HashSet<Span>) -
             _ => lex_host_kind(token.kind),
         };
     }
-    if token.kind == SyntaxKind::Value && typeable.contains(&token.span) {
-        return classify_bare_value(token.text(source).unwrap_or_default());
+    if token.kind == SyntaxKind::Value {
+        while *entry_cursor < entries.len() {
+            let entry = &entries[*entry_cursor];
+            match entry.value {
+                Some(val_span) if val_span.start < token.span.start => {
+                    *entry_cursor += 1;
+                }
+                None => {
+                    *entry_cursor += 1;
+                }
+                Some(val_span) => {
+                    if val_span == token.span && !entry.has_error && !entry.value_quoted {
+                        return classify_bare_value(token.text(source).unwrap_or_default());
+                    }
+                    break;
+                }
+            }
+        }
     }
     lex_host_kind(token.kind)
 }
@@ -149,70 +157,33 @@ fn classify_bare_value(text: &str) -> &'static str {
     if text.eq_ignore_ascii_case("true") || text.eq_ignore_ascii_case("false") {
         return "boolean-value";
     }
-    if is_integer(text) {
+    if is_ascii_integer(text) {
         return "integer-value";
     }
-    if is_decimal(text) {
+    if is_ascii_decimal(text) {
         return "decimal-value";
     }
     "value"
 }
 
-/// `-?` followed by at least one digit and nothing else.
-fn is_integer(text: &str) -> bool {
-    let digits = text.strip_prefix('-').unwrap_or(text);
-    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-/// Optional sign, digits with at least one `.` and/or an exponent — anything
-/// numeric that [`is_integer`] did not already claim.
-fn is_decimal(text: &str) -> bool {
-    let body = text.strip_prefix(['-', '+']).unwrap_or(text);
-    let (mantissa, exponent) = match body.split_once(['e', 'E']) {
-        Some((mantissa, exponent)) => (mantissa, Some(exponent)),
-        None => (body, None),
-    };
-    let mantissa_ok = if mantissa.contains('.') {
-        let mut parts = mantissa.split('.');
-        let head = parts.next().unwrap_or_default();
-        let tail = parts.next().unwrap_or_default();
-        parts.next().is_none()
-            && (head.is_empty() || head.bytes().all(|byte| byte.is_ascii_digit()))
-            && (tail.is_empty() || tail.bytes().all(|byte| byte.is_ascii_digit()))
-            && !(head.is_empty() && tail.is_empty())
-    } else {
-        !mantissa.is_empty() && mantissa.bytes().all(|byte| byte.is_ascii_digit())
-    };
-    if !mantissa_ok || !(mantissa.contains('.') || exponent.is_some()) {
-        return false; // a bare integer is not a decimal
-    }
-    let Some(exponent) = exponent else {
-        return true;
-    };
-    let digits = exponent.strip_prefix(['-', '+']).unwrap_or(exponent);
-    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
-}
-
 fn tokenization(parsed: &Parse<'_>, semantic: bool) -> HostTokenization {
     let source = parsed.lexed().source();
-    let typeable = typeable_values(parsed);
-    let tokens = parsed
-        .lexed()
-        .tokens()
-        .iter()
-        .map(|token| {
-            let kind = if semantic {
-                semantic_host_kind(*token, source, &typeable)
-            } else {
-                lex_host_kind(token.kind)
-            };
-            HostToken {
-                kind: Cow::Borrowed(kind),
-                span: HostSpan::from(token.span),
-                error: token.has_error(),
-            }
-        })
-        .collect();
+    let entries = parsed.entries();
+    let mut entry_cursor = 0usize;
+    let lex_tokens = parsed.lexed().tokens();
+    let mut tokens = Vec::with_capacity(lex_tokens.len());
+    for &token in lex_tokens {
+        let kind = if semantic {
+            semantic_host_kind(token, source, entries, &mut entry_cursor)
+        } else {
+            lex_host_kind(token.kind)
+        };
+        tokens.push(HostToken {
+            kind: Cow::Borrowed(kind),
+            span: HostSpan::from(token.span),
+            error: token.has_error(),
+        });
+    }
     let diagnostics = parsed
         .diagnostics()
         .iter()
@@ -238,13 +209,7 @@ fn analyze(
     host: &HostAnalysisOptions,
     semantic: bool,
 ) -> Result<HostTokenization, HostError> {
-    require_default_dialect(descriptor, host.dialect.as_ref())?;
-    if host.limits.exceeds_input_bytes(source.len()) {
-        return Err(HostError::InputTooLarge {
-            max: host.limits.max_input_bytes,
-            actual: source.len(),
-        });
-    }
+    let _ = check_host_entry(descriptor, source, host)?;
     Ok(tokenization(&parse(source, options), semantic))
 }
 

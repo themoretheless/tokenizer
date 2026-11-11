@@ -127,7 +127,7 @@ fn feature(text: &str, name: &str) -> BTreeSet<String> {
 }
 
 /// Transitive closure of a feature group: nested groups expand, `dep:` keys
-/// resolve to the short name they gate.
+/// and `<pkg>/<subfeature>` keys resolve to the short name they gate.
 fn expand_feature(text: &str, name: &str) -> BTreeSet<String> {
     let groups: BTreeSet<String> = feature_names(text);
     let mut out = BTreeSet::new();
@@ -136,9 +136,13 @@ fn expand_feature(text: &str, name: &str) -> BTreeSet<String> {
         for item in feature(text, &current) {
             if let Some(dep) = item.strip_prefix("dep:") {
                 let prefix = format!("{}-", package_name(text));
-                if let Some(short) = dep.strip_prefix(&prefix) {
+                if let Some(short) = dep.strip_prefix(&prefix)
+                    && short != "languages"
+                {
                     out.insert(short.to_string());
                 }
+            } else if let Some((_, subfeat)) = item.split_once('/') {
+                out.insert(subfeat.to_string());
             } else if groups.contains(&item) {
                 // A group name is itself a valid id when it only aliases
                 // another crate (`tsv = ["csv"]`), so count it as reachable.
@@ -203,6 +207,27 @@ fn every_plugin_crate_is_reachable_through_a_named_feature() {
             "{} must be optional to be feature-gateable",
             dep.key
         );
+        if short == "languages" {
+            let langs_cargo = read("crates/tokenizer-languages/Cargo.toml");
+            for lang_feat in feature_names(&langs_cargo) {
+                if matches!(lang_feat.as_str(), "default" | "all") {
+                    continue;
+                }
+                assert!(
+                    declared.contains(&lang_feat),
+                    "consolidated language `{lang_feat}` has no [features] entry in root Cargo.toml"
+                );
+                let root_feat = feature(&text, &lang_feat);
+                assert!(
+                    root_feat.contains(&format!("dep:{}", dep.key))
+                        && root_feat.contains(&format!("{}/{lang_feat}", dep.key)),
+                    "feature `{lang_feat}` must enable `dep:{}` and `{}/{lang_feat}`",
+                    dep.key,
+                    dep.key
+                );
+            }
+            continue;
+        }
         assert!(
             declared.contains(short),
             "crate `{short}` has no [features] entry named after it"
@@ -249,6 +274,7 @@ fn every_optional_dependency_has_a_reachable_feature() {
     let text = cargo_text();
     let prefix = format!("{}-", package_name(&text));
     let declared = feature_names(&text);
+    let all_entries = table_entries(&text, "features");
     for dep in dependencies(&text) {
         if !dep.contains("optional = true") {
             continue;
@@ -259,6 +285,17 @@ fn every_optional_dependency_has_a_reachable_feature() {
                 dep.key
             )
         });
+        if short == "languages" {
+            let dep_marker = format!("dep:{}", dep.key);
+            assert!(
+                all_entries
+                    .iter()
+                    .any(|e| e.strings().contains(&dep_marker)),
+                "optional dependency `{}` is not enabled by any feature",
+                dep.key
+            );
+            continue;
+        }
         assert!(
             declared.contains(short),
             "optional dependency `{}` has no feature `{short}`",
@@ -614,6 +651,7 @@ fn only_native_grammars_advertise_validate() {
         .map(|id| id.as_str().to_string())
         .collect();
     formats.insert("rush".to_owned());
+    formats.insert("forma".to_owned());
     let mut claimers = BTreeSet::new();
     let mut total = 0;
     for engine in builtin_registry().iter() {
@@ -672,7 +710,7 @@ fn every_engine_is_quiet_on_its_valid_fixture() {
             }
         }
     }
-    assert_eq!(checked, 70, "every registered engine needs a valid fixture");
+    assert_eq!(checked, 71, "every registered engine needs a valid fixture");
     assert!(
         noisy.is_empty(),
         "{} diagnostics on valid fixtures: {:?}",

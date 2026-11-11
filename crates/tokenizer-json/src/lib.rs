@@ -17,7 +17,10 @@ mod visitor;
 pub use ast::{
     Array, Boolean, Member, Null, Number, NumberError, Object, StringValue, Value, ValueKind,
 };
-pub use host::{JSON5_ENGINE, JSONL_ENGINE, Json5Host, JsonlHost};
+pub use host::{
+    DESCRIPTOR, ENGINE, JSON5_DESCRIPTOR, JSON5_ENGINE, JSONL_DESCRIPTOR, JSONL_ENGINE, Json5Host,
+    JsonHost, JsonlHost, LANGUAGE_ID,
+};
 
 pub use jsonl::{Jsonl, Record, parse as parse_jsonl, parse_records};
 pub use lexer::{

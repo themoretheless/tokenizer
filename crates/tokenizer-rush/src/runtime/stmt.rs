@@ -347,6 +347,9 @@ impl<'s> Runtime<'_, 's> {
             .push((name.text, exports.clone()))
             .expect("module export slot reserved before execution");
         self.module_cache[index..].rotate_right(1);
+        if let Some(frame) = self.tx_stack.last_mut() {
+            frame.cached_modules.push(name.text);
+        }
         environment
             .insert(name.text, exports)
             .map_err(|e| self.environment_error(name.span, e))?;
@@ -618,6 +621,36 @@ impl<'s> Runtime<'_, 's> {
                         self.hoist_scope_functions(statements, environment)?;
                     }
                 }
+                StmtKind::LetElse {
+                    pattern,
+                    value: expression,
+                    else_block,
+                } => {
+                    let scrutinee = self.expr(expression, environment)?;
+                    let mut candidate = environment
+                        .try_clone()
+                        .map_err(|e| self.environment_error(statement.span, e))?;
+                    if self.match_value(pattern, &scrutinee, &mut candidate)? {
+                        *environment = candidate;
+                        value = scrutinee;
+                        if last_fn.is_some_and(|last| idx < last) {
+                            self.hoist_scope_functions(statements, environment)?;
+                        }
+                    } else {
+                        drop(candidate);
+                        let result = self.scoped_statements(
+                            &else_block.stmts,
+                            environment
+                                .try_clone()
+                                .map_err(|e| self.environment_error(statement.span, e))?,
+                        )?;
+                        if result.1 != Flow::Next {
+                            return Ok(result);
+                        }
+                        return self
+                            .error(else_block.span, "let-else fallback block did not diverge");
+                    }
+                }
                 StmtKind::Declaration {
                     role: _,
                     name,
@@ -763,6 +796,40 @@ impl<'s> Runtime<'_, 's> {
                         value = result.0;
                     } else {
                         value = Value::Null;
+                    }
+                }
+                StmtKind::IfLet {
+                    pattern,
+                    value: expression,
+                    then_block,
+                    else_block,
+                } => {
+                    let scrutinee = self.expr(expression, environment)?;
+                    let mut then_env = environment
+                        .try_clone()
+                        .map_err(|e| self.environment_error(statement.span, e))?;
+                    if self.match_value(pattern, &scrutinee, &mut then_env)? {
+                        let result = self.scoped_statements(&then_block.stmts, then_env)?;
+                        if result.1 != Flow::Next {
+                            return Ok(result);
+                        }
+                        value = result.0;
+                    } else {
+                        drop(then_env);
+                        if let Some(block) = else_block {
+                            let result = self.scoped_statements(
+                                &block.stmts,
+                                environment
+                                    .try_clone()
+                                    .map_err(|e| self.environment_error(statement.span, e))?,
+                            )?;
+                            if result.1 != Flow::Next {
+                                return Ok(result);
+                            }
+                            value = result.0;
+                        } else {
+                            value = Value::Null;
+                        }
                     }
                 }
                 StmtKind::Region {

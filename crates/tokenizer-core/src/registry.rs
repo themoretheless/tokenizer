@@ -1,5 +1,7 @@
 //! Static language registry for host discovery.
 
+use std::cmp::Ordering;
+
 use crate::{capabilities::Capabilities, host::HostLanguage, language::LanguageId};
 
 /// Why registering a language failed.
@@ -70,65 +72,108 @@ impl RegistryBuilder {
 
     #[must_use]
     pub fn build(self) -> LanguageRegistry {
+        let engines = self.engines.into_boxed_slice();
+        let mut by_key = Vec::with_capacity(engines.len() * 2);
+        let mut by_ext = Vec::with_capacity(engines.len() * 2);
+        let mut by_mime = Vec::with_capacity(engines.len());
+
+        for (idx, engine) in engines.iter().enumerate() {
+            let desc = engine.descriptor();
+            by_key.push((desc.language.as_str(), idx));
+            for &alias in desc.aliases {
+                by_key.push((alias, idx));
+            }
+            for &ext in desc.extensions {
+                by_ext.push((normalize_extension(ext), idx));
+            }
+            for &mime in desc.mime_types {
+                by_mime.push((mime.trim(), idx));
+            }
+        }
+
+        // Exact-byte key index: primary IDs never collide, and on duplicate aliases
+        // first-registered wins (`idx` ascending).
+        by_key.sort_by(|(ka, ia), (kb, ib)| ka.cmp(kb).then_with(|| ia.cmp(ib)));
+        by_key.dedup_by(|a, b| a.0 == b.0);
+
+        // Extension index: exact match after stripping a leading `.`; first-registered wins.
+        by_ext.sort_by(|(ea, ia), (eb, ib)| ea.cmp(eb).then_with(|| ia.cmp(ib)));
+        by_ext.dedup_by(|a, b| a.0 == b.0);
+
+        // MIME index: ASCII case-insensitive order; first-registered wins.
+        by_mime.sort_by(|(ma, ia), (mb, ib)| {
+            cmp_ascii_case_insensitive(ma, mb).then_with(|| ia.cmp(ib))
+        });
+        by_mime.dedup_by(|a, b| a.0.eq_ignore_ascii_case(b.0));
+
         LanguageRegistry {
-            engines: self.engines,
+            engines,
+            by_key: by_key.into_boxed_slice(),
+            by_ext: by_ext.into_boxed_slice(),
+            by_mime: by_mime.into_boxed_slice(),
         }
     }
 }
 
-/// Immutable registry of host language adapters.
+/// Immutable, pre-indexed registry of host language adapters (`O(log N)` lookups).
 #[derive(Clone)]
 pub struct LanguageRegistry {
-    engines: Vec<&'static dyn HostLanguage>,
+    engines: Box<[&'static dyn HostLanguage]>,
+    by_key: Box<[(&'static str, usize)]>,
+    by_ext: Box<[(&'static str, usize)]>,
+    by_mime: Box<[(&'static str, usize)]>,
 }
 
 impl LanguageRegistry {
     #[must_use]
     pub fn empty() -> Self {
         Self {
-            engines: Vec::new(),
+            engines: Box::new([]),
+            by_key: Box::new([]),
+            by_ext: Box::new([]),
+            by_mime: Box::new([]),
         }
     }
 
     #[must_use]
     pub fn get(&self, id: LanguageId) -> Option<&'static dyn HostLanguage> {
-        self.engines
-            .iter()
-            .copied()
-            .find(|engine| engine.id() == id)
+        let target = id.as_str();
+        let idx = self
+            .by_key
+            .binary_search_by_key(&target, |&(key, _)| key)
+            .ok()?;
+        let engine = self.engines[self.by_key[idx].1];
+        (engine.id() == id).then_some(engine)
     }
 
     #[must_use]
     pub fn get_str(&self, id: &str) -> Option<&'static dyn HostLanguage> {
-        self.engines
-            .iter()
-            .copied()
-            .find(|engine| engine.id().as_str() == id || engine.descriptor().aliases.contains(&id))
+        let idx = self
+            .by_key
+            .binary_search_by_key(&id, |&(key, _)| key)
+            .ok()?;
+        Some(self.engines[self.by_key[idx].1])
     }
 
     /// First registered engine that claims the file extension (with or without dot).
     #[must_use]
     pub fn resolve_extension(&self, ext: &str) -> Option<&'static dyn HostLanguage> {
         let normalized = normalize_extension(ext);
-        self.engines.iter().copied().find(|engine| {
-            engine
-                .descriptor()
-                .extensions
-                .iter()
-                .any(|candidate| normalize_extension(candidate) == normalized)
-        })
+        let idx = self
+            .by_ext
+            .binary_search_by_key(&normalized, |&(key, _)| key)
+            .ok()?;
+        Some(self.engines[self.by_ext[idx].1])
     }
 
     #[must_use]
     pub fn resolve_mime(&self, mime: &str) -> Option<&'static dyn HostLanguage> {
         let mime = mime.trim();
-        self.engines.iter().copied().find(|engine| {
-            engine
-                .descriptor()
-                .mime_types
-                .iter()
-                .any(|candidate| candidate.eq_ignore_ascii_case(mime))
-        })
+        let idx = self
+            .by_mime
+            .binary_search_by(|&(candidate, _)| cmp_ascii_case_insensitive(candidate, mime))
+            .ok()?;
+        Some(self.engines[self.by_mime[idx].1])
     }
 
     #[must_use]
@@ -152,8 +197,26 @@ impl LanguageRegistry {
     }
 }
 
+#[inline]
 fn normalize_extension(ext: &str) -> &str {
     ext.strip_prefix('.').unwrap_or(ext)
+}
+
+#[inline]
+fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    let min_len = ab.len().min(bb.len());
+    let mut i = 0;
+    while i < min_len {
+        let ca = ab[i].to_ascii_lowercase();
+        let cb = bb[i].to_ascii_lowercase();
+        if ca != cb {
+            return ca.cmp(&cb);
+        }
+        i += 1;
+    }
+    ab.len().cmp(&bb.len())
 }
 
 #[cfg(test)]
@@ -226,11 +289,68 @@ mod tests {
         builder.register(&DUMMY).unwrap();
         let registry = builder.build();
         assert!(registry.get(LanguageId::JSON).is_some());
+        assert!(registry.get(LanguageId("jsonc-file")).is_none());
         assert!(registry.get_str("jsonc-file").is_some());
         assert!(registry.resolve_extension("json").is_some());
         assert!(registry.resolve_extension(".jsonc").is_some());
         assert!(registry.resolve_mime("application/json").is_some());
+        assert!(registry.resolve_mime("  APPLICATION/JSON ").is_some());
         assert!(registry.supports(LanguageId::JSON, Capabilities::PARSE));
+    }
+
+    #[test]
+    fn first_registered_wins_on_shared_alias_extension_and_mime() {
+        struct SecondUrl;
+        static SECOND_DESC: LanguageDescriptor = LanguageDescriptor {
+            language: LanguageId::URL,
+            display_name: "Second",
+            dialects: DUMMY_DIALECTS,
+            default_dialect: DialectId::STRICT,
+            aliases: &["jsonc-file"],
+            extensions: &[".json", ".url"],
+            mime_types: &["APPLICATION/JSON", "text/uri-list"],
+            capabilities: Capabilities::LEX,
+            engine_version: "0.0.0",
+        };
+        impl HostLanguage for SecondUrl {
+            fn descriptor(&self) -> &'static LanguageDescriptor {
+                &SECOND_DESC
+            }
+            fn lex(
+                &self,
+                _source: &str,
+                _opts: &HostAnalysisOptions,
+            ) -> Result<HostTokenization, HostError> {
+                Ok(HostTokenization::default())
+            }
+        }
+        static SECOND: SecondUrl = SecondUrl;
+
+        let mut builder = RegistryBuilder::new();
+        builder.register(&DUMMY).unwrap();
+        builder.register(&SECOND).unwrap();
+        let registry = builder.build();
+
+        assert_eq!(
+            registry.get_str("jsonc-file").unwrap().id(),
+            LanguageId::JSON
+        );
+        assert_eq!(
+            registry.resolve_extension(".json").unwrap().id(),
+            LanguageId::JSON
+        );
+        assert_eq!(
+            registry.resolve_extension("url").unwrap().id(),
+            LanguageId::URL
+        );
+        assert_eq!(
+            registry.resolve_mime("application/json").unwrap().id(),
+            LanguageId::JSON
+        );
+        assert_eq!(
+            registry.resolve_mime("TEXT/URI-LIST").unwrap().id(),
+            LanguageId::URL
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 //! Lexical binding checks. Unknown names remain available to the host.
-use crate::{Expr, ExprKind, HostFunction, Name, Parse, ValueType};
+use crate::{Expr, ExprKind, Name, Parse, ValueType};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::RangeInclusive;
 use std::rc::Rc;
@@ -14,6 +14,12 @@ mod stmt;
 
 use self::inference::BlockExits;
 use self::shape::Shape;
+
+/// True when `statements` cannot fall through to a following statement.
+#[cfg(feature = "runtime")]
+pub(crate) fn block_diverges(statements: &[crate::Stmt<'_>]) -> bool {
+    !BlockExits::inspect(statements).next
+}
 
 /// Source locations for a lexically resolved reference or an external name.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +51,14 @@ pub struct MemberCompletion {
     pub members: Vec<String>,
 }
 
+/// Lightweight callable signature for host-registered functions used during static analysis.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct HostSignature {
+    pub(crate) parameters: Vec<ValueType>,
+    pub(crate) result: ValueType,
+    pub(crate) transactional: bool,
+}
+
 pub(crate) fn editor(
     parsed: &mut Parse<'_>,
     limit: usize,
@@ -60,7 +74,7 @@ pub(crate) fn editor_with_hosts(
     parsed: &mut Parse<'_>,
     limit: usize,
     calls: bool,
-    hosts: HashMap<String, Rc<HostFunction>>,
+    hosts: HashMap<String, Rc<HostSignature>>,
 ) -> (
     Vec<NameReference>,
     Vec<LexicalBinding>,
@@ -96,7 +110,7 @@ pub(crate) fn check_host_calls(
     parsed: &mut Parse<'_>,
     limit: usize,
     calls: bool,
-    host_functions: HashMap<String, Rc<HostFunction>>,
+    host_functions: HashMap<String, Rc<HostSignature>>,
 ) -> Vec<NameReference> {
     inspect(parsed, limit, calls, host_functions).0
 }
@@ -105,7 +119,7 @@ pub(crate) fn inspect(
     parsed: &mut Parse<'_>,
     limit: usize,
     calls: bool,
-    host_functions: HashMap<String, Rc<HostFunction>>,
+    host_functions: HashMap<String, Rc<HostSignature>>,
 ) -> (Vec<NameReference>, Vec<LexicalBinding>) {
     let (references, bindings, _) = inspect_inner(
         parsed,
@@ -123,6 +137,7 @@ pub(crate) fn inspect(
     (references, bindings)
 }
 
+#[cfg(feature = "runtime")]
 pub(crate) fn editor_modules(
     parsed: &mut Parse<'_>,
     exports: ModuleInterfaces,
@@ -149,6 +164,7 @@ pub(crate) fn editor_modules(
     )
 }
 
+#[cfg(feature = "runtime")]
 pub(crate) fn editor_module(
     parsed: &mut Parse<'_>,
     exports: ModuleInterfaces,
@@ -176,8 +192,10 @@ pub(crate) fn editor_module(
     )
 }
 
+#[cfg(feature = "runtime")]
 pub(crate) type FunctionContract = (Vec<Option<ValueType>>, Option<ValueType>);
 
+#[cfg(feature = "runtime")]
 pub(crate) fn compile_analysis(
     parsed: &mut Parse<'_>,
 ) -> (Vec<NameReference>, HashMap<usize, FunctionContract>) {
@@ -215,6 +233,7 @@ pub(crate) fn compile_analysis(
     (references, contracts)
 }
 
+#[cfg(feature = "runtime")]
 pub(crate) fn resolved_interface(
     parsed: &mut Parse<'_>,
     exports: ModuleInterfaces,
@@ -238,10 +257,12 @@ pub(crate) fn resolved_interface(
     interface
 }
 
+#[cfg(feature = "runtime")]
 pub(crate) fn check_strict(parsed: &mut Parse<'_>) {
     check_strict_modules(parsed, HashMap::new(), None);
 }
 
+#[cfg(feature = "runtime")]
 pub(crate) fn check_strict_modules(
     parsed: &mut Parse<'_>,
     exports: ModuleInterfaces,
@@ -286,7 +307,7 @@ fn inspect_inner(
     parsed: &mut Parse<'_>,
     limit: usize,
     calls: bool,
-    host_functions: HashMap<String, Rc<HostFunction>>,
+    host_functions: HashMap<String, Rc<HostSignature>>,
     recover_trailing_member: bool,
     collect_members: bool,
     context: ModuleContext<'_>,
@@ -321,6 +342,7 @@ fn inspect_inner(
         record_fields: HashMap::new(),
         return_types: Vec::new(),
         inferred_returns: Vec::new(),
+        try_blocks: Vec::new(),
         function_shapes: HashMap::new(),
         suspending_functions: HashSet::new(),
         user_types: HashMap::new(),
@@ -339,6 +361,8 @@ fn inspect_inner(
         region_depth: 0,
         region_strict: Vec::new(),
         binding_regions: HashMap::new(),
+        record_cell_leaks: None,
+        cell_leaking_functions: HashSet::new(),
         moved: HashMap::new(),
         hoisted_declarations: HashSet::new(),
     };
@@ -409,7 +433,7 @@ fn inspect_inner(
 type PatternSignature<'s> = (
     &'s str,
     Option<Vec<RangeInclusive<usize>>>,
-    Option<Rc<HostFunction>>,
+    Option<Rc<HostSignature>>,
     Option<ValueType>,
     Option<Vec<Option<ValueType>>>,
     Shape,
@@ -421,7 +445,7 @@ type Binding = (
     bool,
     Span,
     Option<Vec<RangeInclusive<usize>>>,
-    Option<Rc<HostFunction>>,
+    Option<Rc<HostSignature>>,
 );
 
 pub(crate) type ModuleInterfaces = HashMap<String, Rc<ModuleInterface>>;
@@ -432,9 +456,11 @@ pub(crate) struct ModuleInterface {
     types: HashMap<String, Rc<UserDefinition>>,
     functions: HashMap<usize, Shape>,
     symbols: HashMap<String, Span>,
+    #[cfg_attr(not(feature = "runtime"), allow(dead_code))]
     pub(crate) diagnostics: Vec<Diagnostic>,
 }
 
+#[cfg(feature = "runtime")]
 impl ModuleInterface {
     pub(crate) fn contracts(&self) -> HashMap<usize, FunctionContract> {
         self.functions
@@ -461,6 +487,7 @@ impl ModuleInterface {
 }
 
 /// Build interfaces in dependency order; the runtime separately diagnoses missing imports/cycles.
+#[cfg(feature = "runtime")]
 pub(crate) fn module_interfaces(modules: &[(&str, &crate::Program<'_>)]) -> ModuleInterfaces {
     let mut output = HashMap::new();
     let registered: HashSet<_> = modules.iter().map(|(name, _)| *name).collect();
@@ -522,7 +549,7 @@ struct Checker<'s> {
     constructor_aliases: HashMap<usize, (String, Option<String>)>,
     member_completions: Vec<MemberCompletion>,
     collect_members: bool,
-    host_functions: HashMap<String, Rc<HostFunction>>,
+    host_functions: HashMap<String, Rc<HostSignature>>,
     calls: bool,
     scopes: Vec<HashMap<&'s str, Binding>>,
     scope_spans: Vec<Span>,
@@ -533,6 +560,8 @@ struct Checker<'s> {
     record_fields: HashMap<usize, Vec<String>>,
     return_types: Vec<Option<ValueType>>,
     inferred_returns: Vec<Vec<Shape>>,
+    /// Active `try { ... }` blocks and the operand shapes of any `?` inside each.
+    try_blocks: Vec<Vec<(Span, Shape)>>,
     function_shapes: HashMap<usize, Shape>,
     suspending_functions: HashSet<usize>,
     function_results: HashMap<usize, ValueType>,
@@ -545,6 +574,13 @@ struct Checker<'s> {
     region_depth: usize,
     region_strict: Vec<bool>,
     binding_regions: HashMap<usize, usize>,
+    /// While analyzing a function body: (function name span start, region
+    /// depth at entry). Escape checks record the function as cell-leaking
+    /// instead of reporting, so `arena_run` call sites can lint the callback.
+    record_cell_leaks: Option<(usize, usize)>,
+    /// Functions whose bodies can let captured cells escape their implicit
+    /// per-call region (via outer assignment or return).
+    cell_leaking_functions: HashSet<usize>,
     /// Bindings emptied by `move(...)`; a read is an error until reassigned.
     moved: HashMap<usize, Span>,
     /// Pre-declared `import` / `struct` / `enum` / `fn` definition start offsets in the active scope.
@@ -750,7 +786,7 @@ impl<'s> Checker<'s> {
         if self.collect_members {
             self.annotation_references(ty);
         }
-        match ValueType::annotation_with(ty, &|name| self.resolve_type(name)) {
+        match ValueType::parse_annotation_with(ty, &|name| self.resolve_type(name)) {
             Ok(ty) => Some(ty),
             Err(error) => {
                 if self.calls {

@@ -2,8 +2,7 @@
 
 use themoretheless_tokenizer_core::{
     Capabilities, Diagnostic, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage,
-    HostTokenization, LanguageDescriptor, LanguageId, MarkupFlavor, MarkupParse, markup_to_host,
-    parse_markup_as, require_default_dialect,
+    HostTokenization, LanguageDescriptor, LanguageId, MarkupFlavor, MarkupParse, parse_markup_as,
 };
 
 #[must_use]
@@ -46,17 +45,8 @@ impl HostLanguage for Host {
     }
 
     fn lex(&self, source: &str, opts: &HostAnalysisOptions) -> Result<HostTokenization, HostError> {
-        require_default_dialect(&DESCRIPTOR, opts.dialect.as_ref())?;
-        Ok(markup_to_host(&parse(source)))
-    }
-
-    fn semantic_tokens(
-        &self,
-        source: &str,
-        opts: &HostAnalysisOptions,
-    ) -> Result<HostTokenization, HostError> {
-        // SEMANTIC dropped: identical to syntax (measurement-driven capability honesty).
-        self.lex(source, opts)
+        let _ = self.check_entry(source, opts)?;
+        Ok(parse(source).into_host())
     }
 
     fn diagnose(
@@ -64,7 +54,7 @@ impl HostLanguage for Host {
         source: &str,
         opts: &HostAnalysisOptions,
     ) -> Result<Vec<HostDiagnostic>, HostError> {
-        require_default_dialect(&DESCRIPTOR, opts.dialect.as_ref())?;
+        let _ = self.check_entry(source, opts)?;
         Ok(validate(source)
             .into_iter()
             .map(HostDiagnostic::from_diagnostic)

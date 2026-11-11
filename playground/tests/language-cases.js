@@ -744,6 +744,19 @@ export const LANGUAGE_CASES = {
       { name: 'empty', source: '', expectValid: true, minTokens: 0 },
     ],
   },
+  forma: {
+    modes: ['default'],
+    cases: [
+      {
+        name: 'component-card',
+        source: "component Card {\n  prop title: String = 'Hello';\n  Text { content: props.title; }\n}\n",
+        expectValid: true,
+        expectKinds: ['keyword', 'class', 'variable', 'property', 'string'],
+      },
+      { name: 'unclosed-brace', source: 'component Card {\n', expectValid: false },
+      { name: 'empty', source: '', expectValid: true, minTokens: 0 },
+    ],
+  },
 }
 
 /** Every language id that must be present in the WASM build. */

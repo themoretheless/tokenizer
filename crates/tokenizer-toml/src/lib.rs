@@ -58,7 +58,6 @@ use std::borrow::Cow;
 use themoretheless_tokenizer_core::{
     Capabilities, HostAnalysisOptions, HostDiagnostic, HostError, HostLanguage, HostSpan,
     HostToken, HostTokenization, LanguageDescriptor, LanguageId, Severity, language_descriptor,
-    require_default_dialect,
 };
 
 /// What this engine actually does, stated on its own: TOML has a hand-written
@@ -108,8 +107,9 @@ fn host_kind(kind: SyntaxKind) -> &'static str {
 }
 
 fn host_tokenization(parsed: &Parse<'_>) -> HostTokenization {
-    let mut tokens = Vec::new();
-    for token in parsed.lexed().tokens() {
+    let lex_tokens = parsed.lexed().tokens();
+    let mut tokens = Vec::with_capacity(lex_tokens.len());
+    for token in lex_tokens {
         let error = token.has_error();
         tokens.push(HostToken {
             kind: Cow::Borrowed(if error {
@@ -121,8 +121,9 @@ fn host_tokenization(parsed: &Parse<'_>) -> HostTokenization {
             error,
         });
     }
-    let mut diagnostics = Vec::new();
-    for diagnostic in parsed.diagnostics() {
+    let parsed_diags = parsed.diagnostics();
+    let mut diagnostics = Vec::with_capacity(parsed_diags.len());
+    for diagnostic in parsed_diags {
         diagnostics.push(HostDiagnostic {
             code: Cow::Borrowed(diagnostic.kind.code()),
             message: Cow::Owned(diagnostic.kind.to_string()),
@@ -160,32 +161,8 @@ impl HostLanguage for Host {
     }
 
     fn lex(&self, source: &str, opts: &HostAnalysisOptions) -> Result<HostTokenization, HostError> {
-        require_default_dialect(&DESCRIPTOR, opts.dialect.as_ref())?;
-        if opts.limits.exceeds_input_bytes(source.len()) {
-            return Err(HostError::InputTooLarge {
-                max: opts.limits.max_input_bytes,
-                actual: source.len(),
-            });
-        }
+        let _ = self.check_entry(source, opts)?;
         Ok(host_tokenization(&parse(source)))
-    }
-
-    fn semantic_tokens(
-        &self,
-        source: &str,
-        opts: &HostAnalysisOptions,
-    ) -> Result<HostTokenization, HostError> {
-        // SEMANTIC dropped: identical to syntax (measurement-driven capability honesty).
-        self.lex(source, opts)
-    }
-
-    fn diagnose(
-        &self,
-        source: &str,
-        opts: &HostAnalysisOptions,
-    ) -> Result<Vec<HostDiagnostic>, HostError> {
-        require_default_dialect(&DESCRIPTOR, opts.dialect.as_ref())?;
-        Ok(host_tokenization(&parse(source)).diagnostics)
     }
 }
 

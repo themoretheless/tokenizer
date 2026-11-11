@@ -330,6 +330,7 @@ fn is_keyword(text: &str) -> bool {
             | "false"
             | "null"
             | "region"
+            | "try"
             | "async"
             | "await"
             | "import"

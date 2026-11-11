@@ -3,367 +3,7 @@ use crate::runtime::ops::{check_vector_finite, format_value_for_display, is_trut
 use crate::{RecordMap, Value};
 use std::rc::Rc;
 
-/// Pure collection operations available in the initial environment.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Builtin {
-    Int,
-    Float,
-    BitAnd,
-    BitOr,
-    BitXor,
-    BitNot,
-    Shl,
-    Shr,
-    Degrees,
-    Radians,
-    Some,
-    None,
-    Ok,
-    Err,
-    Promote,
-    Random,
-    Noise,
-    GridMesh,
-    Mesh,
-    Transform,
-    Slerp,
-    AxisAngle,
-    RotationMatrix,
-    Zip,
-    Identity,
-    Translation,
-    Scaling,
-    RotationX,
-    RotationY,
-    RotationZ,
-    TransformPoint,
-    TransformDirection,
-    Polygon,
-    Translate,
-    Rotate,
-    Range,
-    RangeIter,
-    Iter,
-    Collect,
-    Cross,
-    Lerp,
-    Clamp,
-    Smoothstep,
-    Vec2,
-    Vec3,
-    Vec4,
-    Dot,
-    Length,
-    Normalize,
-    Sin,
-    Cos,
-    Sqrt,
-    Deg,
-    Map,
-    FlatMap,
-    Assert,
-    Len,
-    Get,
-    Any,
-    All,
-    Filter,
-    Fold,
-    GroupBy,
-    FoldBy,
-    Arena,
-    ArenaRun,
-    ArenaStats,
-    ArenaReset,
-    JsonParse,
-    JsonStringify,
-    Trim,
-    TrimStart,
-    TrimEnd,
-    Split,
-    Join,
-    StartsWith,
-    EndsWith,
-    Contains,
-    Replace,
-    ToLower,
-    ToUpper,
-}
-
-impl Builtin {
-    /// Callback argument index and number of values supplied per invocation.
-    pub fn callback_arities(self) -> &'static [(usize, usize)] {
-        match self {
-            Self::Map | Self::Filter | Self::FlatMap | Self::Any | Self::All | Self::GroupBy => {
-                &[(1, 1)]
-            }
-            Self::Fold => &[(2, 2)],
-            Self::FoldBy => &[(1, 1), (3, 2)],
-            Self::GridMesh => &[(2, 2)],
-            Self::ArenaRun => &[(1, 0)],
-            _ => &[],
-        }
-    }
-
-    /// Inclusive accepted argument-count range, shared by runtime and analysis.
-    pub fn arity(self) -> std::ops::RangeInclusive<usize> {
-        let (min, max) = match self {
-            Self::None | Self::Identity => (0, 0),
-            Self::Int
-            | Self::Float
-            | Self::BitNot
-            | Self::Degrees
-            | Self::Iter
-            | Self::Len
-            | Self::Promote
-            | Self::Radians
-            | Self::Some
-            | Self::Ok
-            | Self::Err
-            | Self::RotationMatrix
-            | Self::Translation
-            | Self::Scaling
-            | Self::RotationX
-            | Self::RotationY
-            | Self::RotationZ
-            | Self::Polygon
-            | Self::Length
-            | Self::Normalize
-            | Self::Sin
-            | Self::Cos
-            | Self::Sqrt
-            | Self::JsonParse
-            | Self::JsonStringify
-            | Self::Deg
-            | Self::Trim
-            | Self::TrimStart
-            | Self::TrimEnd
-            | Self::ToLower
-            | Self::ToUpper => (1, 1),
-            Self::Range | Self::RangeIter => (2, 3),
-            Self::Assert => (1, 2),
-            Self::Arena => (1, 3),
-            Self::ArenaStats | Self::ArenaReset => (1, 1),
-            Self::ArenaRun => (2, 2),
-            Self::GridMesh
-            | Self::Slerp
-            | Self::Lerp
-            | Self::Clamp
-            | Self::Smoothstep
-            | Self::Vec3
-            | Self::Replace
-            | Self::Fold => (3, 3),
-            Self::Vec4 | Self::FoldBy => (4, 4),
-            Self::BitAnd
-            | Self::BitOr
-            | Self::BitXor
-            | Self::Shl
-            | Self::Shr
-            | Self::Random
-            | Self::Collect
-            | Self::Any
-            | Self::All
-            | Self::Get
-            | Self::Mesh
-            | Self::Noise
-            | Self::Transform
-            | Self::AxisAngle
-            | Self::Zip
-            | Self::TransformPoint
-            | Self::TransformDirection
-            | Self::Translate
-            | Self::Rotate
-            | Self::Cross
-            | Self::Vec2
-            | Self::Dot
-            | Self::Map
-            | Self::GroupBy
-            | Self::FlatMap
-            | Self::Split
-            | Self::Join
-            | Self::StartsWith
-            | Self::EndsWith
-            | Self::Contains
-            | Self::Filter => (2, 2),
-        };
-        min..=max
-    }
-}
-
-/// The runtime registration table, shared with editor name validation.
-pub fn builtin_catalog() -> &'static [(&'static str, Builtin)] {
-    &[
-        ("int", Builtin::Int),
-        ("float", Builtin::Float),
-        ("bit_and", Builtin::BitAnd),
-        ("bit_or", Builtin::BitOr),
-        ("bit_xor", Builtin::BitXor),
-        ("bit_not", Builtin::BitNot),
-        ("shl", Builtin::Shl),
-        ("shr", Builtin::Shr),
-        ("assert", Builtin::Assert),
-        ("json_parse", Builtin::JsonParse),
-        ("json_stringify", Builtin::JsonStringify),
-        ("trim", Builtin::Trim),
-        ("trim_start", Builtin::TrimStart),
-        ("trim_end", Builtin::TrimEnd),
-        ("split", Builtin::Split),
-        ("join", Builtin::Join),
-        ("starts_with", Builtin::StartsWith),
-        ("ends_with", Builtin::EndsWith),
-        ("contains", Builtin::Contains),
-        ("replace", Builtin::Replace),
-        ("to_lower", Builtin::ToLower),
-        ("to_upper", Builtin::ToUpper),
-        ("len", Builtin::Len),
-        ("get", Builtin::Get),
-        ("any", Builtin::Any),
-        ("all", Builtin::All),
-        ("degrees", Builtin::Degrees),
-        ("radians", Builtin::Radians),
-        ("Some", Builtin::Some),
-        ("None", Builtin::None),
-        ("Ok", Builtin::Ok),
-        ("Err", Builtin::Err),
-        ("random", Builtin::Random),
-        ("noise", Builtin::Noise),
-        ("transform", Builtin::Transform),
-        ("grid_mesh", Builtin::GridMesh),
-        ("mesh", Builtin::Mesh),
-        ("slerp", Builtin::Slerp),
-        ("axis_angle", Builtin::AxisAngle),
-        ("rotation_matrix", Builtin::RotationMatrix),
-        ("identity", Builtin::Identity),
-        ("promote", Builtin::Promote),
-        ("arena", Builtin::Arena),
-        ("arena_run", Builtin::ArenaRun),
-        ("arena_stats", Builtin::ArenaStats),
-        ("arena_reset", Builtin::ArenaReset),
-        ("translation", Builtin::Translation),
-        ("scaling", Builtin::Scaling),
-        ("rotation_x", Builtin::RotationX),
-        ("rotation_y", Builtin::RotationY),
-        ("rotation_z", Builtin::RotationZ),
-        ("transform_point", Builtin::TransformPoint),
-        ("transform_direction", Builtin::TransformDirection),
-        ("polygon", Builtin::Polygon),
-        ("translate", Builtin::Translate),
-        ("rotate", Builtin::Rotate),
-        ("zip", Builtin::Zip),
-        ("range", Builtin::Range),
-        ("range_iter", Builtin::RangeIter),
-        ("iter", Builtin::Iter),
-        ("collect", Builtin::Collect),
-        ("cross", Builtin::Cross),
-        ("lerp", Builtin::Lerp),
-        ("clamp", Builtin::Clamp),
-        ("smoothstep", Builtin::Smoothstep),
-        ("vec2", Builtin::Vec2),
-        ("vec3", Builtin::Vec3),
-        ("vec4", Builtin::Vec4),
-        ("dot", Builtin::Dot),
-        ("length", Builtin::Length),
-        ("normalize", Builtin::Normalize),
-        ("sin", Builtin::Sin),
-        ("cos", Builtin::Cos),
-        ("sqrt", Builtin::Sqrt),
-        ("deg", Builtin::Deg),
-        ("map", Builtin::Map),
-        ("flat_map", Builtin::FlatMap),
-        ("filter", Builtin::Filter),
-        ("fold", Builtin::Fold),
-        ("group_by", Builtin::GroupBy),
-        ("fold_by", Builtin::FoldBy),
-    ]
-}
-
-/// Fast O(1) compiled jump-table lookup for builtin names.
-#[inline]
-pub fn lookup_builtin(name: &str) -> Option<Builtin> {
-    Some(match name {
-        "int" => Builtin::Int,
-        "float" => Builtin::Float,
-        "bit_and" => Builtin::BitAnd,
-        "bit_or" => Builtin::BitOr,
-        "bit_xor" => Builtin::BitXor,
-        "bit_not" => Builtin::BitNot,
-        "shl" => Builtin::Shl,
-        "shr" => Builtin::Shr,
-        "assert" => Builtin::Assert,
-        "json_parse" => Builtin::JsonParse,
-        "json_stringify" => Builtin::JsonStringify,
-        "trim" => Builtin::Trim,
-        "trim_start" => Builtin::TrimStart,
-        "trim_end" => Builtin::TrimEnd,
-        "split" => Builtin::Split,
-        "join" => Builtin::Join,
-        "starts_with" => Builtin::StartsWith,
-        "ends_with" => Builtin::EndsWith,
-        "contains" => Builtin::Contains,
-        "replace" => Builtin::Replace,
-        "to_lower" => Builtin::ToLower,
-        "to_upper" => Builtin::ToUpper,
-        "len" => Builtin::Len,
-        "get" => Builtin::Get,
-        "any" => Builtin::Any,
-        "all" => Builtin::All,
-        "degrees" => Builtin::Degrees,
-        "radians" => Builtin::Radians,
-        "Some" => Builtin::Some,
-        "None" => Builtin::None,
-        "Ok" => Builtin::Ok,
-        "Err" => Builtin::Err,
-        "random" => Builtin::Random,
-        "noise" => Builtin::Noise,
-        "transform" => Builtin::Transform,
-        "grid_mesh" => Builtin::GridMesh,
-        "mesh" => Builtin::Mesh,
-        "slerp" => Builtin::Slerp,
-        "axis_angle" => Builtin::AxisAngle,
-        "rotation_matrix" => Builtin::RotationMatrix,
-        "identity" => Builtin::Identity,
-        "promote" => Builtin::Promote,
-        "arena" => Builtin::Arena,
-        "arena_run" => Builtin::ArenaRun,
-        "arena_stats" => Builtin::ArenaStats,
-        "arena_reset" => Builtin::ArenaReset,
-        "translation" => Builtin::Translation,
-        "scaling" => Builtin::Scaling,
-        "rotation_x" => Builtin::RotationX,
-        "rotation_y" => Builtin::RotationY,
-        "rotation_z" => Builtin::RotationZ,
-        "transform_point" => Builtin::TransformPoint,
-        "transform_direction" => Builtin::TransformDirection,
-        "polygon" => Builtin::Polygon,
-        "translate" => Builtin::Translate,
-        "rotate" => Builtin::Rotate,
-        "zip" => Builtin::Zip,
-        "range" => Builtin::Range,
-        "range_iter" => Builtin::RangeIter,
-        "iter" => Builtin::Iter,
-        "collect" => Builtin::Collect,
-        "cross" => Builtin::Cross,
-        "lerp" => Builtin::Lerp,
-        "clamp" => Builtin::Clamp,
-        "smoothstep" => Builtin::Smoothstep,
-        "vec2" => Builtin::Vec2,
-        "vec3" => Builtin::Vec3,
-        "vec4" => Builtin::Vec4,
-        "dot" => Builtin::Dot,
-        "length" => Builtin::Length,
-        "normalize" => Builtin::Normalize,
-        "sin" => Builtin::Sin,
-        "cos" => Builtin::Cos,
-        "sqrt" => Builtin::Sqrt,
-        "deg" => Builtin::Deg,
-        "map" => Builtin::Map,
-        "flat_map" => Builtin::FlatMap,
-        "filter" => Builtin::Filter,
-        "fold" => Builtin::Fold,
-        "group_by" => Builtin::GroupBy,
-        "fold_by" => Builtin::FoldBy,
-        _ => return None,
-    })
-}
+pub use crate::catalog::{Builtin, builtin_catalog, lookup_builtin};
 
 /// Evaluate mathematical, vector, matrix, quaternion, angle, and polygon builtins.
 pub(crate) fn eval_math_builtin<'s>(
@@ -701,6 +341,39 @@ pub(crate) fn eval_math_builtin<'s>(
     }
 }
 
+/// Validate `arena(name, budget?, persistent?, strict?)` arguments and build its descriptor record.
+pub(crate) fn build_arena_descriptor<'s>(
+    args: &[Value<'s>],
+) -> Result<RecordMap<'s>, &'static str> {
+    let Some(Value::String(name)) = args.first() else {
+        return Err("arena requires a name string");
+    };
+    if name.is_empty() {
+        return Err("arena name must not be empty");
+    }
+    let budget = match args.get(1) {
+        None | Some(Value::Null) => Value::Null,
+        Some(v) if v.as_usize_index().is_some() => v.clone(),
+        _ => return Err("arena budget must be a non-negative integer"),
+    };
+    let persistent = match args.get(2) {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(value)) => *value,
+        _ => return Err("arena persistent flag must be a boolean"),
+    };
+    let strict = match args.get(3) {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(value)) => *value,
+        _ => return Err("arena strict flag must be a boolean"),
+    };
+    Ok(RecordMap::from([
+        ("name".into(), Value::String(name.clone())),
+        ("budget".into(), budget),
+        ("persistent".into(), Value::Bool(persistent)),
+        ("strict".into(), Value::Bool(strict)),
+    ]))
+}
+
 /// Evaluate pure, callback-free builtins shared across Bytecode VM and AST runtime.
 pub(crate) fn eval_pure_builtin<'s>(
     builtin: Builtin,
@@ -902,22 +575,17 @@ pub(crate) fn eval_pure_builtin<'s>(
             if !builtin.arity().contains(&args.len()) {
                 return Err("Incorrect builtin argument count".into());
             }
-            let Some(Value::String(name)) = args.first() else {
-                return Err("arena requires a name string".into());
-            };
-            if name.is_empty() {
-                return Err("arena name must not be empty".into());
-            }
-            let budget = match args.get(1) {
-                None | Some(Value::Null) => Value::Null,
-                Some(v) if v.as_usize_index().is_some() => v.clone(),
-                _ => return Err("arena budget must be a non-negative integer".into()),
-            };
-            Ok(Value::Record(RecordMap::from([
-                ("name".into(), Value::String(name.clone())),
-                ("budget".into(), budget),
-            ])))
+            build_arena_descriptor(args)
+                .map(Value::Record)
+                .map_err(Into::into)
         }
+        Builtin::ArenaRun | Builtin::ArenaStats | Builtin::ArenaReset => {
+            Err("Arena runtime operations require the tree-walk runtime".into())
+        }
+        Builtin::TaskAll | Builtin::TaskRace => {
+            Err("Task concurrency operations require CoroutineScheduler".into())
+        }
+        Builtin::GridMesh => Err("grid_mesh requires the tree-walk runtime".into()),
         Builtin::Some | Builtin::None | Builtin::Ok | Builtin::Err => {
             let (tag, count) = match builtin {
                 Builtin::Some => ("Some", 1),

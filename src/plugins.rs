@@ -4,544 +4,107 @@ use std::borrow::Cow;
 use std::sync::OnceLock;
 
 use themoretheless_tokenizer_core::{
-    Capabilities, DialectDescriptor, DialectId, HostAnalysisOptions, HostDiagnostic, HostError,
-    HostLanguage, HostSpan, HostToken, HostTokenization, LanguageDescriptor, LanguageId,
-    LanguageRegistry, RegistryBuilder, Severity, TokenLayer,
+    HostAnalysisOptions, HostError, HostTokenization, LanguageRegistry, RegistryBuilder, TokenLayer,
 };
 
-#[cfg(feature = "json")]
-mod json_host {
-    use super::*;
-    use themoretheless_tokenizer_json::{LexerOptions, ParseOptions, lex_with, tokenize_with};
-
-    pub struct JsonHost;
-
-    static DIALECTS: &[DialectDescriptor] = &[
-        DialectDescriptor {
-            id: DialectId::STRICT,
-            display_name: "Strict JSON",
-            aliases: &[],
-        },
-        DialectDescriptor {
-            id: DialectId::JSONC,
-            display_name: "JSONC",
-            aliases: &["json-with-comments"],
-        },
-    ];
-
-    pub static DESCRIPTOR: LanguageDescriptor = LanguageDescriptor {
-        language: LanguageId::JSON,
-        display_name: "JSON",
-        dialects: DIALECTS,
-        default_dialect: DialectId::STRICT,
-        aliases: &[],
-        extensions: &[".json", ".jsonc"],
-        mime_types: &["application/json", "application/jsonc"],
-        capabilities: Capabilities::JSON_FULL,
-        engine_version: env!("CARGO_PKG_VERSION"),
+macro_rules! register_all {
+    ($builder:ident; $( $feat:literal => $engine:path ),* $(,)?) => {
+        $(
+            #[cfg(feature = $feat)]
+            {
+                $builder.register(&$engine)?;
+            }
+        )*
     };
-
-    pub static ENGINE: JsonHost = JsonHost;
-
-    impl HostLanguage for JsonHost {
-        fn descriptor(&self) -> &'static LanguageDescriptor {
-            &DESCRIPTOR
-        }
-
-        fn lex(
-            &self,
-            source: &str,
-            opts: &HostAnalysisOptions,
-        ) -> Result<HostTokenization, HostError> {
-            let dialect = self.resolve_dialect(opts.dialect.as_ref())?;
-            let options = match dialect {
-                DialectId::JSONC => LexerOptions::jsonc(),
-                _ => LexerOptions::strict(),
-            };
-            let result = lex_with(source, options);
-            let mut tokens = Vec::with_capacity(result.tokens().len());
-            for token in result.tokens() {
-                tokens.push(HostToken {
-                    kind: Cow::Borrowed(syntax_kind_str(token.kind)),
-                    span: token.span.into(),
-                    error: token.has_error(),
-                });
-            }
-            let diagnostics = result
-                .diagnostics()
-                .iter()
-                .map(|diagnostic| HostDiagnostic {
-                    code: Cow::Borrowed(diagnostic.kind.code()),
-                    message: Cow::Owned(diagnostic.kind.to_string()),
-                    span: diagnostic.span.into(),
-                    severity: Severity::Error,
-                })
-                .collect();
-            Ok(HostTokenization {
-                tokens,
-                diagnostics,
-                valid: !result.has_errors(),
-            })
-        }
-
-        fn semantic_tokens(
-            &self,
-            source: &str,
-            opts: &HostAnalysisOptions,
-        ) -> Result<HostTokenization, HostError> {
-            let dialect = self.resolve_dialect(opts.dialect.as_ref())?;
-            let options = match dialect {
-                DialectId::JSONC => ParseOptions::jsonc(),
-                _ => ParseOptions::strict(),
-            };
-            let result = tokenize_with(source, options);
-            let mut tokens = Vec::with_capacity(result.tokens.len());
-            for token in &result.tokens {
-                tokens.push(HostToken {
-                    kind: Cow::Borrowed(semantic_kind_str(token.kind)),
-                    span: token.span.into(),
-                    error: matches!(
-                        token.kind,
-                        themoretheless_tokenizer_json::SemanticKind::Invalid
-                    ),
-                });
-            }
-            let diagnostics = result
-                .diagnostics
-                .iter()
-                .map(|diagnostic| HostDiagnostic {
-                    code: Cow::Borrowed(diagnostic.kind.code()),
-                    message: Cow::Owned(diagnostic.kind.to_string()),
-                    span: diagnostic.span.into(),
-                    severity: Severity::Error,
-                })
-                .collect();
-            Ok(HostTokenization {
-                tokens,
-                diagnostics,
-                valid: result.is_valid(),
-            })
-        }
-
-        fn diagnose(
-            &self,
-            source: &str,
-            opts: &HostAnalysisOptions,
-        ) -> Result<Vec<HostDiagnostic>, HostError> {
-            Ok(self.semantic_tokens(source, opts)?.diagnostics)
-        }
-    }
-
-    const fn syntax_kind_str(kind: themoretheless_tokenizer_json::SyntaxKind) -> &'static str {
-        use themoretheless_tokenizer_json::SyntaxKind;
-        match kind {
-            SyntaxKind::Whitespace => "whitespace",
-            SyntaxKind::Bom => "bom",
-            SyntaxKind::LineComment => "line-comment",
-            SyntaxKind::BlockComment => "block-comment",
-            SyntaxKind::LeftBrace => "left-brace",
-            SyntaxKind::RightBrace => "right-brace",
-            SyntaxKind::LeftBracket => "left-bracket",
-            SyntaxKind::RightBracket => "right-bracket",
-            SyntaxKind::Comma => "comma",
-            SyntaxKind::Colon => "colon",
-            SyntaxKind::String => "string",
-            SyntaxKind::Identifier => "identifier",
-            SyntaxKind::Number => "number",
-            SyntaxKind::True => "true",
-            SyntaxKind::False => "false",
-            SyntaxKind::Null => "null",
-            SyntaxKind::Error => "error",
-            _ => "error",
-        }
-    }
-
-    const fn semantic_kind_str(kind: themoretheless_tokenizer_json::SemanticKind) -> &'static str {
-        use themoretheless_tokenizer_json::SemanticKind;
-        match kind {
-            SemanticKind::Property => "property",
-            SemanticKind::String => "string",
-            SemanticKind::Number => "number",
-            SemanticKind::Boolean => "boolean",
-            SemanticKind::Null => "null",
-            SemanticKind::Punctuation => "punctuation",
-            SemanticKind::Comment => "comment",
-            SemanticKind::Whitespace => "whitespace",
-            SemanticKind::Invalid => "invalid",
-            _ => "invalid",
-        }
-    }
 }
 
-#[cfg(feature = "url")]
-mod url_host {
-    use super::*;
-    use themoretheless_tokenizer_url::{tokenize, validate};
-
-    pub struct UrlHost;
-
-    static DIALECTS: &[DialectDescriptor] = &[DialectDescriptor {
-        id: DialectId::DEFAULT,
-        display_name: "Default",
-        aliases: &[],
-    }];
-
-    pub static DESCRIPTOR: LanguageDescriptor = LanguageDescriptor {
-        language: LanguageId::URL,
-        display_name: "URL",
-        dialects: DIALECTS,
-        default_dialect: DialectId::DEFAULT,
-        aliases: &["uri"],
-        extensions: &[],
-        mime_types: &[],
-        capabilities: Capabilities::URL_TODAY,
-        engine_version: env!("CARGO_PKG_VERSION"),
-    };
-
-    pub static ENGINE: UrlHost = UrlHost;
-
-    impl HostLanguage for UrlHost {
-        fn descriptor(&self) -> &'static LanguageDescriptor {
-            &DESCRIPTOR
-        }
-
-        fn lex(
-            &self,
-            source: &str,
-            opts: &HostAnalysisOptions,
-        ) -> Result<HostTokenization, HostError> {
-            let _ = self.resolve_dialect(opts.dialect.as_ref())?;
-            let result = tokenize(source);
-            let mut diagnostics: Vec<HostDiagnostic> = result
-                .diagnostics
-                .iter()
-                .map(|diagnostic| HostDiagnostic::from_diagnostic(*diagnostic))
-                .collect();
-            for diagnostic in validate(source) {
-                diagnostics.push(HostDiagnostic::from_diagnostic(diagnostic));
-            }
-            let tokens = result
-                .tokens
-                .iter()
-                .map(|token| HostToken {
-                    kind: Cow::Borrowed(token.kind.class_name()),
-                    span: HostSpan::from(token.span),
-                    error: false,
-                })
-                .collect();
-            Ok(HostTokenization {
-                tokens,
-                valid: diagnostics.is_empty(),
-                diagnostics,
-            })
-        }
-
-        fn semantic_tokens(
-            &self,
-            source: &str,
-            opts: &HostAnalysisOptions,
-        ) -> Result<HostTokenization, HostError> {
-            // URL has highlight kinds only; semantic layer reuses lex tokens.
-            self.lex(source, opts)
-        }
-
-        fn diagnose(
-            &self,
-            source: &str,
-            opts: &HostAnalysisOptions,
-        ) -> Result<Vec<HostDiagnostic>, HostError> {
-            let _ = self.resolve_dialect(opts.dialect.as_ref())?;
-            Ok(validate(source)
-                .into_iter()
-                .map(HostDiagnostic::from_diagnostic)
-                .collect())
-        }
-    }
-}
-
-/// Register all Cargo-feature-enabled built-in languages.
+/// Register all Cargo-feature-enabled built-in languages in deterministic priority order.
 pub fn register_builtins(
     builder: &mut RegistryBuilder,
 ) -> Result<(), themoretheless_tokenizer_core::RegisterError> {
-    #[cfg(feature = "json")]
-    {
-        builder.register(&json_host::ENGINE)?;
-    }
-    #[cfg(feature = "json5")]
-    {
-        builder.register(&themoretheless_tokenizer_json::JSON5_ENGINE)?;
-    }
-    #[cfg(feature = "jsonl")]
-    {
-        builder.register(&themoretheless_tokenizer_json::JSONL_ENGINE)?;
-    }
-    #[cfg(feature = "url")]
-    {
-        builder.register(&url_host::ENGINE)?;
-    }
-    #[cfg(feature = "xml")]
-    {
-        builder.register(&themoretheless_tokenizer_xml::ENGINE)?;
-    }
-    #[cfg(feature = "html")]
-    {
-        builder.register(&themoretheless_tokenizer_html::ENGINE)?;
-    }
-    #[cfg(feature = "css")]
-    {
-        builder.register(&themoretheless_tokenizer_css::ENGINE)?;
-    }
-    #[cfg(feature = "yaml")]
-    {
-        builder.register(&themoretheless_tokenizer_yaml::ENGINE)?;
-    }
-    #[cfg(feature = "toml")]
-    {
-        builder.register(&themoretheless_tokenizer_toml::ENGINE)?;
-    }
-    #[cfg(feature = "markdown")]
-    {
-        builder.register(&themoretheless_tokenizer_markdown::ENGINE)?;
-    }
-    #[cfg(feature = "csv")]
-    {
-        builder.register(&themoretheless_tokenizer_csv::ENGINE)?;
-    }
-    #[cfg(feature = "tsv")]
-    {
-        builder.register(&themoretheless_tokenizer_csv::TSV_ENGINE)?;
-    }
-    #[cfg(feature = "logfmt")]
-    {
-        builder.register(&themoretheless_tokenizer_logfmt::ENGINE)?;
-    }
-    #[cfg(feature = "ini")]
-    {
-        builder.register(&themoretheless_tokenizer_ini::ENGINE)?;
-    }
-    #[cfg(feature = "properties")]
-    {
-        builder.register(&themoretheless_tokenizer_ini::PROPERTIES_ENGINE)?;
-    }
-    #[cfg(feature = "hcl")]
-    {
-        builder.register(&themoretheless_tokenizer_hcl::ENGINE)?;
-    }
-    #[cfg(feature = "edn")]
-    {
-        builder.register(&themoretheless_tokenizer_edn::ENGINE)?;
-    }
-    #[cfg(feature = "ics")]
-    {
-        builder.register(&themoretheless_tokenizer_ics::ENGINE)?;
-    }
-    #[cfg(feature = "srt")]
-    {
-        builder.register(&themoretheless_tokenizer_srt::ENGINE)?;
-    }
-    #[cfg(feature = "vtt")]
-    {
-        builder.register(&themoretheless_tokenizer_srt::VTT_ENGINE)?;
-    }
-    #[cfg(feature = "sql")]
-    {
-        builder.register(&themoretheless_tokenizer_sql::ENGINE)?;
-    }
-    #[cfg(feature = "mongo")]
-    {
-        builder.register(&themoretheless_tokenizer_mongo::ENGINE)?;
-    }
-    #[cfg(feature = "bash")]
-    {
-        builder.register(&themoretheless_tokenizer_bash::ENGINE)?;
-    }
-    #[cfg(feature = "rush")]
-    {
-        builder.register(&themoretheless_tokenizer_rush::ENGINE)?;
-    }
-    #[cfg(feature = "powershell")]
-    {
-        builder.register(&themoretheless_tokenizer_powershell::ENGINE)?;
-    }
-    #[cfg(feature = "javascript")]
-    {
-        builder.register(&themoretheless_tokenizer_javascript::ENGINE)?;
-    }
-    #[cfg(feature = "typescript")]
-    {
-        builder.register(&themoretheless_tokenizer_typescript::ENGINE)?;
-    }
-    #[cfg(feature = "python")]
-    {
-        builder.register(&themoretheless_tokenizer_python::ENGINE)?;
-    }
-    #[cfg(feature = "java")]
-    {
-        builder.register(&themoretheless_tokenizer_java::ENGINE)?;
-    }
-    #[cfg(feature = "csharp")]
-    {
-        builder.register(&themoretheless_tokenizer_csharp::ENGINE)?;
-    }
-    #[cfg(feature = "go")]
-    {
-        builder.register(&themoretheless_tokenizer_go::ENGINE)?;
-    }
-    #[cfg(feature = "php")]
-    {
-        builder.register(&themoretheless_tokenizer_php::ENGINE)?;
-    }
-    #[cfg(feature = "ruby")]
-    {
-        builder.register(&themoretheless_tokenizer_ruby::ENGINE)?;
-    }
-    #[cfg(feature = "c")]
-    {
-        builder.register(&themoretheless_tokenizer_c::ENGINE)?;
-    }
-    #[cfg(feature = "cpp")]
-    {
-        builder.register(&themoretheless_tokenizer_cpp::ENGINE)?;
-    }
-    #[cfg(feature = "rust")]
-    {
-        builder.register(&themoretheless_tokenizer_rust::ENGINE)?;
-    }
-    #[cfg(feature = "kotlin")]
-    {
-        builder.register(&themoretheless_tokenizer_kotlin::ENGINE)?;
-    }
-    #[cfg(feature = "swift")]
-    {
-        builder.register(&themoretheless_tokenizer_swift::ENGINE)?;
-    }
-    #[cfg(feature = "dart")]
-    {
-        builder.register(&themoretheless_tokenizer_dart::ENGINE)?;
-    }
-    #[cfg(feature = "r")]
-    {
-        builder.register(&themoretheless_tokenizer_r::ENGINE)?;
-    }
-    #[cfg(feature = "visualbasic")]
-    {
-        builder.register(&themoretheless_tokenizer_visualbasic::ENGINE)?;
-    }
-    #[cfg(feature = "fortran")]
-    {
-        builder.register(&themoretheless_tokenizer_fortran::ENGINE)?;
-    }
-    #[cfg(feature = "matlab")]
-    {
-        builder.register(&themoretheless_tokenizer_matlab::ENGINE)?;
-    }
-    #[cfg(feature = "delphi")]
-    {
-        builder.register(&themoretheless_tokenizer_delphi::ENGINE)?;
-    }
-    #[cfg(feature = "scala")]
-    {
-        builder.register(&themoretheless_tokenizer_scala::ENGINE)?;
-    }
-    #[cfg(feature = "lua")]
-    {
-        builder.register(&themoretheless_tokenizer_lua::ENGINE)?;
-    }
-    #[cfg(feature = "perl")]
-    {
-        builder.register(&themoretheless_tokenizer_perl::ENGINE)?;
-    }
-    #[cfg(feature = "objectivec")]
-    {
-        builder.register(&themoretheless_tokenizer_objectivec::ENGINE)?;
-    }
-    #[cfg(feature = "julia")]
-    {
-        builder.register(&themoretheless_tokenizer_julia::ENGINE)?;
-    }
-    #[cfg(feature = "assembly")]
-    {
-        builder.register(&themoretheless_tokenizer_assembly::ENGINE)?;
-    }
-    #[cfg(feature = "groovy")]
-    {
-        builder.register(&themoretheless_tokenizer_groovy::ENGINE)?;
-    }
-    #[cfg(feature = "haskell")]
-    {
-        builder.register(&themoretheless_tokenizer_haskell::ENGINE)?;
-    }
-    #[cfg(feature = "elixir")]
-    {
-        builder.register(&themoretheless_tokenizer_elixir::ENGINE)?;
-    }
-    #[cfg(feature = "erlang")]
-    {
-        builder.register(&themoretheless_tokenizer_erlang::ENGINE)?;
-    }
-    #[cfg(feature = "clojure")]
-    {
-        builder.register(&themoretheless_tokenizer_clojure::ENGINE)?;
-    }
-    #[cfg(feature = "fsharp")]
-    {
-        builder.register(&themoretheless_tokenizer_fsharp::ENGINE)?;
-    }
-    #[cfg(feature = "ocaml")]
-    {
-        builder.register(&themoretheless_tokenizer_ocaml::ENGINE)?;
-    }
-    #[cfg(feature = "lisp")]
-    {
-        builder.register(&themoretheless_tokenizer_lisp::ENGINE)?;
-    }
-    #[cfg(feature = "scheme")]
-    {
-        builder.register(&themoretheless_tokenizer_scheme::ENGINE)?;
-    }
-    #[cfg(feature = "solidity")]
-    {
-        builder.register(&themoretheless_tokenizer_solidity::ENGINE)?;
-    }
-    #[cfg(feature = "zig")]
-    {
-        builder.register(&themoretheless_tokenizer_zig::ENGINE)?;
-    }
-    #[cfg(feature = "nim")]
-    {
-        builder.register(&themoretheless_tokenizer_nim::ENGINE)?;
-    }
-    #[cfg(feature = "dlang")]
-    {
-        builder.register(&themoretheless_tokenizer_dlang::ENGINE)?;
-    }
-    #[cfg(feature = "cobol")]
-    {
-        builder.register(&themoretheless_tokenizer_cobol::ENGINE)?;
-    }
-    #[cfg(feature = "ada")]
-    {
-        builder.register(&themoretheless_tokenizer_ada::ENGINE)?;
-    }
-    #[cfg(feature = "prolog")]
-    {
-        builder.register(&themoretheless_tokenizer_prolog::ENGINE)?;
-    }
-    #[cfg(feature = "abap")]
-    {
-        builder.register(&themoretheless_tokenizer_abap::ENGINE)?;
-    }
-    #[cfg(feature = "vhdl")]
-    {
-        builder.register(&themoretheless_tokenizer_vhdl::ENGINE)?;
-    }
-    #[cfg(feature = "verilog")]
-    {
-        builder.register(&themoretheless_tokenizer_verilog::ENGINE)?;
-    }
-    #[cfg(feature = "graphql")]
-    {
-        builder.register(&themoretheless_tokenizer_graphql::ENGINE)?;
+    register_all! { builder;
+        // Formats
+        "json" => themoretheless_tokenizer_json::ENGINE,
+        "json5" => themoretheless_tokenizer_json::JSON5_ENGINE,
+        "jsonl" => themoretheless_tokenizer_json::JSONL_ENGINE,
+        "url" => themoretheless_tokenizer_url::ENGINE,
+        "xml" => themoretheless_tokenizer_xml::ENGINE,
+        "html" => themoretheless_tokenizer_html::ENGINE,
+        "css" => themoretheless_tokenizer_css::ENGINE,
+        "yaml" => themoretheless_tokenizer_yaml::ENGINE,
+        "toml" => themoretheless_tokenizer_toml::ENGINE,
+        "markdown" => themoretheless_tokenizer_markdown::ENGINE,
+        "csv" => themoretheless_tokenizer_csv::ENGINE,
+        "tsv" => themoretheless_tokenizer_csv::TSV_ENGINE,
+        "logfmt" => themoretheless_tokenizer_logfmt::ENGINE,
+        "ini" => themoretheless_tokenizer_ini::ENGINE,
+        "properties" => themoretheless_tokenizer_ini::PROPERTIES_ENGINE,
+        "hcl" => themoretheless_tokenizer_hcl::ENGINE,
+        "edn" => themoretheless_tokenizer_edn::ENGINE,
+        "ics" => themoretheless_tokenizer_ics::ENGINE,
+        "srt" => themoretheless_tokenizer_srt::ENGINE,
+        "vtt" => themoretheless_tokenizer_srt::VTT_ENGINE,
+
+        // Wave 2 + Rush
+        "sql" => themoretheless_tokenizer_languages::sql::ENGINE,
+        "mongo" => themoretheless_tokenizer_languages::mongo::ENGINE,
+        "bash" => themoretheless_tokenizer_languages::bash::ENGINE,
+        "rush" => themoretheless_tokenizer_rush::ENGINE,
+        "powershell" => themoretheless_tokenizer_languages::powershell::ENGINE,
+
+        // Wave 3–5
+        "javascript" => themoretheless_tokenizer_languages::javascript::ENGINE,
+        "typescript" => themoretheless_tokenizer_languages::typescript::ENGINE,
+        "python" => themoretheless_tokenizer_languages::python::ENGINE,
+        "java" => themoretheless_tokenizer_languages::java::ENGINE,
+        "csharp" => themoretheless_tokenizer_languages::csharp::ENGINE,
+        "go" => themoretheless_tokenizer_languages::go::ENGINE,
+        "php" => themoretheless_tokenizer_languages::php::ENGINE,
+        "ruby" => themoretheless_tokenizer_languages::ruby::ENGINE,
+        "c" => themoretheless_tokenizer_languages::c::ENGINE,
+        "cpp" => themoretheless_tokenizer_languages::cpp::ENGINE,
+        "rust" => themoretheless_tokenizer_languages::rust::ENGINE,
+        "kotlin" => themoretheless_tokenizer_languages::kotlin::ENGINE,
+        "swift" => themoretheless_tokenizer_languages::swift::ENGINE,
+        "dart" => themoretheless_tokenizer_languages::dart::ENGINE,
+        "r" => themoretheless_tokenizer_languages::r::ENGINE,
+
+        // Wave 6
+        "visualbasic" => themoretheless_tokenizer_languages::visualbasic::ENGINE,
+        "fortran" => themoretheless_tokenizer_languages::fortran::ENGINE,
+        "matlab" => themoretheless_tokenizer_languages::matlab::ENGINE,
+        "delphi" => themoretheless_tokenizer_languages::delphi::ENGINE,
+        "scala" => themoretheless_tokenizer_languages::scala::ENGINE,
+        "lua" => themoretheless_tokenizer_languages::lua::ENGINE,
+        "perl" => themoretheless_tokenizer_languages::perl::ENGINE,
+        "objectivec" => themoretheless_tokenizer_languages::objectivec::ENGINE,
+        "julia" => themoretheless_tokenizer_languages::julia::ENGINE,
+        "assembly" => themoretheless_tokenizer_languages::assembly::ENGINE,
+
+        // Wave 7 (next20)
+        "groovy" => themoretheless_tokenizer_languages::groovy::ENGINE,
+        "haskell" => themoretheless_tokenizer_languages::haskell::ENGINE,
+        "elixir" => themoretheless_tokenizer_languages::elixir::ENGINE,
+        "erlang" => themoretheless_tokenizer_languages::erlang::ENGINE,
+        "clojure" => themoretheless_tokenizer_languages::clojure::ENGINE,
+        "fsharp" => themoretheless_tokenizer_languages::fsharp::ENGINE,
+        "ocaml" => themoretheless_tokenizer_languages::ocaml::ENGINE,
+        "lisp" => themoretheless_tokenizer_languages::lisp::ENGINE,
+        "scheme" => themoretheless_tokenizer_languages::scheme::ENGINE,
+        "solidity" => themoretheless_tokenizer_languages::solidity::ENGINE,
+        "zig" => themoretheless_tokenizer_languages::zig::ENGINE,
+        "nim" => themoretheless_tokenizer_languages::nim::ENGINE,
+        "dlang" => themoretheless_tokenizer_languages::dlang::ENGINE,
+        "cobol" => themoretheless_tokenizer_languages::cobol::ENGINE,
+        "ada" => themoretheless_tokenizer_languages::ada::ENGINE,
+        "prolog" => themoretheless_tokenizer_languages::prolog::ENGINE,
+        "abap" => themoretheless_tokenizer_languages::abap::ENGINE,
+        "vhdl" => themoretheless_tokenizer_languages::vhdl::ENGINE,
+        "verilog" => themoretheless_tokenizer_languages::verilog::ENGINE,
+        "graphql" => themoretheless_tokenizer_languages::graphql::ENGINE,
+
+        // Forma UI / Scene language
+        "forma" => themoretheless_tokenizer_forma::ENGINE,
     }
     let _ = builder;
     Ok(())
@@ -558,11 +121,11 @@ pub fn builtin_registry() -> &'static LanguageRegistry {
     })
 }
 
-/// Analyze source through the builtin registry.
-pub fn analyze_host(
+/// Analyze source through the builtin registry with explicit [`HostAnalysisOptions`].
+pub fn analyze_host_with_options(
     language: &str,
     source: &str,
-    dialect: &str,
+    opts: &HostAnalysisOptions,
     layer: TokenLayer,
 ) -> Result<HostTokenization, HostError> {
     let engine =
@@ -571,24 +134,42 @@ pub fn analyze_host(
             .ok_or_else(|| HostError::UnknownLanguage {
                 language: language.to_owned(),
             })?;
-    let dialect_cow = if dialect.is_empty() {
-        Cow::Borrowed(engine.descriptor().default_dialect.as_str())
-    } else {
-        Cow::Owned(dialect.to_owned())
-    };
-    let opts = HostAnalysisOptions::new(dialect_cow);
     if opts.limits.exceeds_input_bytes(source.len()) {
         return Err(HostError::InputTooLarge {
             max: opts.limits.max_input_bytes,
             actual: source.len(),
         });
     }
-    engine.tokenize_layer(source, &opts, layer)
+    if opts.dialect.is_empty() {
+        let resolved = HostAnalysisOptions {
+            dialect: Cow::Borrowed(engine.descriptor().default_dialect.as_str()),
+            limits: opts.limits,
+        };
+        engine.tokenize_layer(source, &resolved, layer)
+    } else {
+        engine.tokenize_layer(source, opts, layer)
+    }
+}
+
+/// Analyze source through the builtin registry using conservative input limits.
+pub fn analyze_host(
+    language: &str,
+    source: &str,
+    dialect: &str,
+    layer: TokenLayer,
+) -> Result<HostTokenization, HostError> {
+    let opts = HostAnalysisOptions {
+        dialect: Cow::Owned(dialect.to_owned()),
+        limits: themoretheless_tokenizer_core::InputLimits::conservative(),
+    };
+    analyze_host_with_options(language, source, &opts, layer)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(any(feature = "json", feature = "url"))]
+    use themoretheless_tokenizer_core::LanguageId;
 
     #[test]
     fn builtins_include_enabled_languages() {
@@ -637,8 +218,7 @@ mod tests {
     #[cfg(feature = "all-languages")]
     #[test]
     fn all_languages_register() {
-        // Exact coverage is checked against Cargo features and playground fixtures.
-        assert_eq!(builtin_registry().len(), 70);
+        assert_eq!(builtin_registry().len(), 71);
     }
 
     #[cfg(feature = "top20")]
