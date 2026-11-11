@@ -1,7 +1,9 @@
 use super::pattern::extract_pattern_name;
 use super::{Compiler, VariableResolution, try_eval_const};
 use crate::bytecode::opcode::{Opcode, RecordShapeDescriptor};
-use crate::{Builtin, Expr, ExprKind, InterpolationPart, RecordMap, RuntimeError, Value};
+use crate::{
+    Builtin, Expr, ExprKind, InterpolationPart, RecordMap, RecordUpdateEntry, RuntimeError, Value,
+};
 use std::rc::Rc;
 
 fn expr_may_mutate(expr: &Expr<'_>) -> bool {
@@ -22,6 +24,10 @@ fn expr_may_mutate(expr: &Expr<'_>) -> bool {
         ExprKind::Map(entries) => entries
             .iter()
             .any(|(k, v)| expr_may_mutate(k) || expr_may_mutate(v)),
+        ExprKind::RecordUpdate { entries } => entries.iter().any(|entry| match entry {
+            RecordUpdateEntry::Spread(expr) => expr_may_mutate(expr),
+            RecordUpdateEntry::Field(k, v) => expr_may_mutate(k) || expr_may_mutate(v),
+        }),
         ExprKind::If {
             condition: scrutinee,
             then_value,
@@ -290,6 +296,52 @@ impl<'s> Compiler<'s> {
                         .emit(Opcode::BuildRecord(entries.len()), span);
                 }
             }
+            ExprKind::RecordUpdate { entries } => {
+                // Compile in batches of <= 63 entries so any length fits in `u64` spread_mask.
+                let mut offset = 0usize;
+                let mut carry_prev = false;
+                while offset < entries.len() || !carry_prev {
+                    let max_batch = if carry_prev { 63 } else { 64 };
+                    let end = (offset + max_batch).min(entries.len());
+                    let slice = &entries[offset..end];
+                    let mut spread_mask = 0u64;
+                    let mut count = 0u32;
+                    if carry_prev {
+                        spread_mask |= 1;
+                        count += 1;
+                    }
+                    for entry in slice {
+                        match entry {
+                            RecordUpdateEntry::Spread(spread) => {
+                                self.compile_expr(spread)?;
+                                spread_mask |= 1u64 << count;
+                            }
+                            RecordUpdateEntry::Field(key, val) => {
+                                match &key.kind {
+                                    ExprKind::Name(n) => {
+                                        let idx = self
+                                            .current()
+                                            .chunk
+                                            .add_constant(Value::String(n.text.to_string()));
+                                        self.current().chunk.emit(Opcode::Constant(idx), key.span);
+                                    }
+                                    _ => self.compile_expr(key)?,
+                                }
+                                self.compile_expr(val)?;
+                            }
+                        }
+                        count += 1;
+                    }
+                    self.current()
+                        .chunk
+                        .emit(Opcode::RecordUpdate { count, spread_mask }, span);
+                    offset = end;
+                    carry_prev = true;
+                    if offset >= entries.len() {
+                        break;
+                    }
+                }
+            }
             ExprKind::If {
                 condition,
                 then_value,
@@ -411,6 +463,46 @@ impl<'s> Compiler<'s> {
                 for stage in stages {
                     match &stage.kind {
                         ExprKind::Call { callee, arguments } => {
+                            if crate::catalog::has_pipeline_placeholder(arguments) {
+                                let tmp_slot = *shared_tmp_slot
+                                    .get_or_insert_with(|| self.current().declare_temp_local());
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::StoreLocal(tmp_slot), stage.span);
+                                if let ExprKind::Name(name) = &callee.kind
+                                    && let VariableResolution::Builtin(builtin) =
+                                        self.resolve_variable(name.text)
+                                {
+                                    for arg in arguments {
+                                        if crate::catalog::is_pipeline_placeholder(arg) {
+                                            self.current()
+                                                .chunk
+                                                .emit(Opcode::GetLocal(tmp_slot), arg.span);
+                                        } else {
+                                            self.compile_expr(arg)?;
+                                        }
+                                    }
+                                    self.current().chunk.emit(
+                                        Opcode::CallBuiltin(builtin, arguments.len()),
+                                        stage.span,
+                                    );
+                                    continue;
+                                }
+                                self.compile_expr(callee)?;
+                                for arg in arguments {
+                                    if crate::catalog::is_pipeline_placeholder(arg) {
+                                        self.current()
+                                            .chunk
+                                            .emit(Opcode::GetLocal(tmp_slot), arg.span);
+                                    } else {
+                                        self.compile_expr(arg)?;
+                                    }
+                                }
+                                self.current()
+                                    .chunk
+                                    .emit(Opcode::Call(arguments.len()), stage.span);
+                                continue;
+                            }
                             if let ExprKind::Name(name) = &callee.kind
                                 && let VariableResolution::Builtin(builtin) =
                                     self.resolve_variable(name.text)

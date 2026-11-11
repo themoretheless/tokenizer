@@ -552,3 +552,93 @@ pub(crate) fn parse_f64_literal(text: &str) -> Option<f64> {
         text.parse::<f64>().ok().filter(|n| n.is_finite())
     }
 }
+
+/// Decoded WGSL-style vector swizzle in either `xyzw` or `rgba` namespace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Swizzle {
+    pub len: u8,
+    pub indices: [u8; 4],
+}
+
+impl Swizzle {
+    #[inline]
+    pub(crate) fn max_index(self) -> usize {
+        let mut max = 0u8;
+        let mut i = 0usize;
+        while i < self.len as usize {
+            if self.indices[i] > max {
+                max = self.indices[i];
+            }
+            i += 1;
+        }
+        max as usize
+    }
+
+    #[inline]
+    pub(crate) fn has_duplicates(self) -> bool {
+        let mut mask = 0u8;
+        let mut i = 0usize;
+        while i < self.len as usize {
+            let bit = 1u8 << self.indices[i];
+            if (mask & bit) != 0 {
+                return true;
+            }
+            mask |= bit;
+            i += 1;
+        }
+        false
+    }
+}
+
+/// Parses a `1..=4` vector component or swizzle (`xyzw` or `rgba`, never mixed).
+pub(crate) fn parse_vector_swizzle(field: &str) -> Option<Swizzle> {
+    let bytes = field.as_bytes();
+    if bytes.is_empty() || bytes.len() > 4 {
+        return None;
+    }
+    let mut indices = [0u8; 4];
+    // Try xyzw namespace first.
+    let mut all_xyzw = true;
+    for (i, &b) in bytes.iter().enumerate() {
+        indices[i] = match b {
+            b'x' => 0,
+            b'y' => 1,
+            b'z' => 2,
+            b'w' => 3,
+            _ => {
+                all_xyzw = false;
+                break;
+            }
+        };
+    }
+    if all_xyzw {
+        return Some(Swizzle {
+            len: bytes.len() as u8,
+            indices,
+        });
+    }
+    // Try rgba namespace (never mixed with xyzw).
+    for (i, &b) in bytes.iter().enumerate() {
+        indices[i] = match b {
+            b'r' => 0,
+            b'g' => 1,
+            b'b' => 2,
+            b'a' => 3,
+            _ => return None,
+        };
+    }
+    Some(Swizzle {
+        len: bytes.len() as u8,
+        indices,
+    })
+}
+
+#[inline]
+pub(crate) fn is_pipeline_placeholder(expr: &crate::ast::Expr<'_>) -> bool {
+    matches!(&expr.kind, crate::ast::ExprKind::Name(name) if name.text == "_")
+}
+
+#[inline]
+pub(crate) fn has_pipeline_placeholder(arguments: &[crate::ast::Expr<'_>]) -> bool {
+    arguments.iter().any(is_pipeline_placeholder)
+}

@@ -311,8 +311,22 @@ pub enum Opcode {
     StoreUpvalue(u32),
     /// Pop and assert region budget is a non-negative integer.
     AssertRegionBudget,
+    /// Pop boolean condition and fail with constant string message if `false`.
+    AssertWhere(u32),
+    /// Register a nominal struct contract (and optional top-of-stack validator closure if `has_validator`).
+    RegisterStruct { desc_idx: u32, has_validator: bool },
+    /// Functional record/struct spread update: `count` entries (`<= 64`), bit `i` of `spread_mask` is 1 for `Spread` (1 stack value) and 0 for `Field` (key + value on stack).
+    RecordUpdate { count: u32, spread_mask: u64 },
     /// Return from execution.
     Return,
+}
+
+/// Precompiled nominal struct field contract for bytecode construction and updates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StructDescriptor {
+    pub type_name: String,
+    pub shape: crate::RecordShape,
+    pub fields: Vec<(String, crate::ValueType)>,
 }
 
 /// Precompiled record shape and optional source-to-sorted-slot mapping.
@@ -332,6 +346,7 @@ pub struct Chunk {
     pub constants: Vec<Value<'static>>,
     pub functions: Vec<Rc<BytecodeFunction>>,
     pub record_shapes: Vec<RecordShapeDescriptor>,
+    pub struct_descriptors: Vec<StructDescriptor>,
     pub spans: Vec<Span>,
     /// Per-instruction inline-cache slot hints for $O(1)$ record/struct field lookup.
     pub ic_slots: Vec<Cell<u32>>,
@@ -344,6 +359,7 @@ impl PartialEq for Chunk {
             && self.constants == other.constants
             && self.functions == other.functions
             && self.record_shapes == other.record_shapes
+            && self.struct_descriptors == other.struct_descriptors
             && self.spans == other.spans
             && self.local_count == other.local_count
     }
@@ -427,6 +443,12 @@ impl Chunk {
         }
         let idx = self.record_shapes.len() as u32;
         self.record_shapes.push(desc);
+        idx
+    }
+
+    pub fn add_struct_descriptor(&mut self, desc: StructDescriptor) -> u32 {
+        let idx = self.struct_descriptors.len() as u32;
+        self.struct_descriptors.push(desc);
         idx
     }
 

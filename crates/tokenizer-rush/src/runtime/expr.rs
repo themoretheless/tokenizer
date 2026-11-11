@@ -1,9 +1,10 @@
-use super::mutation::{mutate_path, read_path};
+use super::mutation::{collect_mutated_structs, mutate_path, read_path};
 use super::{
     Binding, Builtin, Closure, Environment, FunctionBody, RecordMap, Result, Runtime, RuntimeError,
-    Value, builtins, exact_remainder, format_value_for_display,
+    UserData, Value, builtins, exact_remainder, format_value_for_display,
 };
-use crate::{Expr, ExprKind};
+use crate::{Expr, ExprKind, RecordUpdateEntry};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
 
@@ -148,6 +149,9 @@ impl<'s> Runtime<'_, 's> {
                 }
                 Ok(Value::Record(RecordMap::from_unique_entries(pairs)))
             }
+            ExprKind::RecordUpdate { entries } => {
+                self.eval_record_update(entries, environment, span)
+            }
             ExprKind::Number(text) => {
                 if super::is_int_literal(text) {
                     super::parse_int_literal(text)
@@ -256,6 +260,18 @@ impl<'s> Runtime<'_, 's> {
                     {
                         self.cells[index].0 = previous;
                         return self.error(span, "Assignment violates variable type");
+                    }
+                    if !self.struct_constraints.is_empty() {
+                        let mut touched = Vec::new();
+                        collect_mutated_structs(&self.cells[index].0, &steps, &mut touched);
+                        for (type_name, fields) in touched.into_iter().rev() {
+                            if let Err(err) =
+                                self.validate_struct_constraints(&type_name, &fields, span)
+                            {
+                                self.cells[index].0 = previous;
+                                return Err(err);
+                            }
+                        }
                     }
                     if let Err(error) = self.enforce_retained_limit(span, None) {
                         self.cells[index].0 = previous;
@@ -382,29 +398,31 @@ impl<'s> Runtime<'_, 's> {
                         message: format!("Unknown field: {}", field.text),
                     });
                 }
-                if !matches!(object, Value::Vector(_)) {
+                let Value::Vector(values) = object else {
                     return self.error(field.span, "Value does not support member access");
-                }
-                let axis = match field.text {
-                    "x" => 0,
-                    "y" => 1,
-                    "z" => 2,
-                    "w" => 3,
-                    _ => return self.error(field.span, "Unknown vector component"),
                 };
-                match object {
-                    Value::Vector(values) => values
-                        .get(axis)
-                        .copied()
-                        .map(Value::Number)
-                        .ok_or_else(|| RuntimeError {
-                            stack: Vec::new(),
-                            location: None,
-                            module: self.module.map(str::to_owned),
-                            span: field.span,
-                            message: "Vector component out of bounds".into(),
-                        }),
-                    _ => self.error(span, "Member access requires a vector"),
+                let Some(swizzle) = crate::catalog::parse_vector_swizzle(field.text) else {
+                    return self.error(field.span, "Unknown vector component");
+                };
+                if swizzle.max_index() >= values.len() {
+                    return Err(RuntimeError {
+                        stack: Vec::new(),
+                        location: None,
+                        module: self.module.map(str::to_owned),
+                        span: field.span,
+                        message: "Vector component out of bounds".into(),
+                    });
+                }
+                if swizzle.len == 1 {
+                    Ok(Value::Number(values[swizzle.indices[0] as usize]))
+                } else {
+                    let mut buf = [0.0f64; 4];
+                    for (i, slot) in buf.iter_mut().take(swizzle.len as usize).enumerate() {
+                        *slot = values[swizzle.indices[i] as usize];
+                    }
+                    Ok(Value::Vector(crate::InlineVec::from_slice(
+                        &buf[..swizzle.len as usize],
+                    )))
                 }
             }
             ExprKind::Index { object, index } => {
@@ -472,11 +490,33 @@ impl<'s> Runtime<'_, 's> {
                         _ => (stage, &[][..]),
                     };
                     let function = self.expr(callee, environment)?;
-                    let mut arguments = vec![value];
-                    for argument in supplied {
-                        arguments.push(self.expr(argument, environment)?);
+                    if crate::catalog::has_pipeline_placeholder(supplied) {
+                        let last_placeholder = supplied
+                            .iter()
+                            .rposition(crate::catalog::is_pipeline_placeholder)
+                            .unwrap();
+                        let mut piped = Some(value);
+                        let mut arguments = Vec::with_capacity(supplied.len());
+                        for (idx, argument) in supplied.iter().enumerate() {
+                            if crate::catalog::is_pipeline_placeholder(argument) {
+                                if idx == last_placeholder {
+                                    arguments.push(piped.take().unwrap());
+                                } else {
+                                    arguments.push(piped.as_ref().unwrap().clone());
+                                }
+                            } else {
+                                arguments.push(self.expr(argument, environment)?);
+                            }
+                        }
+                        value = self.call(function, arguments.into(), stage.span)?;
+                    } else {
+                        let mut arguments = Vec::with_capacity(supplied.len() + 1);
+                        arguments.push(value);
+                        for argument in supplied {
+                            arguments.push(self.expr(argument, environment)?);
+                        }
+                        value = self.call(function, arguments.into(), stage.span)?;
                     }
-                    value = self.call(function, arguments.into(), stage.span)?;
                 }
                 Ok(value)
             }
@@ -727,6 +767,178 @@ impl<'s> Runtime<'_, 's> {
             return self.vector(components, span);
         }
         self.error(span, "Numeric operands required")
+    }
+
+    pub(super) fn eval_record_update(
+        &mut self,
+        entries: &[RecordUpdateEntry<'s>],
+        environment: &Environment<'s>,
+        span: Span,
+    ) -> Result<Value<'s>> {
+        let eval_key = |rt: &mut Self, key: &Expr<'s>| -> Result<String> {
+            match &key.kind {
+                ExprKind::Name(name) => {
+                    rt.string_growth(0, name.text.len(), key.span)?;
+                    Ok(name.text.to_owned())
+                }
+                _ => match rt.expr(key, environment)? {
+                    Value::String(k) => {
+                        rt.string_growth(0, k.len(), key.span)?;
+                        Ok(k)
+                    }
+                    _ => rt.error(key.span, "Record key must be a name or string"),
+                },
+            }
+        };
+
+        // Check if the first entry spreads a nominal struct (`UserData` with `variant: None`).
+        let mut iter = entries.iter();
+        let mut map: BTreeMap<String, Value<'s>> = BTreeMap::new();
+        if let Some(first) = iter.next() {
+            match first {
+                RecordUpdateEntry::Spread(spread_expr) => {
+                    let base = self.expr(spread_expr, environment)?;
+                    match base {
+                        Value::UserData(data) if data.variant.is_none() => {
+                            let UserData {
+                                type_name,
+                                mut values,
+                                ..
+                            } = *data;
+                            let Some(Value::Record(mut fields)) = values.pop() else {
+                                return self.error(spread_expr.span, "Invalid struct value");
+                            };
+                            let contract = self.struct_fields.get(&type_name).cloned();
+                            for entry in iter {
+                                match entry {
+                                    RecordUpdateEntry::Spread(other_expr) => {
+                                        let other = self.expr(other_expr, environment)?;
+                                        let overlay = match other {
+                                            Value::Record(rec) => rec,
+                                            Value::UserData(other_data)
+                                                if other_data.variant.is_none()
+                                                    && other_data.type_name == type_name =>
+                                            {
+                                                let mut vs = other_data.values;
+                                                let Some(Value::Record(rec)) = vs.pop() else {
+                                                    return self.error(
+                                                        other_expr.span,
+                                                        "Invalid struct value",
+                                                    );
+                                                };
+                                                rec
+                                            }
+                                            _ => {
+                                                return self.error(
+                                                    other_expr.span,
+                                                    "Struct update spread requires a record or matching struct",
+                                                );
+                                            }
+                                        };
+                                        for (k, mut v) in overlay {
+                                            let Some(slot) = fields.get_mut(&k) else {
+                                                return self.error(
+                                                    other_expr.span,
+                                                    &format!("Unknown struct field: {k}"),
+                                                );
+                                            };
+                                            if let Some(expected_ty) =
+                                                contract.as_ref().and_then(|c| c.get(&k))
+                                            {
+                                                if !expected_ty.accepts(&v) {
+                                                    return self.error(
+                                                        other_expr.span,
+                                                        "Struct field type does not match declaration",
+                                                    );
+                                                }
+                                                v = v.coerce_for_type(expected_ty);
+                                            }
+                                            *slot = v;
+                                        }
+                                    }
+                                    RecordUpdateEntry::Field(key_expr, val_expr) => {
+                                        let key = eval_key(self, key_expr)?;
+                                        let mut val = self.expr(val_expr, environment)?;
+                                        let Some(slot) = fields.get_mut(&key) else {
+                                            return self.error(
+                                                key_expr.span,
+                                                &format!("Unknown struct field: {key}"),
+                                            );
+                                        };
+                                        if let Some(expected_ty) =
+                                            contract.as_ref().and_then(|c| c.get(&key))
+                                        {
+                                            if !expected_ty.accepts(&val) {
+                                                return self.error(
+                                                    val_expr.span,
+                                                    "Struct field type does not match declaration",
+                                                );
+                                            }
+                                            val = val.coerce_for_type(expected_ty);
+                                        }
+                                        *slot = val;
+                                    }
+                                }
+                            }
+                            self.validate_struct_constraints(&type_name, &fields, span)?;
+                            return Ok(Value::UserData(Box::new(UserData {
+                                type_name,
+                                variant: None,
+                                values: vec![Value::Record(fields)],
+                            })));
+                        }
+                        Value::Record(rec) => {
+                            self.collection_growth(0, rec.len(), spread_expr.span)?;
+                            for (k, v) in rec {
+                                self.string_growth(0, k.len(), spread_expr.span)?;
+                                map.insert(k, v);
+                            }
+                        }
+                        _ => {
+                            return self.error(
+                                spread_expr.span,
+                                "Spread operand in record update must be a record or struct",
+                            );
+                        }
+                    }
+                }
+                RecordUpdateEntry::Field(key_expr, val_expr) => {
+                    let key = eval_key(self, key_expr)?;
+                    let val = self.expr(val_expr, environment)?;
+                    self.collection_growth(0, 1, span)?;
+                    map.insert(key, val);
+                }
+            }
+        }
+
+        for entry in iter {
+            match entry {
+                RecordUpdateEntry::Spread(spread_expr) => {
+                    let Value::Record(rec) = self.expr(spread_expr, environment)? else {
+                        return self.error(
+                            spread_expr.span,
+                            "Spread operand in record update must be a record",
+                        );
+                    };
+                    for (k, v) in rec {
+                        if !map.contains_key(&k) {
+                            self.collection_growth(map.len(), 1, spread_expr.span)?;
+                            self.string_growth(0, k.len(), spread_expr.span)?;
+                        }
+                        map.insert(k, v);
+                    }
+                }
+                RecordUpdateEntry::Field(key_expr, val_expr) => {
+                    let key = eval_key(self, key_expr)?;
+                    let val = self.expr(val_expr, environment)?;
+                    if !map.contains_key(&key) {
+                        self.collection_growth(map.len(), 1, span)?;
+                    }
+                    map.insert(key, val);
+                }
+            }
+        }
+        Ok(Value::Record(RecordMap::from_iter(map)))
     }
 
     pub(super) fn vector(&self, values: crate::InlineVec, span: Span) -> Result<Value<'s>> {

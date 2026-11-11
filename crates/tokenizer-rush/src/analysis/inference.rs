@@ -1,5 +1,5 @@
 use super::{Checker, Shape};
-use crate::{Expr, ExprKind, Stmt, StmtKind, ValueType};
+use crate::{Expr, ExprKind, RecordUpdateEntry, Stmt, StmtKind, ValueType};
 use std::collections::{HashMap, HashSet};
 use themoretheless_tokenizer_core::Span;
 
@@ -277,6 +277,97 @@ impl<'s> Checker<'s> {
                     );
                 }
             }
+            ExprKind::Pipeline { input, stages } => {
+                let mut input_expected = None;
+                if let Some(first_stage) = stages.first() {
+                    match &first_stage.kind {
+                        ExprKind::Call { callee, arguments } => {
+                            let types = self.known_user_parameters(callee).or_else(|| {
+                                self.known_host(callee)
+                                    .map(|h| h.parameters.iter().cloned().map(Some).collect())
+                            });
+                            if crate::catalog::has_pipeline_placeholder(arguments) {
+                                for (i, arg) in arguments.iter().enumerate() {
+                                    if crate::catalog::is_pipeline_placeholder(arg) {
+                                        if input_expected.is_none() {
+                                            input_expected = types
+                                                .as_ref()
+                                                .and_then(|t| t.get(i))
+                                                .cloned()
+                                                .flatten();
+                                        }
+                                    } else {
+                                        self.constrain(
+                                            arg,
+                                            types
+                                                .as_ref()
+                                                .and_then(|t| t.get(i))
+                                                .cloned()
+                                                .flatten(),
+                                            parameters,
+                                        );
+                                    }
+                                }
+                            } else {
+                                input_expected =
+                                    types.as_ref().and_then(|t| t.first()).cloned().flatten();
+                                for (i, arg) in arguments.iter().enumerate() {
+                                    self.constrain(
+                                        arg,
+                                        types
+                                            .as_ref()
+                                            .and_then(|t| t.get(i + 1))
+                                            .cloned()
+                                            .flatten(),
+                                        parameters,
+                                    );
+                                }
+                            }
+                        }
+                        _ => {
+                            let types = self.known_user_parameters(first_stage).or_else(|| {
+                                self.known_host(first_stage)
+                                    .map(|h| h.parameters.iter().cloned().map(Some).collect())
+                            });
+                            input_expected =
+                                types.as_ref().and_then(|t| t.first()).cloned().flatten();
+                        }
+                    }
+                }
+                self.constrain(input, input_expected, parameters);
+                for stage in stages.iter().skip(1) {
+                    if let ExprKind::Call { callee, arguments } = &stage.kind {
+                        let types = self.known_user_parameters(callee).or_else(|| {
+                            self.known_host(callee)
+                                .map(|h| h.parameters.iter().cloned().map(Some).collect())
+                        });
+                        let has_ph = crate::catalog::has_pipeline_placeholder(arguments);
+                        for (i, arg) in arguments.iter().enumerate() {
+                            if has_ph && crate::catalog::is_pipeline_placeholder(arg) {
+                                continue;
+                            }
+                            let idx = if has_ph { i } else { i + 1 };
+                            self.constrain(
+                                arg,
+                                types.as_ref().and_then(|t| t.get(idx)).cloned().flatten(),
+                                parameters,
+                            );
+                        }
+                    }
+                }
+            }
+            ExprKind::RecordUpdate { entries } => {
+                for entry in entries {
+                    match entry {
+                        RecordUpdateEntry::Spread(spread) => {
+                            self.constrain(spread, None, parameters);
+                        }
+                        RecordUpdateEntry::Field(_, value) => {
+                            self.constrain(value, None, parameters);
+                        }
+                    }
+                }
+            }
             ExprKind::Assign {
                 operator,
                 target,
@@ -345,6 +436,7 @@ impl<'s> Checker<'s> {
                     constant,
                     value,
                     ty,
+                    constraint,
                 } => {
                     let ty = ty.as_ref().and_then(|t| {
                         ValueType::parse_annotation_with(t, &|n| self.resolve_type(n)).ok()
@@ -366,6 +458,9 @@ impl<'s> Checker<'s> {
                     }
                     if *constant {
                         self.binding_shapes.insert(name.span.start, shape);
+                    }
+                    if let Some(constraint) = constraint {
+                        self.constrain(constraint, Some(ValueType::Bool), parameters);
                     }
                 }
                 StmtKind::LetElse {

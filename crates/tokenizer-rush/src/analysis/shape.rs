@@ -1,6 +1,6 @@
 use super::Checker;
 use crate::analysis::HostSignature;
-use crate::{Builtin, Expr, ExprKind, Name, ValueType};
+use crate::{Builtin, Expr, ExprKind, Name, RecordUpdateEntry, ValueType};
 use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
@@ -665,6 +665,39 @@ impl<'s> Checker<'s> {
                 }
                 Shape::Record(fields)
             }
+            ExprKind::RecordUpdate { entries } => {
+                if let Some(RecordUpdateEntry::Spread(first)) = entries.first() {
+                    let base_shape = self.shape(first);
+                    if let Shape::Typed(ValueType::User(id)) = &base_shape
+                        && self
+                            .user_types
+                            .get(id)
+                            .and_then(|d| d.fields.as_ref())
+                            .is_some()
+                    {
+                        return base_shape;
+                    }
+                }
+                let mut fields = BTreeMap::new();
+                for entry in entries {
+                    match entry {
+                        RecordUpdateEntry::Spread(spread) => match self.shape(spread) {
+                            Shape::Record(spread_fields) => {
+                                fields.extend(spread_fields);
+                            }
+                            Shape::Unknown => return Shape::Unknown,
+                            _ => return Shape::Unsupported,
+                        },
+                        RecordUpdateEntry::Field(key, value) => {
+                            let ExprKind::Name(name) = &key.kind else {
+                                return Shape::Unsupported;
+                            };
+                            fields.insert(name.text.to_owned(), self.shape(value));
+                        }
+                    }
+                }
+                Shape::Record(fields)
+            }
             ExprKind::Lambda { .. } => Shape::Unsupported,
             ExprKind::Call { callee, arguments } => self.applied_result_shape(
                 callee,
@@ -697,14 +730,28 @@ impl<'s> Checker<'s> {
             ExprKind::Pipeline { input, stages } => {
                 let mut result = self.shape(input);
                 for stage in stages {
-                    let mut supplied = vec![result];
-                    let callee = if let ExprKind::Call { callee, arguments } = &stage.kind {
-                        supplied.extend(arguments.iter().map(|arg| self.shape(arg)));
-                        callee.as_ref()
+                    if let ExprKind::Call { callee, arguments } = &stage.kind {
+                        if crate::catalog::has_pipeline_placeholder(arguments) {
+                            let supplied: Vec<Shape> = arguments
+                                .iter()
+                                .map(|arg| {
+                                    if crate::catalog::is_pipeline_placeholder(arg) {
+                                        result.clone()
+                                    } else {
+                                        self.shape(arg)
+                                    }
+                                })
+                                .collect();
+                            result = self.applied_result_shape(callee, &supplied);
+                        } else {
+                            let mut supplied = Vec::with_capacity(arguments.len() + 1);
+                            supplied.push(result);
+                            supplied.extend(arguments.iter().map(|arg| self.shape(arg)));
+                            result = self.applied_result_shape(callee, &supplied);
+                        }
                     } else {
-                        stage
-                    };
-                    result = self.applied_result_shape(callee, &supplied);
+                        result = self.applied_result_shape(stage, &[result]);
+                    }
                 }
                 result
             }
@@ -724,18 +771,16 @@ impl<'s> Checker<'s> {
                         _ => Shape::Unknown,
                     };
                 }
-                let axis = match field.text {
-                    "x" => Some(0),
-                    "y" => Some(1),
-                    "z" => Some(2),
-                    "w" => Some(3),
-                    _ => None,
-                };
-                if let (Shape::Typed(ValueType::Vector(size)), Some(axis)) =
-                    (self.shape(object), axis)
-                    && axis < size
+                if let (Shape::Typed(ValueType::Vector(size)), Some(swizzle)) = (
+                    self.shape(object),
+                    crate::catalog::parse_vector_swizzle(field.text),
+                ) && swizzle.max_index() < size
                 {
-                    Shape::Typed(ValueType::Number)
+                    if swizzle.len == 1 {
+                        Shape::Typed(ValueType::Number)
+                    } else {
+                        Shape::Typed(ValueType::Vector(swizzle.len as usize))
+                    }
                 } else {
                     Shape::Unknown
                 }
@@ -887,6 +932,7 @@ impl<'s> Checker<'s> {
                 _ => false,
             }
         }
-        matches!(value.kind, ExprKind::Map(_)) || data(&self.shape(value))
+        matches!(value.kind, ExprKind::Map(_) | ExprKind::RecordUpdate { .. })
+            || data(&self.shape(value))
     }
 }

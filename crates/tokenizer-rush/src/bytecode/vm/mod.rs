@@ -6,7 +6,9 @@ mod builtins;
 mod dispatch;
 mod ops;
 
-use crate::bytecode::opcode::{BytecodeClosure, BytecodeFunction, Chunk, Upvalue};
+use crate::bytecode::opcode::{
+    BytecodeClosure, BytecodeFunction, Chunk, StructDescriptor, Upvalue,
+};
 use crate::runtime::memory::{Budget, CoverError};
 use crate::runtime::ops::eval_binary_values;
 use crate::{CancellationToken, ExecutionLimits, RuntimeError, Value};
@@ -14,6 +16,11 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
+
+pub(super) struct StructVmContract {
+    pub(super) desc: StructDescriptor,
+    pub(super) validator: Option<Rc<BytecodeClosure>>,
+}
 
 pub(super) struct CallFrame {
     pub(super) closure: Rc<BytecodeClosure>,
@@ -29,6 +36,8 @@ pub struct Vm<'c> {
     pub(super) cancel: Option<&'c CancellationToken>,
     pub(super) memory: Budget,
     pub(super) globals: HashMap<String, Value<'static>>,
+    pub(super) struct_contracts: HashMap<String, StructVmContract>,
+    pub(super) has_struct_validators: bool,
     pub(super) frames: Vec<CallFrame>,
     pub(super) stack: Vec<Value<'static>>,
     pub(super) open_upvalues: Vec<Rc<RefCell<Upvalue>>>,
@@ -46,6 +55,8 @@ impl<'c> Vm<'c> {
             cancel,
             memory: Budget::with_allocated_limit(limits.max_heap_bytes, limits.max_allocated_bytes),
             globals: HashMap::new(),
+            struct_contracts: HashMap::new(),
+            has_struct_validators: false,
             frames: Vec::with_capacity(16),
             stack: Vec::with_capacity(64),
             open_upvalues: Vec::new(),
@@ -61,6 +72,8 @@ impl<'c> Vm<'c> {
             cancel: None,
             memory,
             globals: HashMap::new(),
+            struct_contracts: HashMap::new(),
+            has_struct_validators: false,
             frames: Vec::with_capacity(16),
             stack: Vec::with_capacity(64),
             open_upvalues: Vec::new(),
@@ -223,6 +236,84 @@ impl<'c> Vm<'c> {
                 self.stack.truncate(callee_slot);
                 Err(e)
             }
+        }
+    }
+
+    pub(super) fn validate_struct_record(
+        &mut self,
+        type_name: &str,
+        fields: &mut crate::RecordMap<'static>,
+        span: Span,
+    ) -> Result<(), RuntimeError> {
+        let validator = if let Some(contract) = self.struct_contracts.get(type_name) {
+            if fields.len() != contract.desc.fields.len()
+                || (!Rc::ptr_eq(fields.shape(), &contract.desc.shape)
+                    && fields.keys_slice() != &*contract.desc.shape)
+                || fields
+                    .values_slice()
+                    .iter()
+                    .zip(&contract.desc.fields)
+                    .any(|(value, (_, ty))| !ty.accepts(value))
+            {
+                return Err(self.error(span, "Struct fields do not match declaration"));
+            }
+            for (val, (_, ty)) in fields
+                .values_mut_slice()
+                .iter_mut()
+                .zip(&contract.desc.fields)
+            {
+                let v = std::mem::replace(val, Value::Null);
+                *val = v.coerce_for_type(ty);
+            }
+            fields.set_shape(contract.desc.shape.clone());
+            contract.validator.clone()
+        } else {
+            None
+        };
+        if let Some(validator) = validator {
+            let arg = Value::Record(fields.clone());
+            self.run_closure(&validator, &[arg]).map_err(|mut e| {
+                e.span = span;
+                e
+            })?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn validate_container_structs(
+        &mut self,
+        value: &mut Value<'static>,
+        span: Span,
+    ) -> Result<(), RuntimeError> {
+        match value {
+            Value::UserData(data) if data.variant.is_none() => {
+                let type_name = data.type_name.clone();
+                if let Some(Value::Record(fields)) = data.values.first_mut() {
+                    for (_, sub) in fields
+                        .keys_slice()
+                        .to_vec()
+                        .into_iter()
+                        .zip(fields.values_mut_slice().iter_mut())
+                    {
+                        self.validate_container_structs(sub, span)?;
+                    }
+                    self.validate_struct_record(&type_name, fields, span)?;
+                }
+                Ok(())
+            }
+            Value::Record(fields) => {
+                for sub in fields.values_mut_slice().iter_mut() {
+                    self.validate_container_structs(sub, span)?;
+                }
+                Ok(())
+            }
+            Value::List(items) | Value::Tuple(items) => {
+                for sub in items.iter_mut() {
+                    self.validate_container_structs(sub, span)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
 

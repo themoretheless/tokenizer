@@ -5,7 +5,8 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use themoretheless_tokenizer_rush::{
-    CancellationToken, Expr, ExprKind, InterpolationPart, Module, Program, Stmt, StmtKind, Value,
+    CancellationToken, Expr, ExprKind, InterpolationPart, Module, Program, RecordUpdateEntry, Stmt,
+    StmtKind, Value,
 };
 
 struct CountingAllocator;
@@ -113,6 +114,17 @@ fn count_expr(expr: &Expr<'_>, nodes: &mut usize) {
                 count_expr(value, nodes);
             }
         }
+        ExprKind::RecordUpdate { entries } => {
+            for entry in entries {
+                match entry {
+                    RecordUpdateEntry::Spread(expr) => count_expr(expr, nodes),
+                    RecordUpdateEntry::Field(key, value) => {
+                        count_expr(key, nodes);
+                        count_expr(value, nodes);
+                    }
+                }
+            }
+        }
         ExprKind::Pipeline { input, stages } => {
             count_expr(input, nodes);
             for stage in stages {
@@ -161,7 +173,21 @@ fn count_stmt(stmt: &Stmt<'_>, nodes: &mut usize) {
                 count_stmt(statement, nodes);
             }
         }
-        StmtKind::Declaration { value, .. } => count_expr(value, nodes),
+        StmtKind::Struct { fields, .. } => {
+            for field in fields {
+                if let Some(constraint) = &field.constraint {
+                    count_expr(constraint, nodes);
+                }
+            }
+        }
+        StmtKind::Declaration {
+            value, constraint, ..
+        } => {
+            count_expr(value, nodes);
+            if let Some(constraint) = constraint {
+                count_expr(constraint, nodes);
+            }
+        }
         StmtKind::Return(Some(value)) => count_expr(value, nodes),
         StmtKind::Return(None) => {}
         StmtKind::If {

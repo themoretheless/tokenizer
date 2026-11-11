@@ -314,6 +314,17 @@ impl<'s> Program<'s> {
                         visit_expr(v, pending);
                     }
                 }
+                ExprKind::RecordUpdate { entries } => {
+                    for entry in entries {
+                        match entry {
+                            crate::RecordUpdateEntry::Spread(expr) => visit_expr(expr, pending),
+                            crate::RecordUpdateEntry::Field(k, v) => {
+                                visit_expr(k, pending);
+                                visit_expr(v, pending);
+                            }
+                        }
+                    }
+                }
                 ExprKind::Pipeline { input, stages } => {
                     visit_expr(input, pending);
                     for stage in stages {
@@ -384,8 +395,22 @@ impl<'s> Program<'s> {
                             pending.push(&block.stmts);
                         }
                     }
-                    StmtKind::Declaration { value, .. }
-                    | StmtKind::Destructure { value, .. }
+                    StmtKind::Struct { fields, .. } => {
+                        for field in fields {
+                            if let Some(constraint) = &field.constraint {
+                                visit_expr(constraint, &mut pending);
+                            }
+                        }
+                    }
+                    StmtKind::Declaration {
+                        value, constraint, ..
+                    } => {
+                        visit_expr(value, &mut pending);
+                        if let Some(constraint) = constraint {
+                            visit_expr(constraint, &mut pending);
+                        }
+                    }
+                    StmtKind::Destructure { value, .. }
                     | StmtKind::Show(value)
                     | StmtKind::Yield(value)
                     | StmtKind::Expr(value) => visit_expr(value, &mut pending),
@@ -736,6 +761,8 @@ impl<'s> Program<'s> {
             coroutines: HashMap::new(),
             user_types: HashMap::new(),
             struct_fields: HashMap::new(),
+            struct_constraints: HashMap::new(),
+            host_inputs: std::collections::HashSet::new(),
             modules: HashMap::new(),
             module_cache: memory::Slots::new(&memory, 0)
                 .expect("empty module cache requires no allocation"),
@@ -815,6 +842,7 @@ impl<'s> Program<'s> {
             environment
                 .insert(name, value.clone())
                 .map_err(|e| runtime.environment_error(self.parsed.module.span, e))?;
+            runtime.host_inputs.insert((*name).to_owned());
         }
         runtime.module_globals = environment
             .try_clone()
@@ -872,12 +900,22 @@ struct TransactionFrame<'s> {
     cached_modules: Vec<&'s str>,
 }
 
+/// Compiled runtime contract for `where` refinements on struct fields.
+struct StructConstraint<'s> {
+    module: Option<&'s str>,
+    environment: memory::Shared<Environment<'s>>,
+    field_names: Vec<&'s str>,
+    checks: Vec<(String, Expr<'s>)>,
+}
+
 struct Runtime<'a, 's> {
     module: Option<&'s str>,
     early_return: Option<Value<'s>>,
     coroutines: HashMap<CoroutineId, coroutine::Coroutine<'s>>,
     user_types: HashMap<(Option<&'s str>, &'s str), String>,
     struct_fields: HashMap<String, BTreeMap<String, ValueType>>,
+    struct_constraints: HashMap<String, Rc<StructConstraint<'s>>>,
+    host_inputs: std::collections::HashSet<String>,
     modules: HashMap<&'s str, crate::Module<'s>>,
     module_cache: memory::Slots<(&'s str, Value<'s>)>,
     loading: memory::Slots<&'s str>,

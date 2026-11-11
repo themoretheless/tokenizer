@@ -1,7 +1,7 @@
 use super::pattern::extract_pattern_name;
 use super::{Compiler, LoopContext, type_annotation_has_int};
-use crate::bytecode::opcode::{BytecodeFunction, Chunk, Opcode};
-use crate::{ExprKind, RuntimeError, Stmt, StmtKind, Value};
+use crate::bytecode::opcode::{BytecodeFunction, Chunk, Opcode, StructDescriptor};
+use crate::{ExprKind, RuntimeError, Stmt, StmtKind, StructField, Value, ValueType};
 use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
 
@@ -43,6 +43,11 @@ impl<'s> Compiler<'s> {
                     .chunk
                     .emit(Opcode::StoreLocal(slot), stmt.span);
                 hoisted_fns.push((i, fn_idx));
+            }
+        }
+        for stmt in items {
+            if let StmtKind::Struct { name, fields } = &stmt.kind {
+                self.compile_struct_contract(name.text, fields, stmt.span)?;
             }
         }
         let mut fn_cursor = 0;
@@ -103,7 +108,11 @@ impl<'s> Compiler<'s> {
     ) -> Result<(), RuntimeError> {
         match &stmt.kind {
             StmtKind::Declaration {
-                name, value, ty, ..
+                name,
+                value,
+                ty,
+                constraint,
+                ..
             } => {
                 self.compile_expr(value)?;
                 if ty.as_ref().is_some_and(type_annotation_has_int) {
@@ -113,6 +122,16 @@ impl<'s> Compiler<'s> {
                 self.current()
                     .chunk
                     .emit(Opcode::StoreLocal(slot), stmt.span);
+                if let Some(constraint) = constraint {
+                    self.compile_expr(constraint)?;
+                    let msg_idx = self.current().chunk.add_constant(Value::String(format!(
+                        "Parameter '{}' violates where constraint",
+                        name.text
+                    )));
+                    self.current()
+                        .chunk
+                        .emit(Opcode::AssertWhere(msg_idx), constraint.span);
+                }
                 if keep_result {
                     self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
@@ -381,9 +400,87 @@ impl<'s> Compiler<'s> {
         Ok(())
     }
 
+    fn compile_struct_contract(
+        &mut self,
+        type_name: &'s str,
+        fields: &[StructField<'s>],
+        span: Span,
+    ) -> Result<(), RuntimeError> {
+        let mut resolved_fields = Vec::with_capacity(fields.len());
+        for f in fields {
+            let ty = ValueType::parse_annotation_with(&f.ty, &|n| {
+                self.user_types.contains(n).then(|| n.to_owned())
+            })
+            .map_err(|err| {
+                self.error(
+                    err.span,
+                    format!("Unsupported type annotation: {}", err.name),
+                )
+            })?;
+            resolved_fields.push((f.name.text.to_owned(), ty));
+        }
+        resolved_fields.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let sorted_keys: Vec<String> = resolved_fields.iter().map(|(k, _)| k.clone()).collect();
+        let desc_idx = self
+            .current()
+            .chunk
+            .add_struct_descriptor(StructDescriptor {
+                type_name: type_name.to_owned(),
+                shape: Rc::from(sorted_keys),
+                fields: resolved_fields,
+            });
+
+        let has_validator = fields.iter().any(|f| f.constraint.is_some());
+        if has_validator {
+            self.push_state(Some(format!("{type_name}::validator")), 1);
+            self.current().declare_param("__record", 0);
+            for f in fields {
+                let f_slot = self.current().declare_local(f.name.text);
+                let name_idx = self
+                    .current()
+                    .chunk
+                    .add_constant(Value::String(f.name.text.to_owned()));
+                self.current()
+                    .chunk
+                    .emit(Opcode::LocalMemberGet(0, name_idx), f.name.span);
+                self.current()
+                    .chunk
+                    .emit(Opcode::StoreLocal(f_slot), f.name.span);
+            }
+            for f in fields {
+                if let Some(constraint) = &f.constraint {
+                    self.compile_expr(constraint)?;
+                    let msg_idx = self.current().chunk.add_constant(Value::String(format!(
+                        "Struct field '{}' violates where constraint",
+                        f.name.text
+                    )));
+                    self.current()
+                        .chunk
+                        .emit(Opcode::AssertWhere(msg_idx), constraint.span);
+                }
+            }
+            self.current().chunk.emit(Opcode::Null, span);
+            self.current().chunk.emit(Opcode::Return, span);
+            let compiled = self.pop_state();
+            let val_fn_idx = self.current().chunk.add_function(Rc::new(compiled));
+            self.current()
+                .chunk
+                .emit(Opcode::MakeClosure(val_fn_idx), span);
+        }
+        self.current().chunk.emit(
+            Opcode::RegisterStruct {
+                desc_idx,
+                has_validator,
+            },
+            span,
+        );
+        Ok(())
+    }
+
     pub(super) fn compile_type_decl(&mut self, stmt: &Stmt<'s>) -> Result<(), RuntimeError> {
         match &stmt.kind {
             StmtKind::Struct { name, .. } => {
+                self.user_types.insert(name.text.to_string());
                 let slot = self.current().declare_local(name.text);
                 let mut ctor_chunk = Chunk::new();
                 let ctor_type_idx = ctor_chunk.add_constant(Value::String(name.text.to_string()));
@@ -413,6 +510,7 @@ impl<'s> Compiler<'s> {
                     .emit(Opcode::StoreLocal(slot), stmt.span);
             }
             StmtKind::Enum { name, variants } => {
+                self.user_types.insert(name.text.to_string());
                 let slot = self.current().declare_local(name.text);
                 for (var_name, var_types) in variants {
                     let var_const_idx = self

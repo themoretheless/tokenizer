@@ -269,7 +269,11 @@ impl<'s> Coroutine<'s> {
                             }
                             AwaitForm::Declare => {
                                 let StmtKind::Declaration {
-                                    name, constant, ty, ..
+                                    name,
+                                    constant,
+                                    ty,
+                                    constraint,
+                                    ..
                                 } = &statement.kind
                                 else {
                                     unreachable!("await declaration")
@@ -282,6 +286,16 @@ impl<'s> Coroutine<'s> {
                                     statement.span,
                                     environment,
                                 )?;
+                                if let Some(constraint) = constraint {
+                                    runtime.check_where_constraint(
+                                        constraint,
+                                        environment,
+                                        &format!(
+                                            "Parameter '{}' violates where constraint",
+                                            name.text
+                                        ),
+                                    )?;
+                                }
                                 *next += 1;
                             }
                             AwaitForm::Destructure => {

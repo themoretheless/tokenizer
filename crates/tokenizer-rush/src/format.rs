@@ -1,5 +1,5 @@
 //! Canonical AST formatting with comment preservation and a parse-back guard.
-use crate::{Block, Expr, ExprKind, Name, Stmt, StmtKind, Type, parse};
+use crate::{Block, Expr, ExprKind, Name, RecordUpdateEntry, Stmt, StmtKind, Type, parse};
 use themoretheless_tokenizer_core::{Span, SyntaxKind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -193,10 +193,14 @@ impl<'s> Writer<'s> {
                 self.text(" {");
                 self.newline();
                 self.indent += 1;
-                for (name, ty) in fields {
-                    self.name(name);
+                for field in fields {
+                    self.name(&field.name);
                     self.text(": ");
-                    self.ty(ty);
+                    self.ty(&field.ty);
+                    if let Some(constraint) = &field.constraint {
+                        self.text(" where ");
+                        self.expr(constraint, 0);
+                    }
                     self.text(",");
                     self.newline();
                 }
@@ -266,6 +270,7 @@ impl<'s> Writer<'s> {
                 constant,
                 ty,
                 value,
+                constraint,
             } => {
                 self.text(match role {
                     crate::DeclarationRole::Parameter => "param ",
@@ -280,6 +285,10 @@ impl<'s> Writer<'s> {
                 }
                 self.text(" = ");
                 self.expr(value, 0);
+                if let Some(constraint) = constraint {
+                    self.text(" where ");
+                    self.expr(constraint, 0);
+                }
             }
             StmtKind::Function {
                 name,
@@ -582,6 +591,26 @@ impl<'s> Writer<'s> {
                     self.expr(key, 0);
                     self.text(": ");
                     self.expr(value, 0);
+                }
+                self.text("}");
+            }
+            ExprKind::RecordUpdate { entries } => {
+                self.text("{");
+                for (i, entry) in entries.iter().enumerate() {
+                    if i > 0 {
+                        self.text(", ");
+                    }
+                    match entry {
+                        RecordUpdateEntry::Spread(expr) => {
+                            self.text("..");
+                            self.expr(expr, 0);
+                        }
+                        RecordUpdateEntry::Field(key, value) => {
+                            self.expr(key, 0);
+                            self.text(": ");
+                            self.expr(value, 0);
+                        }
+                    }
                 }
                 self.text("}");
             }

@@ -55,11 +55,24 @@ pub struct Stmt<'s> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructField<'s> {
+    pub name: Name<'s>,
+    pub ty: Type<'s>,
+    pub constraint: Option<Expr<'s>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordUpdateEntry<'s> {
+    Spread(Expr<'s>),
+    Field(Expr<'s>, Expr<'s>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StmtKind<'s> {
     Show(Expr<'s>),
     Struct {
         name: Name<'s>,
-        fields: Vec<(Name<'s>, Type<'s>)>,
+        fields: Vec<StructField<'s>>,
     },
     Enum {
         name: Name<'s>,
@@ -94,6 +107,7 @@ pub enum StmtKind<'s> {
         constant: bool,
         ty: Option<Type<'s>>,
         value: Expr<'s>,
+        constraint: Option<Expr<'s>>,
     },
     Return(Option<Expr<'s>>),
     Yield(Expr<'s>),
@@ -200,6 +214,10 @@ pub enum ExprKind<'s> {
     List(Vec<Expr<'s>>),
     Tuple(Vec<Expr<'s>>),
     Map(Vec<(Expr<'s>, Expr<'s>)>),
+    /// Functional record or nominal struct spread update `{ ..base, field: value }`.
+    RecordUpdate {
+        entries: Vec<RecordUpdateEntry<'s>>,
+    },
     Pipeline {
         input: Box<Expr<'s>>,
         stages: Vec<Expr<'s>>,

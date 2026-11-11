@@ -202,12 +202,14 @@ pub(super) enum VariableResolution {
 
 pub(crate) struct Compiler<'s> {
     states: Vec<CompilerState<'s>>,
+    pub(super) user_types: std::collections::HashSet<String>,
 }
 
 impl<'s> Compiler<'s> {
     pub(crate) fn new() -> Self {
         Self {
             states: vec![CompilerState::new(Some("<main>".into()), 0)],
+            user_types: std::collections::HashSet::new(),
         }
     }
 

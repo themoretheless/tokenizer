@@ -1,5 +1,5 @@
 use super::{BlockExits, Checker, NameReference, Shape, UserDefinition};
-use crate::{Block, Expr, ExprKind, Name, Stmt, StmtKind, ValueType};
+use crate::{Block, Expr, ExprKind, Name, RecordUpdateEntry, Stmt, StmtKind, ValueType};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
@@ -189,14 +189,14 @@ impl<'s> Checker<'s> {
                 StmtKind::Struct { name, fields } => {
                     let field_spans = fields
                         .iter()
-                        .map(|(n, _)| (n.text.to_owned(), n.span))
+                        .map(|f| (f.name.text.to_owned(), f.name.span))
                         .collect();
                     let fields = fields
                         .iter()
-                        .filter_map(|(name, ty)| {
-                            ValueType::parse_annotation_with(ty, &|n| self.resolve_type(n))
+                        .filter_map(|f| {
+                            ValueType::parse_annotation_with(&f.ty, &|n| self.resolve_type(n))
                                 .ok()
-                                .map(|ty| (name.text.to_owned(), ty))
+                                .map(|ty| (f.name.text.to_owned(), ty))
                         })
                         .collect();
                     let id = self.identity(name.text);
@@ -516,6 +516,15 @@ impl<'s> Checker<'s> {
                 Self::expr_calls_suspending(k, scopes, suspending)
                     || Self::expr_calls_suspending(v, scopes, suspending)
             }),
+            ExprKind::RecordUpdate { entries } => entries.iter().any(|entry| match entry {
+                RecordUpdateEntry::Spread(expr) => {
+                    Self::expr_calls_suspending(expr, scopes, suspending)
+                }
+                RecordUpdateEntry::Field(k, v) => {
+                    Self::expr_calls_suspending(k, scopes, suspending)
+                        || Self::expr_calls_suspending(v, scopes, suspending)
+                }
+            }),
             _ => false,
         }
     }
@@ -623,27 +632,50 @@ impl<'s> Checker<'s> {
                 self.declare_user_type(name);
                 let field_spans = fields
                     .iter()
-                    .map(|(n, _)| (n.text.to_owned(), n.span))
+                    .map(|f| (f.name.text.to_owned(), f.name.span))
                     .collect();
                 if self.collect_members {
-                    for (field, _) in fields {
+                    for field in fields {
                         self.references.push(NameReference {
-                            usage: field.span,
-                            definition: Some(field.span),
+                            usage: field.name.span,
+                            definition: Some(field.name.span),
                             definition_module: None,
                         });
                     }
                 }
-                let fields = fields
+                let resolved_fields: BTreeMap<String, ValueType> = fields
                     .iter()
-                    .filter_map(|(name, ty)| {
-                        self.checked_annotation(ty)
-                            .map(|ty| (name.text.to_owned(), ty))
+                    .filter_map(|f| {
+                        self.checked_annotation(&f.ty)
+                            .map(|ty| (f.name.text.to_owned(), ty))
                     })
                     .collect();
+                if fields.iter().any(|f| f.constraint.is_some()) {
+                    let mut field_scope = HashMap::new();
+                    let mut temp_ids = Vec::with_capacity(fields.len());
+                    for field in fields {
+                        field_scope.insert(field.name.text, (true, field.name.span, None, None));
+                        if let Some(ty) = resolved_fields.get(field.name.text) {
+                            self.binding_types.insert(field.name.span.start, ty.clone());
+                            temp_ids.push(field.name.span.start);
+                        }
+                    }
+                    self.scopes.push(field_scope);
+                    self.scope_spans.push(statement.span);
+                    for field in fields {
+                        if let Some(constraint) = &field.constraint {
+                            self.condition(constraint);
+                        }
+                    }
+                    self.scopes.pop();
+                    self.scope_spans.pop();
+                    for id in temp_ids {
+                        self.binding_types.remove(&id);
+                    }
+                }
                 if let Some(definition) = self.user_types.get_mut(&self.identity(name.text)) {
                     let definition = Rc::make_mut(definition);
-                    definition.fields = Some(fields);
+                    definition.fields = Some(resolved_fields);
                     definition.field_spans = field_spans;
                 }
                 self.constructor_aliases
@@ -997,6 +1029,7 @@ impl<'s> Checker<'s> {
                 constant,
                 value,
                 ty,
+                constraint,
             } => {
                 self.expr(value);
                 let imported_module = self.expression_module(value);
@@ -1105,6 +1138,9 @@ impl<'s> Checker<'s> {
                     .get_mut(name.text)
                     .unwrap()
                     .2 = arity;
+                if let Some(constraint) = constraint {
+                    self.condition(constraint);
+                }
             }
             StmtKind::Return(value) => {
                 if let Some(value) = value {

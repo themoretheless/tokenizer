@@ -250,6 +250,7 @@ pub(crate) fn run(source: &str, limits: InputLimits) -> (Lexed, bool) {
                 | [b'&', b'=', ..]
                 | [b'^', b'=', ..]
                 | [b'*', b'*', ..]
+                | [b'.', b'.', ..]
                 | [b'&', b'&', ..]
                 | [b'|', b'|', ..] => Some(2usize),
                 _ => None,
