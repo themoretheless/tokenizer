@@ -65,9 +65,9 @@ function singleValueOrigin(value,source){
 }
 const soleOrigin=(value,source)=>isCacheable(source)?singleValueOrigin(value,source):singleOrigin(source);
 
-export function propertyOrigins(value,source,props={},sources={},traces={},seen){
+export function propertyOrigins(value,source,props={},sources={},traces={},seen,knownReferences){
  if(value===null||typeof value!=='object')return source?singleOrigin(source):noOrigins;
- const references=expressionReferences(value);
+ const references=knownReferences??expressionReferences(value);
  if(references.length===0)return source?soleOrigin(value,source):noOrigins;
  const result=source?[declaration(source)]:[];
  for(const ref of references){

@@ -56,7 +56,7 @@ MemberExpression { Value !member (("." | "?.") PropertyName | "[" Value "]" | "?
 TypedValue { TypeName !typed Block }
 Array { "[" (Value ("," Value)* ","?)? "]" }
 Object { "{" ((PropertyName | String) ":" Value+ ((";" | ",") (PropertyName | String) ":" Value+)* (";" | ",")?)? "}" }
-Call { Path !call Arguments }
+Call { (Path | MemberExpression) !call Arguments }
 Arguments { "(" (Value ("," Value)* ","?)? ")" }
 Match { match Subject "{" Branch* "}" }
 GroupMatch { match Subject "{" GroupBranch* "}" ";"? }
@@ -65,7 +65,8 @@ Tuple { "(" Value ("," Value)+ ")" }
 Branch { Pattern (if Value)? MatchArrow Value+ ";" }
 GroupBranch { Pattern (if Value)? MatchArrow ("{" (Property | Node | If | For | LetDeclaration | GroupMatch)* "}" ";"? | Node ";"?) }
 Pattern { SinglePattern ("|" SinglePattern)* }
-SinglePattern { Wildcard | Boolean | Null | String | Number (RangeOp Number)? | Path | Dash Number | Comparison Number | "(" Pattern ("," Pattern)+ ")" }
+SignedNumber { Dash? Number }
+SinglePattern { Wildcard | Boolean | Null | String | SignedNumber (RangeOp SignedNumber)? | Path | Comparison (SignedNumber | String | Path) | "(" Pattern ("," Pattern)+ ")" }
 Path { Identifier | TypeName }
 ComponentName { TypeName }
 PropertyName { Identifier }
@@ -108,7 +109,7 @@ Wildcard { @specialize<Identifier, "_"> }
   space { $[ \t\n\r]+ }
   LineComment { "//" ![\n]* }
   BlockComment { "/*" (![*] | "*" ![/])* "*/" }
-  Number { $[0-9]+ ("." $[0-9]+)? ("px" | "rem" | "em" | "vw" | "vh" | "vmin" | "vmax" | "ch" | "ms" | "s" | "deg" | "rad" | "turn" | "%" | "fr" | "*")? }
+  Number { $[0-9]+ ("." $[0-9]+)? (($[eE] ("+" | "-")? $[0-9]+)?) ("px" | "rem" | "em" | "vw" | "vh" | "vmin" | "vmax" | "ch" | "ms" | "s" | "deg" | "rad" | "turn" | "%" | "fr" | "*")? }
   Color { "#" $[0-9a-fA-F]+ }
   TypeName { $[A-Z] $[a-zA-Z0-9_.]* }
   Identifier { $[a-z_] $[a-zA-Z0-9_.]* }

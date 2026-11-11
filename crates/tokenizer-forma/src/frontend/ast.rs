@@ -50,7 +50,7 @@ pub(super) fn path(s: &str) -> bool {
     !expect_start
 }
 #[inline]
-pub(super) fn is_pure_function(s: &str) -> bool {
+pub(crate) fn is_pure_function(s: &str) -> bool {
     matches!(
         s,
         "min"

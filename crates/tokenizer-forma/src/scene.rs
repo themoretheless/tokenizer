@@ -520,16 +520,16 @@ impl<'a> Parser<'a> {
     fn color(&mut self, property: &str) -> Result<[u8; 4], String> {
         let Kind::Hex(raw) = &self.current.kind else {
             return Err(self.error(&format!(
-                "'{property}' requires an unquoted #RGB, #RRGGBB or #RRGGBBAA color"
+                "'{property}' requires an unquoted #RGB, #RGBA, #RRGGBB or #RRGGBBAA color"
             )));
         };
-        if !matches!(raw.len(), 3 | 6 | 8) || !raw.chars().all(|c| c.is_ascii_hexdigit()) {
+        if !matches!(raw.len(), 3 | 4 | 6 | 8) || !raw.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(self.error(&format!(
-                "Invalid hex color '#{raw}': expected #RGB, #RRGGBB or #RRGGBBAA"
+                "Invalid hex color '#{raw}': expected #RGB, #RGBA, #RRGGBB or #RRGGBBAA"
             )));
         }
         let mut color = [0, 0, 0, 255];
-        if raw.len() == 3 {
+        if raw.len() == 3 || raw.len() == 4 {
             for (i, c) in raw.chars().enumerate() {
                 color[i] = c.to_digit(16).unwrap() as u8 * 17;
             }
@@ -1024,6 +1024,10 @@ mod tests {
             [170, 187, 204, 255]
         );
         assert_eq!(
+            with_button("color: #f08A;").unwrap().button.color,
+            [255, 0, 136, 170]
+        );
+        assert_eq!(
             with_button("background: #01020304;")
                 .unwrap()
                 .button
@@ -1031,7 +1035,7 @@ mod tests {
             [1, 2, 3, 4]
         );
         for value in [
-            "#abcd",
+            "#abcde",
             "#12",
             "#123456789",
             "#xyzxyz",

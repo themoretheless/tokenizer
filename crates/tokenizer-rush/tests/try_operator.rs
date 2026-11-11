@@ -390,19 +390,22 @@ fn host_transactional_effect_contract_blocks_impure_callbacks_and_allows_transac
         callback: plain_double_cb,
     });
 
-    // Static rejection on direct impure host call inside `try { ... }`.
-    let analysis = analyze_host_calls(
-        "try { let x = impure_write(); Some(x) }",
-        std::slice::from_ref(&impure.function),
-    );
+    // Static rejection on direct impure host call inside `try { ... }` at instantiate time.
+    let direct_prog = Program::compile("try { let x = impure_write(); Some(x) }").unwrap();
+    let token = CancellationToken::default();
+    let limits = ExecutionLimits::new(5000);
+    let static_err =
+        match direct_prog.instantiate(limits, &token, &[], &[], std::slice::from_ref(&impure), &[])
+        {
+            Ok(_) => panic!("expected static non-transactional-host error"),
+            Err(err) => err,
+        };
     assert!(
-        analysis
-            .diagnostics
-            .iter()
-            .any(|d| d.code == "non-transactional-host"),
-        "{:?}",
-        analysis.diagnostics
+        static_err.message.contains("non-transactional-host"),
+        "{}",
+        static_err.message
     );
+    assert_eq!(*side_effects.borrow(), 0);
 
     // Transactional contextual host + plain HostFunction succeed inside `try { ... }`.
     let ok_analysis = analyze_host_calls(
@@ -441,14 +444,24 @@ fn tx_pure() -> Result[int, str] {
     let err = instance
         .call("call_indirect", &[impure_val], limits)
         .unwrap_err();
-    assert!(err.message.contains("not transactional"), "{}", err.message);
+    assert!(
+        err.message
+            .contains("cannot be called inside a transaction"),
+        "{}",
+        err.message
+    );
     assert_eq!(*side_effects.borrow(), 0);
     assert_eq!(instance.get("counter"), Some(Value::Int(10)));
 
     let err = instance
         .call_transactional("tx_entry", &[], limits)
         .unwrap_err();
-    assert!(err.message.contains("not transactional"), "{}", err.message);
+    assert!(
+        err.message
+            .contains("cannot be called inside a transaction"),
+        "{}",
+        err.message
+    );
     assert_eq!(*side_effects.borrow(), 0);
     assert_eq!(instance.get("counter"), Some(Value::Int(10)));
 

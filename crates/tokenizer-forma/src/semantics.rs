@@ -46,7 +46,18 @@ pub fn evaluate_value(
             "Превышен предел вложенности",
         ));
     }
-    if value.get("type").is_some() {
+    let o = match value {
+        V::Null | V::Bool(_) | V::Number(_) | V::String(_) => return Ok(value.clone()),
+        V::Array(a) => {
+            return Ok(V::Array(
+                a.iter()
+                    .map(|v| evaluate_value(v, props, state, stack, expand, env))
+                    .collect::<R<_>>()?,
+            ));
+        }
+        V::Object(o) => o,
+    };
+    if o.contains_key("type") {
         if !expand {
             return Ok(value.clone());
         }
@@ -62,10 +73,13 @@ pub fn evaluate_value(
         );
         return Ok(out);
     }
-    if let Some(subject) = value.get("match") {
+    if o.len() != 1
+        && let Some(subject) = o.get("match")
+    {
         let actual = evaluate_value(subject, props, state, stack, expand, env)?;
-        for b in value["branches"]
-            .as_array()
+        for b in o
+            .get("branches")
+            .and_then(V::as_array)
             .ok_or_else(|| Diagnostic::new("invalid-match", "Некорректные ветки match"))?
         {
             if pattern(&b["pattern"], &actual, props, state, env)? {
@@ -83,18 +97,14 @@ pub fn evaluate_value(
             "match: нет подходящей ветки; добавьте _ => …",
         ));
     }
-    if let Some(a) = value.as_array() {
-        return Ok(V::Array(
-            a.iter()
-                .map(|v| evaluate_value(v, props, state, stack, expand, env))
-                .collect::<R<_>>()?,
-        ));
-    }
-    if let Some(o) = value.as_object()
-        && !own(value, "expr")
-        && !own(value, "expression")
-        && !own(value, "interpolation")
-    {
+    let is_ast_leaf = if o.len() == 1 {
+        o.keys()
+            .next()
+            .is_some_and(|k| matches!(k.as_str(), "expr" | "expression" | "interpolation"))
+    } else {
+        o.contains_key("expr") || o.contains_key("expression") || o.contains_key("interpolation")
+    };
+    if !is_ast_leaf {
         let mut out = serde_json::Map::with_capacity(o.len());
         for (k, v) in o {
             out.insert(
@@ -195,7 +205,8 @@ pub fn evaluate_value(
             if own(tokens, tail) {
                 return evaluate_value(&tokens[tail], props, state, stack, expand, env);
             }
-            return read_path(tokens, tail.split('.'), raw, optional);
+            let val = read_path(tokens, tail.split('.'), raw, optional)?;
+            return evaluate_value(&val, props, state, stack, expand, env);
         }
         if let Some(tail) = raw.strip_prefix("i18n.") {
             let i18n = &env["i18n"];
@@ -527,15 +538,17 @@ pub fn matches_type(value: &V, ty: &str, enums: &V) -> bool {
             .is_some_and(|n| n.is_finite() && n.fract() == 0. && n.abs() <= 9007199254740991.),
         "Color" => raw.as_str().is_some_and(|s| {
             s.strip_prefix('#').is_some_and(|s| {
-                [3, 6, 8].contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
+                [3, 4, 6, 8].contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
             })
         }),
         "Length" => {
             raw.as_f64().is_some_and(|n| n.is_finite() && n >= 0.)
                 || raw.as_str().is_some_and(|s| {
-                    ["px", "%", "rem", "em", "vw", "vh", "ch", "fr"]
-                        .iter()
-                        .any(|u| unit(s, u))
+                    [
+                        "px", "%", "rem", "em", "vw", "vh", "vmin", "vmax", "ch", "fr",
+                    ]
+                    .iter()
+                    .any(|u| unit(s, u))
                 })
         }
         "Duration" => raw.as_str().is_some_and(|s| unit(s, "ms") || unit(s, "s")),
@@ -550,7 +563,7 @@ pub fn matches_type(value: &V, ty: &str, enums: &V) -> bool {
         _ => false,
     }
 }
-fn check_constraints(val: &V, constraints: &V, path_label: &str) -> R<()> {
+pub(crate) fn check_constraints(val: &V, constraints: &V, path_label: &str) -> R<()> {
     if val.is_null() {
         return Ok(());
     }
@@ -603,6 +616,93 @@ fn check_constraints(val: &V, constraints: &V, path_label: &str) -> R<()> {
     }
     Ok(())
 }
+pub(crate) fn check_struct_constraints_recursive(
+    val: &V,
+    ty: &str,
+    enums: &V,
+    path_label: &str,
+) -> R<()> {
+    if val.is_null() {
+        return Ok(());
+    }
+    let ty = ty.trim();
+    if let Some(parts) = split_top_level(ty, b'|') {
+        for p in parts {
+            if matches_type(val, p, enums) {
+                return check_struct_constraints_recursive(val, p, enums, path_label);
+            }
+        }
+        return Ok(());
+    }
+    if let Some(inner) = ty.strip_suffix('?') {
+        return check_struct_constraints_recursive(val, inner.trim(), enums, path_label);
+    }
+    if let Some(inner) = ty.strip_prefix("List<").and_then(|s| s.strip_suffix('>')) {
+        if let Some(arr) = val.as_array() {
+            for (idx, item) in arr.iter().enumerate() {
+                check_struct_constraints_recursive(
+                    item,
+                    inner,
+                    enums,
+                    &format!("{path_label}[{idx}]"),
+                )?;
+            }
+        }
+        return Ok(());
+    }
+    if let Some(inner) = ty.strip_prefix("Map<").and_then(|s| s.strip_suffix('>')) {
+        if let Some(obj) = val.as_object() {
+            for (k, item) in obj {
+                check_struct_constraints_recursive(
+                    item,
+                    inner,
+                    enums,
+                    &format!("{path_label}.{k}"),
+                )?;
+            }
+        }
+        return Ok(());
+    }
+    if let Some(inner) = ty.strip_prefix("Record<").and_then(|s| s.strip_suffix('>')) {
+        if let Some(parts) = split_top_level(inner, b',')
+            && parts.len() == 2
+            && parts[0] == "String"
+            && let Some(obj) = val.as_object()
+        {
+            for (k, item) in obj {
+                check_struct_constraints_recursive(
+                    item,
+                    parts[1],
+                    enums,
+                    &format!("{path_label}.{k}"),
+                )?;
+            }
+        }
+        return Ok(());
+    }
+    if let Some(obj) = val.as_object() {
+        if let Some(struct_cons) = enums["_structConstraints"].get(ty).and_then(V::as_object) {
+            for (field, fcons) in struct_cons {
+                if let Some(fval) = obj.get(field) {
+                    check_constraints(fval, fcons, &format!("{path_label}.{field}"))?;
+                }
+            }
+        }
+        if let Some(fields) = enums.get(ty).and_then(V::as_object) {
+            for (field, fty) in fields {
+                if let (Some(fty_str), Some(fval)) = (fty.as_str(), obj.get(field)) {
+                    check_struct_constraints_recursive(
+                        fval,
+                        fty_str,
+                        enums,
+                        &format!("{path_label}.{field}"),
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
 pub fn validate_contract(defs: &V, values: &V, enums: &V, label: &str) -> R<()> {
     if let Some(o) = defs.as_object() {
         for (name, d) in o {
@@ -619,27 +719,17 @@ pub fn validate_contract(defs: &V, values: &V, enums: &V, label: &str) -> R<()> 
                 }
                 continue;
             }
+            let prop_label = format!("{label}.{name}");
             if !matches_type(&values[name], ty, enums) {
                 return Err(Diagnostic::new(
                     "type-mismatch",
-                    format!("{label}.{name}: ожидался {ty}"),
+                    format!("{prop_label}: ожидался {ty}"),
                 ));
             }
             if d["constraints"].is_object() {
-                check_constraints(&values[name], &d["constraints"], &format!("{label}.{name}"))?;
+                check_constraints(&values[name], &d["constraints"], &prop_label)?;
             }
-            let base_ty = ty.strip_suffix('?').unwrap_or(ty);
-            if let Some(struct_cons) = enums["_structConstraints"]
-                .get(base_ty)
-                .and_then(V::as_object)
-                && let Some(obj) = values[name].as_object()
-            {
-                for (field, fcons) in struct_cons {
-                    if let Some(fval) = obj.get(field) {
-                        check_constraints(fval, fcons, &format!("{label}.{name}.{field}"))?;
-                    }
-                }
-            }
+            check_struct_constraints_recursive(&values[name], ty, enums, &prop_label)?;
         }
     }
     Ok(())
@@ -878,21 +968,18 @@ where
                         } else {
                             key.to_string()
                         };
-                        if !keys.insert(identity.clone()) {
+                        if keys.contains(&identity) {
                             return Err(Diagnostic::new(
                                 "duplicate-key",
                                 format!("Повторный ключ for: {identity}"),
                             )
                             .or_span(span));
                         }
+                        let step_prefix = format!("{prefix}@{node_start}:{identity}/");
+                        keys.insert(identity);
                         out.extend(
-                            self.walk(
-                                &node["children"],
-                                &local,
-                                &format!("{prefix}@{node_start}:{identity}/"),
-                                depth + 1,
-                            )
-                            .map_err(|e: Diagnostic| e.or_span(span))?,
+                            self.walk(&node["children"], &local, &step_prefix, depth + 1)
+                                .map_err(|e: Diagnostic| e.or_span(span))?,
                         )
                     }
                     if !matched_any {

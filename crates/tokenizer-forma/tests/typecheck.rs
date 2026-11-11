@@ -190,28 +190,320 @@ fn corpus_has_no_unreviewed_type_diagnostics_and_has_real_coverage() {
         total += report.expressions_total;
         typed += report.expressions_typed;
         for diagnostic in report.diagnostics {
-            if diagnostic["code"]
-                .as_str()
-                .unwrap_or("")
-                .starts_with("incompatible-")
-            {
-                eprintln!(
-                    "CORPUS {file} {} {}..{} expected={} actual={}",
-                    diagnostic["code"],
-                    diagnostic["from"],
-                    diagnostic["to"],
-                    diagnostic["expected"],
-                    diagnostic["actual"]
-                );
-                diagnostics.push((file, diagnostic));
-            }
+            eprintln!(
+                "CORPUS {file} {} {}..{} expected={} actual={}",
+                diagnostic["code"],
+                diagnostic["from"],
+                diagnostic["to"],
+                diagnostic["expected"],
+                diagnostic["actual"]
+            );
+            diagnostics.push((file, diagnostic));
         }
     }
     eprintln!("CORPUS COVERAGE typed={typed} total={total}");
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     assert_eq!(
         (typed, total),
-        (1724, 2247),
+        (1746, 2280),
         "Reviewed corpus coverage baseline"
     );
+}
+
+#[test]
+fn stdlib_collection_and_record_calls_preserve_element_types() {
+    let valid = r#"
+        struct Item {
+            price: Number;
+            label: String;
+        }
+        component Cart {
+            prop nums: List<Number?> = [1, null, 2];
+            prop grid: List<List<Number>> = [[1, 2], [3]];
+            prop items: List<Item> = [];
+            prop scores: Record<String, Number> = {};
+            prop bonus: Record<String, Int> = {};
+            prop firstItem: Item = { price: 10, label: 'ok' };
+            Text {
+                width: sum(compact(props.nums))
+                    + sum(flatten(props.grid))
+                    + sum(pluck(props.items, 'price'))
+                    + sum(values(pick(props.scores, ['a'])))
+                    + sum(values(omit(props.scores, ['b'])))
+                    + sum(values(merge(props.scores, props.bonus)))
+                    + sum(values(pick(props.firstItem, ['price'])));
+            }
+        }
+    "#;
+    let valid_report = report(valid);
+    assert!(
+        valid_report.diagnostics.is_empty(),
+        "{:#?}",
+        valid_report.diagnostics
+    );
+
+    let d1 = assert_range(
+        "component A { prop tags: List<String?> = ['a', null]; Text { width: sum(compact(props.tags)); } }",
+        "incompatible-argument",
+        "compact(props.tags)",
+    );
+    assert_eq!(d1["actual"], "List<String>");
+
+    let d2 = assert_range(
+        "component A { prop rows: List<List<String>> = [['a']]; Text { width: sum(flatten(props.rows)); } }",
+        "incompatible-argument",
+        "flatten(props.rows)",
+    );
+    assert_eq!(d2["actual"], "List<String>");
+
+    let d3 = assert_range(
+        "struct Item { label: String; } component A { prop items: List<Item> = []; Text { width: sum(pluck(props.items, 'label')); } }",
+        "incompatible-argument",
+        "pluck(props.items, 'label')",
+    );
+    assert_eq!(d3["actual"], "List<String>");
+
+    let d4 = assert_range(
+        "struct Item { label: String; } component A { prop item: Item = { label: 'x' }; Text { width: sum(values(pick(props.item, ['label']))); } }",
+        "incompatible-argument",
+        "values(pick(props.item, ['label']))",
+    );
+    assert_eq!(d4["actual"], "List<String>");
+
+    // Structural checking on struct literals (including nested in List<Item>)
+    // and match expressions inside ternary conditions:
+    let nested_ok = r#"
+        struct Item { price: Number; label: String; tag: String?; }
+        component A {
+            state x: Int = 1;
+            prop items: List<Item> = [{ price: 5, label: 'ok' }];
+            Text {
+                width: (match state.x { 1 => true; _ => false; }) ? 10px : 20px;
+            }
+        }
+    "#;
+    assert!(report(nested_ok).diagnostics.is_empty());
+
+    assert_range(
+        "struct Item { price: Number; label: String; } component A { prop items: List<Item> = [{ price: 'bad', label: 'ok' }]; }",
+        "incompatible-binding",
+        "'bad'",
+    );
+    assert_range(
+        "struct Item { price: Number; label: String; } component A { prop item: Item = { price: 10 }; }",
+        "incompatible-binding",
+        "{ price: 10 }",
+    );
+}
+
+#[test]
+fn span_soundness_bare_props_sibling_duplicates_ufcs_pipe_and_match_blocks() {
+    let bare_call = "component A { state val: Number = 1; Text { text: trim(val); } }";
+    let d_bare = incompatible(bare_call, "incompatible-argument");
+    let at_val = bare_call.rfind("val").unwrap();
+    assert_eq!(d_bare["from"], bare_call[..at_val].encode_utf16().count());
+    assert_eq!(d_bare["to"], bare_call[..at_val].encode_utf16().count() + 3);
+
+    assert_range(
+        "component A { state n: Number = 1; Text { disabled: !n; } }",
+        "incompatible-operand",
+        "!n",
+    );
+    assert_range(
+        "component A { Text { width: 'bad' - 1; } }",
+        "incompatible-operand",
+        "'bad'",
+    );
+    assert_range(
+        "component A { Text { disabled: 'bad' && true; } }",
+        "incompatible-operand",
+        "'bad'",
+    );
+    assert_range(
+        "component A { Text { width: 'bad' ? 10px : 20px; } }",
+        "incompatible-condition",
+        "'bad'",
+    );
+
+    let ufcs_call = "component A { state val: Number = 1; Text { text: val.trim(); } }";
+    let d_ufcs = incompatible(ufcs_call, "incompatible-argument");
+    let at_ufcs = ufcs_call.rfind("val").unwrap();
+    assert_eq!(d_ufcs["from"], ufcs_call[..at_ufcs].encode_utf16().count());
+    assert_eq!(
+        d_ufcs["to"],
+        ufcs_call[..at_ufcs].encode_utf16().count() + 3
+    );
+
+    let pipe_call = "component A { state val: Number = 1; Text { text: val |> trim; } }";
+    let d_pipe = incompatible(pipe_call, "incompatible-argument");
+    let at_pipe = pipe_call.rfind("val").unwrap();
+    assert_eq!(d_pipe["from"], pipe_call[..at_pipe].encode_utf16().count());
+    assert_eq!(
+        d_pipe["to"],
+        pipe_call[..at_pipe].encode_utf16().count() + 3
+    );
+
+    let dup_call = "component A { Text { text: repeat('5', '5'); } }";
+    let diag = incompatible(dup_call, "incompatible-argument");
+    let second = dup_call.rfind("'5'").unwrap();
+    let from = dup_call[..second].encode_utf16().count();
+    assert_eq!(diag["from"], from);
+    assert_eq!(diag["to"], from + "'5'".len());
+
+    let dup_interp = "component A { prop items: List<Int> = [1]; Text { text: '${1} ${items}'; } }";
+    let d_interp = incompatible(dup_interp, "incompatible-operand");
+    let at_items = dup_interp.rfind("items").unwrap();
+    assert_eq!(
+        d_interp["from"],
+        dup_interp[..at_items].encode_utf16().count()
+    );
+    assert_eq!(
+        d_interp["to"],
+        dup_interp[..at_items].encode_utf16().count() + "items".len()
+    );
+
+    assert_range(
+        "component A { state flag: Bool = true; match state.flag { 'bad' => { width: 10px; } _ => { width: 20px; } } }",
+        "incompatible-match-pattern",
+        "'bad'",
+    );
+    assert_range(
+        "component A { state flag: Bool = true; Row { match state.flag { 'bad' => Text {} _ => Text {} } } }",
+        "incompatible-match-pattern",
+        "'bad'",
+    );
+    assert_range(
+        "component A { state s: String = 'a'; Text { text: match state.s { 1..=5 => 'num'; _ => 'other'; }; } }",
+        "incompatible-match-pattern",
+        "1..=5",
+    );
+    assert_range(
+        "component A { state a: Int = 1; state b: Int = 2; Text { text: match (state.a, state.b) { (1, 'bad') => 'x'; _ => 'y'; }; } }",
+        "incompatible-match-pattern",
+        "'bad'",
+    );
+}
+
+#[test]
+fn exhaustiveness_enum_variants_struct_fields_arities_int_precision_and_constraints() {
+    assert_range(
+        "enum Tone { Accent, Danger, Muted } component A { prop tone: Tone = Tone.Accent; Text { text: match props.tone { Tone.Accent => 'a'; Tone.Danger => 'd'; }; } }",
+        "non-exhaustive-match",
+        "match props.tone { Tone.Accent => 'a'; Tone.Danger => 'd'; }",
+    );
+    assert_range(
+        "component A { state flag: Bool? = null; Row { match state.flag { true => Text {} false => Text {} } } }",
+        "non-exhaustive-match",
+        "match state.flag { true => Text {} false => Text {} }",
+    );
+    let exhaustive_enum = "enum Tone { Accent, Danger } component A { prop tone: Tone = Tone.Accent; Text { text: match props.tone { Tone.Accent | Tone.Danger => 'ok'; }; } }";
+    assert!(report(exhaustive_enum).diagnostics.is_empty());
+    assert_range(
+        "component A { state flag: Bool = true; Text { text: match state.flag { true if state.flag => 'a'; false => 'b'; }; } }",
+        "non-exhaustive-match",
+        "match state.flag { true if state.flag => 'a'; false => 'b'; }",
+    );
+
+    assert_range(
+        "enum Tone { Accent, Danger } component A { prop tone: Tone = Tone.Dnger; }",
+        "unknown-variant",
+        "Tone.Dnger",
+    );
+
+    let extra_field = "struct Item { price: Number; label: String; } component A { prop item: Item = { price: 10, label: 'ok', extra: 1 }; }";
+    let d_extra = incompatible(extra_field, "unknown-field");
+    let at_extra_val = extra_field.rfind('1').unwrap();
+    assert_eq!(
+        d_extra["from"],
+        extra_field[..at_extra_val].encode_utf16().count()
+    );
+    assert_eq!(
+        d_extra["to"],
+        extra_field[..at_extra_val].encode_utf16().count() + 1
+    );
+
+    assert_range(
+        "struct Item { price: Number; label: String; } component A { prop item: Item = { price: 10, label: 'ok' }; Text { width: props.item.pirce; } }",
+        "unknown-field",
+        "props.item.pirce",
+    );
+    assert_range(
+        "struct Item { price: Number; label: String; } component A { prop items: List<Item> = []; Text { width: sum(pluck(props.items, 'pirce')); } }",
+        "unknown-field",
+        "'pirce'",
+    );
+    assert_range(
+        "struct Item { id: Int; label: String; } component A { prop items: List<Item> = []; let found = find(props.items, 'id', 'not-an-int'); }",
+        "incompatible-argument",
+        "'not-an-int'",
+    );
+
+    assert_range(
+        "component A { Text { width: clamp(10, 20); } }",
+        "invalid-argument-count",
+        "clamp(10, 20)",
+    );
+    assert_range(
+        "component A { Text { width: min(); } }",
+        "invalid-argument-count",
+        "min()",
+    );
+    assert_range(
+        "component A { event picked(index: Int); Button { clicked -> events.picked(1, 2); } }",
+        "invalid-argument-count",
+        "clicked -> events.picked(1, 2);",
+    );
+    assert_range(
+        "component A { state x: Number = 5; Text { width: clamp(state.x, 100, 20); } }",
+        "invalid-range",
+        "clamp(state.x, 100, 20)",
+    );
+
+    let int_ok = r#"
+        component Pager {
+            state page: Int = 0;
+            event selected(idx: Int);
+            Row {
+                width: 50vmin;
+                height: 80vmax;
+                for n in 0..10 key n {
+                    Button {
+                        clicked -> events.selected(clamp(abs(state.page + n - 1), 0, round(9.4)));
+                    }
+                }
+            }
+        }
+    "#;
+    assert!(
+        report(int_ok).diagnostics.is_empty(),
+        "{:#?}",
+        report(int_ok).diagnostics
+    );
+
+    assert_range(
+        "component A { #[range(1, 10)] prop count: Int = 25; }",
+        "out-of-range",
+        "25",
+    );
+    assert_range(
+        "component A { #[pattern('digits')] prop code: String = 'abc'; }",
+        "pattern-mismatch",
+        "'abc'",
+    );
+    assert_range(
+        "struct Pin { #[pattern('^[0-9]{4}$')] code: String; } component A { prop pin: Pin = { code: '12ab' }; }",
+        "pattern-mismatch",
+        "'12ab'",
+    );
+
+    assert_range(
+        "component A { style card { width: 'bad'; } }",
+        "incompatible-binding",
+        "'bad'",
+    );
+    let ov_src = "component A : Base { state val: Number = 1; override content: trim(val); }";
+    let d_ov = incompatible(ov_src, "incompatible-argument");
+    let at_ov = ov_src.rfind("val").unwrap();
+    assert_eq!(d_ov["from"], ov_src[..at_ov].encode_utf16().count());
+    assert_eq!(d_ov["to"], ov_src[..at_ov].encode_utf16().count() + 3);
 }

@@ -152,9 +152,21 @@ pub(crate) fn tokenize_borrowed(
                     i += 1;
                 }
             }
+            if i < bytes.len() && matches!(bytes[i], b'e' | b'E') {
+                let mut exp = i + 1;
+                if exp < bytes.len() && matches!(bytes[exp], b'+' | b'-') {
+                    exp += 1;
+                }
+                if exp < bytes.len() && bytes[exp].is_ascii_digit() {
+                    i = exp;
+                    while i < bytes.len() && bytes[i].is_ascii_digit() {
+                        i += 1;
+                    }
+                }
+            }
             for unit in [
-                "turn", "rem", "deg", "rad", "ms", "px", "em", "vw", "vh", "ch", "fr", "s", "%",
-                "*",
+                "vmin", "vmax", "turn", "rem", "deg", "rad", "ms", "px", "em", "vw", "vh", "ch",
+                "fr", "s", "%", "*",
             ] {
                 if source[i..].starts_with(unit) {
                     let next = source[i + unit.len()..].chars().next();

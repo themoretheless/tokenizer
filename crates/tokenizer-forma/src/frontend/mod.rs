@@ -13,7 +13,7 @@ mod lexer;
 mod lint;
 mod parser;
 
-pub(crate) use ast::SpanTable;
+pub(crate) use ast::{SpanTable, is_pure_function};
 pub use format::{format_source, serialize_value};
 pub(crate) use lexer::{BorrowedToken, Comment, tokenize_borrowed};
 pub use lexer::{Error, Token, tokenize, tokenize_with_trivia};

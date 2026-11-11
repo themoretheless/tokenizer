@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use super::ast::*;
 use super::format::{serialize_value, unit_literal};
 use super::lexer::{BorrowedToken, Error, R, ident, string_end, tokenize_borrowed};
+use super::lint::{LintDecls, lint_declarations_from_tokens};
 
 struct Parser<'a> {
     source: &'a str,
@@ -140,6 +141,16 @@ impl<'a> Parser<'a> {
         }
         Ok(s)
     }
+    #[inline]
+    fn record_span(&mut self, from: usize, to: usize, value: &V) {
+        if let Some(spans) = &mut self.spans {
+            spans.push(ExpressionSpan {
+                value: value.clone(),
+                from: from + self.span_base,
+                to: to + self.span_base,
+            });
+        }
+    }
     fn expression(&mut self, min: u8) -> R<V> {
         self.depth += 1;
         if self.depth > 32 {
@@ -150,21 +161,18 @@ impl<'a> Parser<'a> {
         self.depth -= 1;
         if let Ok(value) = &result {
             let to = self.end();
-            if let Some(spans) = &mut self.spans {
-                spans.push(ExpressionSpan {
-                    value: value.clone(),
-                    from: from + self.span_base,
-                    to: to + self.span_base,
-                });
-            }
+            self.record_span(from, to, value);
         }
         result
     }
     fn expression_inner(&mut self, min: u8) -> R<V> {
+        let from = self.pos();
         let mut left = self.primary()?;
+        let mut left_end = self.end();
         loop {
             let op = self.peek();
             if ["?.", ".", "["].contains(&op) {
+                self.record_span(from, left_end, &left);
                 self.i += 1;
                 let optional = op == "?.";
                 let computed = op == "[" || (optional && self.peek() == "[");
@@ -201,14 +209,23 @@ impl<'a> Parser<'a> {
                         self.take(")")?;
                         left = json!({"expression":{"kind":"call","name":prop_str,"args":args}});
                     } else {
-                        for (index, part) in prop_str.split('.').enumerate() {
-                            left = json!({"expression":{"kind":"member","object":left,"property":part,"optional":index==0&&optional,"computed":false}})
+                        let prop_end = self.end();
+                        let mut segments = prop_str.split('.').peekable();
+                        let mut index = 0usize;
+                        while let Some(part) = segments.next() {
+                            left = json!({"expression":{"kind":"member","object":left,"property":part,"optional":index==0&&optional,"computed":false}});
+                            if segments.peek().is_some() {
+                                self.record_span(from, prop_end, &left);
+                            }
+                            index += 1;
                         }
                     }
                 }
+                left_end = self.end();
                 continue;
             }
             if op == "|>" && min <= 1 {
+                self.record_span(from, left_end, &left);
                 self.i += 1;
                 let fn_name = self.take("")?;
                 if !is_pure_function(fn_name) {
@@ -226,14 +243,17 @@ impl<'a> Parser<'a> {
                     self.take(")")?;
                 }
                 left = json!({"expression":{"kind":"call","name":fn_name,"args":args}});
+                left_end = self.end();
                 continue;
             }
             if op == "?" && min == 0 {
+                self.record_span(from, left_end, &left);
                 self.i += 1;
                 let then = self.expression(0)?;
                 self.take(":")?;
                 let otherwise = self.expression(0)?;
                 left = json!({"expression":{"kind":"conditional","condition":left,"then":then,"else":otherwise}});
+                left_end = self.end();
                 continue;
             }
             let rank = match op {
@@ -249,8 +269,10 @@ impl<'a> Parser<'a> {
             if rank < min {
                 break;
             }
+            self.record_span(from, left_end, &left);
             self.i += 1;
             left = json!({"expression":{"kind":"binary","operator":op,"left":left,"right":self.expression(rank+1)?}});
+            left_end = self.end();
         }
         Ok(left)
     }
@@ -339,6 +361,9 @@ impl<'a> Parser<'a> {
             return parse_string(token, token_start + self.span_base, &mut self.spans);
         }
         if let Ok(n) = token.parse::<f64>() {
+            if !n.is_finite() {
+                return self.err(format!("Число {token} должно быть конечным"));
+            }
             return Ok(json!(n));
         }
         if self.peek() == "(" {
@@ -361,6 +386,17 @@ impl<'a> Parser<'a> {
                         .join(", ")
                 )));
             }
+            if let Some((receiver, method)) = token.rsplit_once('.')
+                && !receiver.is_empty()
+                && receiver.chars().all(|c| ident(c) || c == '.')
+                && is_pure_function(method)
+            {
+                let recv_val = json!({"expr": receiver});
+                let recv_end = token_start + receiver.encode_utf16().count();
+                self.record_span(token_start, recv_end, &recv_val);
+                args.insert(0, recv_val);
+                return Ok(json!({"expression":{"kind":"call","name":method,"args":args}}));
+            }
             if !is_pure_function(token) {
                 return self.err(format!("Неизвестная чистая функция {token}"));
             }
@@ -372,11 +408,18 @@ impl<'a> Parser<'a> {
         Ok(json!({"expr":token}))
     }
     fn sequence(&mut self) -> R<V> {
+        let from = self.pos();
         let mut a = vec![self.expression(0)?];
         while self.peek() != ";" {
             a.push(self.expression(0)?)
         }
-        Ok(if a.len() == 1 { a.remove(0) } else { json!(a) })
+        if a.len() == 1 {
+            Ok(a.remove(0))
+        } else {
+            let out = json!(a);
+            self.record_span(from, self.end(), &out);
+            Ok(out)
+        }
     }
     fn tuple(&mut self, pattern: bool) -> R<V> {
         if self.peek() != "(" {
@@ -386,6 +429,7 @@ impl<'a> Parser<'a> {
                 self.expression(0)
             };
         }
+        let from = self.pos();
         self.take("(")?;
         let mut a = vec![if pattern {
             self.pattern()?
@@ -401,15 +445,24 @@ impl<'a> Parser<'a> {
             })
         }
         self.take(")")?;
-        Ok(if a.len() == 1 { a.remove(0) } else { json!(a) })
+        if a.len() == 1 {
+            Ok(a.remove(0))
+        } else {
+            let out = json!(a);
+            self.record_span(from, self.end(), &out);
+            Ok(out)
+        }
     }
     fn single_pattern(&mut self) -> R<V> {
         if self.peek() == "(" {
             return self.tuple(true);
         }
         if ["<", "<=", ">", ">="].contains(&self.peek()) {
+            let from = self.pos();
             let op = self.take("")?;
-            return Ok(json!({"comparison":op,"value":self.expression(0)?}));
+            let out = json!({"comparison":op,"value":self.expression(0)?});
+            self.record_span(from, self.end(), &out);
+            return Ok(out);
         }
         let p = self.expression(0)?;
         if p.is_object()
@@ -422,6 +475,7 @@ impl<'a> Parser<'a> {
         Ok(p)
     }
     fn pattern(&mut self) -> R<V> {
+        let from = self.pos();
         let first = self.single_pattern()?;
         if self.peek() != "|" {
             return Ok(first);
@@ -431,7 +485,9 @@ impl<'a> Parser<'a> {
             self.i += 1;
             alts.push(self.single_pattern()?);
         }
-        Ok(json!({"or": alts}))
+        let out = json!({"or": alts});
+        self.record_span(from, self.end(), &out);
+        Ok(out)
     }
     fn is_markup_match(&self) -> bool {
         let mut j = self.i;
@@ -518,6 +574,7 @@ impl<'a> Parser<'a> {
         Ok(n)
     }
     fn match_value(&mut self, group: bool) -> R<V> {
+        let from = self.pos();
         self.take("match")?;
         let subject = self.tuple(false)?;
         self.take("{")?;
@@ -570,7 +627,11 @@ impl<'a> Parser<'a> {
         if branches.is_empty() {
             return self.err("match требует хотя бы одну ветку");
         }
-        Ok(json!({"match":subject,"branches":branches}))
+        let out = json!({"match":subject,"branches":branches});
+        if group {
+            self.record_span(from, self.end(), &out);
+        }
+        Ok(out)
     }
     fn children(&mut self) -> R<(V, usize)> {
         self.take("{")?;
@@ -1538,8 +1599,22 @@ pub fn parse_with_options(source: &str, fragment: bool) -> R<V> {
 pub(crate) fn parse_with_span_table(source: &str) -> R<(V, SpanTable)> {
     let mut parser = Parser::new_spanned(source, 0)?;
     let document = parser.document(false)?;
-    let entries = parser.spans.take().unwrap_or_default();
+    let mut entries = parser.spans.take().unwrap_or_default();
+    entries.sort_by_key(|e| (e.from, e.to));
     Ok((document, SpanTable { entries }))
+}
+pub(super) fn parse_for_lint(source: &str) -> R<(V, SpanTable, LintDecls)> {
+    let mut parser = Parser::new_spanned(source, 0)?;
+    let document = parser.document(false)?;
+    let has_body = !document["designBody"].is_null()
+        || nonempty(&document["nodes"])
+        || nonempty(&document["defaults"])
+        || nonempty(&document["propDefinitions"])
+        || nonempty(&document["stateDefinitions"]);
+    let lint_decls = lint_declarations_from_tokens(&parser.tokens, has_body);
+    let mut entries = parser.spans.take().unwrap_or_default();
+    entries.sort_by_key(|e| (e.from, e.to));
+    Ok((document, SpanTable { entries }, lint_decls))
 }
 pub fn parse_expression(source: &str) -> R<V> {
     let mut p = Parser::new(source)?;

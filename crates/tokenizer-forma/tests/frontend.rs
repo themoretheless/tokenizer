@@ -428,3 +428,255 @@ fn unused_token_and_i18n_key_lints() {
     let src = "tokens { a: 1px; b: 2px; }\ni18n { hi: 'H'; }\ni18n en { hello: 'H'; }";
     assert_eq!(lint_codes(src), []);
 }
+
+#[test]
+fn lint_unused_style_unknown_style_and_unreachable_branch_carry_utf16_spans() {
+    use themoretheless_tokenizer_forma::frontend::lint_document;
+
+    let src = "component A { title: '😀'; style unusedCard { color: #fff; } Row { apply missingCard; width: match 1 { _ => 10px; 2 => 20px; }; } }";
+    let items = lint_document(src).unwrap();
+    let arr = items.as_array().unwrap();
+
+    let unused_style = arr.iter().find(|w| w["code"] == "unused-style").unwrap();
+    let style_at = src.find("unusedCard").unwrap();
+    assert_eq!(unused_style["from"], src[..style_at].encode_utf16().count());
+    assert_eq!(
+        unused_style["to"],
+        src[..style_at].encode_utf16().count() + "unusedCard".len()
+    );
+
+    let unknown_style = arr.iter().find(|w| w["code"] == "unknown-style").unwrap();
+    let missing_at = src.find("missingCard").unwrap();
+    assert_eq!(unknown_style["severity"], "error");
+    assert_eq!(
+        unknown_style["from"],
+        src[..missing_at].encode_utf16().count()
+    );
+    assert_eq!(
+        unknown_style["to"],
+        src[..missing_at].encode_utf16().count() + "missingCard".len()
+    );
+
+    let unreachable = arr
+        .iter()
+        .find(|w| w["code"] == "unreachable-branch")
+        .unwrap();
+    let branch_at = src.find("2 => 20px").unwrap();
+    assert_eq!(unreachable["from"], src[..branch_at].encode_utf16().count());
+    assert_eq!(
+        unreachable["to"],
+        src[..branch_at].encode_utf16().count() + "1".len()
+    );
+
+    // Imported module (`use`) or inherited `base` suppresses local-only `unknown-style`
+    let imported = "use './theme.forma'; component A { Row { apply externalStyle; } }";
+    assert!(
+        !lint_document(imported)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["code"] == "unknown-style")
+    );
+}
+
+#[test]
+fn corpus_and_modern_syntax_formatter_round_trip_and_idempotence() {
+    use themoretheless_tokenizer_forma::frontend::{format_source, serialize_value};
+
+    let cases: Value = serde_json::from_str(include_str!("fixtures/forma-corpus.json")).unwrap();
+    for case in cases.as_array().unwrap() {
+        let src = case["source"].as_str().unwrap();
+        let file = case["file"].as_str().unwrap();
+        let ast_before = parse(src).unwrap();
+        let formatted = format_source(src).unwrap_or_else(|e| panic!("{file}: {e}"));
+        let ast_after = parse(&formatted)
+            .unwrap_or_else(|e| panic!("{file} failed to re-parse:\n{formatted}\nerr: {e}"));
+        let again = format_source(&formatted).unwrap();
+        assert_eq!(formatted, again, "{file}: formatter not idempotent");
+        // Compare semantic AST fields (ignoring byte/UTF-16 offsets which shift when formatted)
+        assert_eq!(ast_before["name"], ast_after["name"], "{file}");
+        assert_eq!(
+            ast_before["propDefinitions"], ast_after["propDefinitions"],
+            "{file}"
+        );
+        assert!(
+            evaluate::equal(&ast_before["defaults"], &ast_after["defaults"]),
+            "{file}"
+        );
+        assert_eq!(
+            ast_before["nodes"].as_array().map(Vec::len),
+            ast_after["nodes"].as_array().map(Vec::len),
+            "{file}"
+        );
+    }
+
+    let modern = r#"#[use('./shared.forma')]
+struct Item {
+  #[range(1, 100)]
+  score: Int,
+  #[pattern('hex')]
+  tint: Color?,
+}
+component Showcase {
+  enum Mode { Compact, Full }
+  prop items: List<Item>? = null;
+  prop meta: Record<String, List<Int>>? = null;
+  prop mode: Mode = Mode.Compact;
+  state count: Int = 0;
+  let padded = '7'.padStart(3, '0') |> upper();
+  slot header(title: padded) {
+    Text { text: padded; }
+  }
+  Frame {
+    width: 50vmin;
+    height: 80vmax;
+    color: #f08a;
+    text: state.count > 0 ? 'pos' : 'zero';
+    opacity: match state.count {
+      -10..=0 => 0.5;
+      1 | 2 if state.count > 0 => 0.8;
+      >= 3 => 1;
+      _ => 0;
+    };
+    match props.mode {
+      Mode.Compact => Text { text: 'C'; };
+      Mode.Full => {
+        let localLabel = (state.count + 1) * 2;
+        Text { text: String(localLabel); }
+      };
+    }
+    for it, idx in 0..3 where idx >= 0 {
+      Row {
+        @badge(item) {
+          Text { text: String(it); }
+        }
+      }
+    } empty {
+      Text { text: 'none'; }
+    }
+  }
+}"#;
+    let formatted = format_source(modern).unwrap();
+    assert!(
+        formatted.contains("#[use('./shared.forma')]"),
+        "{formatted}"
+    );
+    assert!(formatted.contains("#[range(1, 100)]"), "{formatted}");
+    assert!(formatted.contains("List<Item>?"), "{formatted}");
+    assert!(
+        formatted.contains("Record<String, List<Int>>?"),
+        "{formatted}"
+    );
+    assert!(formatted.contains("-10..=0 => 0.5;"), "{formatted}");
+    assert!(
+        formatted.contains("state.count > 0 ? 'pos' : 'zero'"),
+        "{formatted}"
+    );
+    assert!(formatted.contains("@badge(item)"), "{formatted}");
+    assert_eq!(formatted, format_source(&formatted).unwrap());
+    assert!(parse(&formatted).is_ok());
+
+    // `serialize_value` round-trips complex match expressions (or, comparison, guard, range)
+    let match_expr = parse_expression(
+        "match state.x { -5..=0 => 'neg'; 1 | 2 if state.ok => 'small'; >= 3 => 'big'; _ => 'other'; }",
+    )
+    .unwrap();
+    let serialized = serialize_value(&match_expr);
+    let reparsed = parse_expression(&serialized).unwrap();
+    assert_eq!(match_expr, reparsed, "{serialized}");
+}
+
+#[test]
+fn rgba_hex_colors_safe_ranges_and_nested_struct_contracts_work() {
+    let eval = |src: &str| {
+        evaluate::evaluate(&parse_expression(src).unwrap(), &mut |_, _| Ok(Value::Null))
+    };
+    // 4-digit #rgba color parity across evaluate, pattern('hex'), and matches_type('Color')
+    assert_eq!(eval("alpha(#f008, 1)").unwrap(), json!({"expr": "#ff0000"}));
+    assert_eq!(eval("lighten('#f008', 0)").unwrap(), json!("#ff000088"));
+    assert_eq!(eval("isValid('#f008', 'hex')").unwrap(), json!(true));
+    assert!(semantics::matches_type(
+        &json!({"expr": "#f008"}),
+        "Color",
+        &json!({})
+    ));
+    assert!(semantics::matches_type(
+        &json!("#f008"),
+        "Color",
+        &json!({})
+    ));
+
+    // Extreme float ranges never overflow i64 and deterministically return `size-limit`
+    assert_eq!(eval("-1e30..1e30").unwrap_err().code, "size-limit");
+    assert_eq!(eval("-1e30..=1e30").unwrap_err().code, "size-limit");
+    assert_eq!(eval("range(-1e30, 1e30)").unwrap_err().code, "size-limit");
+    assert_eq!(eval("range(5, 5)").unwrap(), json!([]));
+    assert_eq!(eval("plural(1e30, 'a', 'b', 'c')").unwrap(), json!("c"));
+
+    // Nested struct field constraints inside List<T>, Map<T>, Record<String, T>, and nested structs
+    let src = r#"component Inventory {
+      struct Tag {
+        #[pattern('nonempty')]
+        label: String,
+      }
+      struct Entry {
+        #[range(0, 10)]
+        qty: Int,
+        tag: Tag,
+      }
+      prop entries: List<Entry> = [];
+      prop byId: Record<String, Entry> = {};
+      Text { text: String(len(entries)) + String(len(byId)); }
+    }"#;
+    let doc = parse(src).unwrap();
+    let mut types = doc["enums"].clone();
+    for (k, v) in doc["structs"].as_object().unwrap() {
+        types[k] = v.clone();
+    }
+    types["_structConstraints"] = doc["structConstraints"].clone();
+
+    let ok_vals = json!({
+        "entries": [{"qty": 5, "tag": {"label": "ok"}}],
+        "byId": {"k1": {"qty": 10, "tag": {"label": "fine"}}}
+    });
+    assert!(semantics::validate_contract(&doc["propDefinitions"], &ok_vals, &types, "Inv").is_ok());
+
+    let bad_list = json!({
+        "entries": [{"qty": 99, "tag": {"label": "ok"}}],
+        "byId": {}
+    });
+    let err = semantics::validate_contract(&doc["propDefinitions"], &bad_list, &types, "Inv")
+        .unwrap_err();
+    assert_eq!(err.code, "out-of-range");
+    assert!(
+        err.message.contains("Inv.entries[0].qty"),
+        "{}",
+        err.message
+    );
+
+    let bad_nested = json!({
+        "entries": [],
+        "byId": {"k1": {"qty": 3, "tag": {"label": "   "}}}
+    });
+    let err = semantics::validate_contract(&doc["propDefinitions"], &bad_nested, &types, "Inv")
+        .unwrap_err();
+    assert_eq!(err.code, "pattern-mismatch");
+    assert!(
+        err.message.contains("Inv.byId.k1.tag.label"),
+        "{}",
+        err.message
+    );
+
+    // Nested tokens accessed via `tokens.group.key` evaluate expressions just like flat tokens
+    let tok_val = semantics::evaluate_value(
+        &parse_expression("tokens.spacing.double").unwrap(),
+        &json!({"base": 8}),
+        &json!({}),
+        &[],
+        false,
+        &json!({"tokens": {"spacing": {"double": parse_expression("props.base * 2").unwrap()}}}),
+    )
+    .unwrap();
+    assert_eq!(tok_val, json!(16.0));
+}

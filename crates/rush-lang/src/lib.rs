@@ -1168,6 +1168,7 @@ impl Interpreter {
         }
         frame.words_len = cap.words_len;
         frame.word_offset = 0;
+        frame.rows_mode = false;
         frame.frame_floor = self.depth as u8;
         self.pending_len += 1;
         // Bind the first word immediately, or pop if word list is whitespace-only.
@@ -1252,6 +1253,17 @@ impl Interpreter {
     /// after `=`, or the whole first token without one), and every
     /// `field=value` token also binds `var.field`.
     fn bind_row(&mut self, var: &str, row: &str) -> Result<(), RushError> {
+        let var_bytes = var.as_bytes();
+        let prefix_len = var_bytes.len();
+        for slot in &mut self.vars[..self.var_count] {
+            let nlen = usize::from(slot.name_len);
+            if nlen > prefix_len + 1
+                && slot.name[..prefix_len] == *var_bytes
+                && slot.name[prefix_len] == b'.'
+            {
+                slot.value_len = 0;
+            }
+        }
         let mut first = true;
         for token in row.split_whitespace() {
             let (field, value) = match token.split_once('=') {
@@ -1374,6 +1386,7 @@ impl Interpreter {
             frame.var_len = 0;
             frame.words_len = 0;
             frame.word_offset = 0;
+            frame.rows_mode = false;
             frame.frame_floor = self.depth as u8;
         }
         self.pending_len += 1;
@@ -1599,14 +1612,16 @@ fn eval_condition(condition: &str, interp: &Interpreter) -> Option<bool> {
         return None;
     }
     let mut words = body.split_whitespace();
+    let mut left_buf = [0u8; MAX_VALUE];
+    let mut right_buf = [0u8; MAX_VALUE];
     let result = match (words.next(), words.next(), words.next(), words.next()) {
         (Some(only), None, None, None) => {
-            let value = operand(only, interp);
+            let value = operand(only, interp, &mut left_buf)?;
             !value.is_empty() && value != "0"
         }
         (Some(left), Some(op), Some(right), None) => {
-            let left = operand(left, interp);
-            let right = operand(right, interp);
+            let left = operand(left, interp, &mut left_buf)?;
+            let right = operand(right, interp, &mut right_buf)?;
             let numeric = parse_u64(left).zip(parse_u64(right));
             match (op, numeric) {
                 ("=", _) => left == right,
@@ -1623,11 +1638,23 @@ fn eval_condition(condition: &str, interp: &Interpreter) -> Option<bool> {
     Some(result != negated)
 }
 
-fn operand<'a>(word: &'a str, interp: &'a Interpreter) -> &'a str {
-    if let Some(name) = word.strip_prefix('$') {
-        return interp.get(name).unwrap_or("");
+fn operand<'a>(
+    word: &'a str,
+    interp: &'a Interpreter,
+    scratch: &'a mut [u8; MAX_VALUE],
+) -> Option<&'a str> {
+    if !word.contains('$') {
+        return Some(word);
     }
-    word
+    if let Some(name) = word.strip_prefix('$') {
+        if !name.contains('$') {
+            if let Some(val) = interp.get(name) {
+                return Some(val);
+            }
+        }
+    }
+    let len = interp.expand_to(word, scratch).ok()?;
+    str::from_utf8(&scratch[..len]).ok()
 }
 
 fn parse_u64(text: &str) -> Option<u64> {
