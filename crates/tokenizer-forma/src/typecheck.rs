@@ -11,7 +11,21 @@ pub const BUILTIN_PROPERTY_SCHEMA_VERSION: u32 = 1;
 pub struct TypeContext {
     properties: HashMap<String, HashMap<String, String>>,
     components: HashMap<String, HashMap<String, String>>,
+    required_component_props: HashMap<String, HashSet<String>>,
+    component_prop_constraints: HashMap<String, HashMap<String, V>>,
+    component_events: HashMap<String, HashMap<String, Vec<String>>>,
+    component_styles: HashMap<String, HashSet<String>>,
+    registered_components: HashSet<String>,
     actions: HashMap<String, Vec<String>>,
+    enums: HashMap<String, Vec<String>>,
+    structs: HashMap<String, HashMap<String, String>>,
+    struct_constraints: HashMap<String, HashMap<String, V>>,
+    tokens: HashMap<String, String>,
+    i18n: HashMap<String, String>,
+    styles: HashSet<String>,
+    module_paths: HashSet<String>,
+    unresolved_module_uses: HashSet<String>,
+    strict_styles: bool,
 }
 impl Default for TypeContext {
     fn default() -> Self {
@@ -23,7 +37,21 @@ impl TypeContext {
         Self {
             properties: HashMap::new(),
             components: HashMap::new(),
+            required_component_props: HashMap::new(),
+            component_prop_constraints: HashMap::new(),
+            component_events: HashMap::new(),
+            component_styles: HashMap::new(),
+            registered_components: HashSet::new(),
             actions: HashMap::new(),
+            enums: HashMap::new(),
+            structs: HashMap::new(),
+            struct_constraints: HashMap::new(),
+            tokens: HashMap::new(),
+            i18n: HashMap::new(),
+            styles: HashSet::new(),
+            module_paths: HashSet::new(),
+            unresolved_module_uses: HashSet::new(),
+            strict_styles: false,
         }
     }
     pub fn builtin() -> Self {
@@ -71,8 +99,64 @@ impl TypeContext {
             .or_default()
             .insert(name.into(), ty.into());
     }
+    pub fn set_required_component_property(&mut self, component: &str, name: &str, required: bool) {
+        let entry = self
+            .required_component_props
+            .entry(component.into())
+            .or_default();
+        if required {
+            entry.insert(name.into());
+        } else {
+            entry.remove(name);
+        }
+    }
+    pub fn set_component_property_constraint(
+        &mut self,
+        component: &str,
+        name: &str,
+        constraints: V,
+    ) {
+        if constraints.is_object() {
+            self.component_prop_constraints
+                .entry(component.into())
+                .or_default()
+                .insert(name.into(), constraints);
+        }
+    }
+    pub fn set_component_event(&mut self, component: &str, event: &str, arguments: Vec<String>) {
+        self.component_events
+            .entry(component.into())
+            .or_default()
+            .insert(event.into(), arguments);
+    }
     pub fn set_action(&mut self, name: &str, arguments: Vec<String>) {
         self.actions.insert(name.into(), arguments);
+    }
+    pub fn set_enum(&mut self, name: &str, variants: Vec<String>) {
+        self.enums.insert(name.into(), variants);
+    }
+    pub fn set_struct(&mut self, name: &str, fields: HashMap<String, String>) {
+        self.structs.insert(name.into(), fields);
+    }
+    pub fn set_struct_constraint(&mut self, struct_name: &str, field: &str, constraints: V) {
+        if constraints.is_object() {
+            self.struct_constraints
+                .entry(struct_name.into())
+                .or_default()
+                .insert(field.into(), constraints);
+        }
+    }
+    pub fn set_token(&mut self, key: &str, ty: &str) {
+        self.tokens.insert(key.into(), ty.into());
+    }
+    pub fn set_i18n(&mut self, key: &str, ty: &str) {
+        self.i18n.insert(key.into(), ty.into());
+    }
+    pub fn add_style(&mut self, name: &str) {
+        self.styles.insert(name.into());
+    }
+    pub fn set_strict_styles(&mut self, strict: bool) {
+        self.strict_styles = strict;
     }
     pub fn property_type(&self, node: &str, name: &str) -> Option<&str> {
         self.components
@@ -81,6 +165,230 @@ impl TypeContext {
             .or_else(|| self.properties.get(node).and_then(|p| p.get(name)))
             .or_else(|| self.properties.get("*").and_then(|p| p.get(name)))
             .map(String::as_str)
+    }
+    pub fn register_module_ast(&mut self, path: Option<&str>, doc: &V) {
+        if let Some(p) = path {
+            self.module_paths.insert(p.into());
+            self.unresolved_module_uses.remove(p);
+        }
+        if let Some(uses) = doc["uses"].as_array() {
+            for u in uses.iter().filter_map(V::as_str) {
+                if !self.module_paths.contains(u) {
+                    self.unresolved_module_uses.insert(u.into());
+                }
+            }
+        }
+        if let Some(enums) = doc["enums"].as_object() {
+            for (name, variants) in enums {
+                if let Some(arr) = variants.as_array() {
+                    let list = arr.iter().filter_map(V::as_str).map(String::from).collect();
+                    self.set_enum(name, list);
+                }
+            }
+        }
+        if let Some(structs) = doc["structs"].as_object() {
+            for (name, fields) in structs {
+                if let Some(obj) = fields.as_object() {
+                    let map = obj
+                        .iter()
+                        .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.into())))
+                        .collect();
+                    self.set_struct(name, map);
+                }
+            }
+        }
+        if let Some(sc) = doc["structConstraints"].as_object() {
+            for (sname, fields) in sc {
+                if let Some(obj) = fields.as_object() {
+                    for (fname, c) in obj {
+                        self.set_struct_constraint(sname, fname, c.clone());
+                    }
+                }
+            }
+        }
+        if let Some(styles) = doc["styles"].as_object() {
+            for sname in styles.keys() {
+                self.add_style(sname);
+            }
+        }
+        let empty_spans = SpanTable::default();
+        let inferred_dicts = {
+            let mut analyzer = Analyzer::new(doc, &empty_spans, self);
+            analyzer.infer_declarations();
+            analyzer.dictionary_cache
+        };
+        for (cache_key, ty) in inferred_dicts {
+            if !ty.known() {
+                continue;
+            }
+            if let Some(key) = cache_key.strip_prefix("tokens.") {
+                self.set_token(key, &ty.display());
+            } else if let Some(key) = cache_key.strip_prefix("i18n.") {
+                self.set_i18n(key, &ty.display());
+            }
+        }
+        let is_design = !doc["designBody"].is_null()
+            || (doc["entries"].as_array().is_some_and(|a| !a.is_empty())
+                && doc["nodes"].as_array().is_none_or(Vec::is_empty)
+                && doc["propDefinitions"]
+                    .as_object()
+                    .is_none_or(serde_json::Map::is_empty));
+        let comp_name = doc["name"].as_str().unwrap_or("");
+        let is_component = !is_design
+            && !comp_name.is_empty()
+            && (comp_name != "Preview"
+                || doc["propDefinitions"]
+                    .as_object()
+                    .is_some_and(|o| !o.is_empty())
+                || doc["eventDefinitions"]
+                    .as_object()
+                    .is_some_and(|o| !o.is_empty())
+                || !doc["base"].is_null());
+        if is_component {
+            self.registered_components.insert(comp_name.into());
+            if let Some(base) = doc["base"].as_str() {
+                if let Some(base_props) = self.components.get(base).cloned() {
+                    let target = self.components.entry(comp_name.into()).or_default();
+                    for (k, v) in base_props {
+                        target.entry(k).or_insert(v);
+                    }
+                }
+                if let Some(base_req) = self.required_component_props.get(base).cloned() {
+                    let target = self
+                        .required_component_props
+                        .entry(comp_name.into())
+                        .or_default();
+                    for req in base_req {
+                        if doc["defaults"].get(&req).is_none() {
+                            target.insert(req);
+                        }
+                    }
+                }
+                if let Some(base_c) = self.component_prop_constraints.get(base).cloned() {
+                    let target = self
+                        .component_prop_constraints
+                        .entry(comp_name.into())
+                        .or_default();
+                    for (k, v) in base_c {
+                        target.entry(k).or_insert(v);
+                    }
+                }
+                if let Some(base_ev) = self.component_events.get(base).cloned() {
+                    let target = self.component_events.entry(comp_name.into()).or_default();
+                    for (k, v) in base_ev {
+                        target.entry(k).or_insert(v);
+                    }
+                }
+                if let Some(base_st) = self.component_styles.get(base).cloned() {
+                    self.component_styles
+                        .entry(comp_name.into())
+                        .or_default()
+                        .extend(base_st);
+                }
+            }
+            if let Some(styles) = doc["styles"].as_object() {
+                let target = self.component_styles.entry(comp_name.into()).or_default();
+                for sname in styles.keys() {
+                    target.insert(sname.clone());
+                }
+            }
+            if let Some(prop_defs) = doc["propDefinitions"].as_object() {
+                for (pname, pdef) in prop_defs {
+                    if let Some(pty) = pdef["type"].as_str() {
+                        self.set_component_property(comp_name, pname, pty);
+                    }
+                    self.set_required_component_property(
+                        comp_name,
+                        pname,
+                        pdef["required"] == true,
+                    );
+                    if pdef["constraints"].is_object() {
+                        self.set_component_property_constraint(
+                            comp_name,
+                            pname,
+                            pdef["constraints"].clone(),
+                        );
+                    }
+                }
+            }
+            if let Some(event_defs) = doc["eventDefinitions"].as_object() {
+                for (ename, eargs) in event_defs {
+                    if let Some(arr) = eargs.as_array() {
+                        let types = arr
+                            .iter()
+                            .filter_map(|a| a["type"].as_str().map(String::from))
+                            .collect();
+                        self.set_component_event(comp_name, ename, types);
+                    }
+                }
+            }
+        }
+    }
+    pub fn register_module_source(&mut self, source: &str) -> Result<(), crate::Diagnostic> {
+        let doc = crate::frontend::parse(source).map_err(crate::Diagnostic::from)?;
+        self.register_module_ast(None, &doc);
+        Ok(())
+    }
+    pub fn register_named_module_source(
+        &mut self,
+        path: &str,
+        source: &str,
+    ) -> Result<(), crate::Diagnostic> {
+        let doc = crate::frontend::parse(source).map_err(crate::Diagnostic::from)?;
+        self.register_module_ast(Some(path), &doc);
+        Ok(())
+    }
+    pub fn with_module_source(mut self, source: &str) -> Result<Self, crate::Diagnostic> {
+        self.register_module_source(source)?;
+        Ok(self)
+    }
+    pub fn with_named_module_source(
+        mut self,
+        path: &str,
+        source: &str,
+    ) -> Result<Self, crate::Diagnostic> {
+        self.register_named_module_source(path, source)?;
+        Ok(self)
+    }
+    pub(crate) fn can_validate_styles(&self, doc: &V) -> bool {
+        let uses = doc["uses"].as_array();
+        if uses.is_none_or(Vec::is_empty) && doc["base"].is_null() {
+            return true;
+        }
+        let uses_ok = self.strict_styles
+            || (uses.is_none_or(|list| {
+                list.iter()
+                    .all(|u| u.as_str().is_some_and(|p| self.module_paths.contains(p)))
+            }) && self
+                .unresolved_module_uses
+                .iter()
+                .all(|p| self.module_paths.contains(p)));
+        let base_ok = doc["base"].is_null()
+            || doc["base"]
+                .as_str()
+                .is_some_and(|b| self.registered_components.contains(b));
+        uses_ok && base_ok
+    }
+    pub(crate) fn has_style_for_doc(&self, doc: &V, style_name: &str) -> bool {
+        doc["styles"]
+            .as_object()
+            .is_some_and(|s| s.contains_key(style_name))
+            || self.styles.contains(style_name)
+            || doc["base"].as_str().is_some_and(|b| {
+                self.component_styles
+                    .get(b)
+                    .is_some_and(|s| s.contains(style_name))
+            })
+    }
+    fn parse_module_entry(entry: &V) -> Result<V, String> {
+        if let Some(src) = entry.as_str() {
+            crate::frontend::parse(src)
+                .map_err(|err| format!("TypeContext.modules: {}", err.message))
+        } else if entry.is_object() {
+            Ok(entry.clone())
+        } else {
+            Err("Элемент TypeContext.modules должен быть строкой .forma или AST-объектом".into())
+        }
     }
     pub fn from_json(value: &V) -> Result<Self, String> {
         let mut context = Self::builtin();
@@ -91,22 +399,99 @@ impl TypeContext {
                 Err("TypeContext должен быть объектом".into())
             };
         };
+        if let Some(strict) = root.get("strictStyles") {
+            let Some(flag) = strict.as_bool() else {
+                return Err("TypeContext.strictStyles должен быть Bool".into());
+            };
+            context.set_strict_styles(flag);
+        }
+        if let Some(modules) = root.get("modules") {
+            let mut parsed: Vec<(Option<String>, V)> = Vec::new();
+            if let Some(list) = modules.as_array() {
+                for item in list {
+                    parsed.push((None, Self::parse_module_entry(item)?));
+                }
+            } else if let Some(map) = modules.as_object() {
+                for (path, item) in map {
+                    parsed.push((Some(path.clone()), Self::parse_module_entry(item)?));
+                }
+            } else {
+                return Err("TypeContext.modules должен быть списком или объектом".into());
+            }
+            for (path, doc) in &parsed {
+                if doc["base"].is_null() {
+                    context.register_module_ast(path.as_deref(), doc);
+                }
+            }
+            for (path, doc) in &parsed {
+                if !doc["base"].is_null() {
+                    context.register_module_ast(path.as_deref(), doc);
+                }
+            }
+        }
         for (section, component) in [("properties", false), ("components", true)] {
             if let Some(nodes) = root.get(section).and_then(V::as_object) {
                 for (node, props) in nodes {
                     let Some(props) = props.as_object() else {
                         return Err(format!("TypeContext.{section}.{node} должен быть объектом"));
                     };
-                    for (name, ty) in props {
-                        let Some(ty) = ty.as_str() else {
-                            return Err(format!("Тип {node}.{name} должен быть строкой"));
-                        };
-                        if component {
+                    if component {
+                        context.registered_components.insert(node.clone());
+                    }
+                    for (name, spec) in props {
+                        if let Some(ty) = spec.as_str() {
+                            if component {
+                                context.set_component_property(node, name, ty);
+                            } else {
+                                context.set_property(node, name, ty);
+                            }
+                        } else if component && let Some(spec_obj) = spec.as_object() {
+                            let Some(ty) = spec_obj.get("type").and_then(V::as_str) else {
+                                return Err(format!("Тип {node}.{name} должен быть строкой"));
+                            };
                             context.set_component_property(node, name, ty);
+                            if let Some(req) = spec_obj.get("required").and_then(V::as_bool) {
+                                context.set_required_component_property(node, name, req);
+                            }
+                            if let Some(constraints) = spec_obj.get("constraints")
+                                && constraints.is_object()
+                            {
+                                context.set_component_property_constraint(
+                                    node,
+                                    name,
+                                    constraints.clone(),
+                                );
+                            }
                         } else {
-                            context.set_property(node, name, ty);
+                            return Err(format!("Тип {node}.{name} должен быть строкой"));
                         }
                     }
+                }
+            }
+        }
+        if let Some(comp_events) = root.get("componentEvents").and_then(V::as_object) {
+            for (comp, events) in comp_events {
+                let Some(events) = events.as_object() else {
+                    return Err(format!(
+                        "TypeContext.componentEvents.{comp} должен быть объектом"
+                    ));
+                };
+                for (ename, args) in events {
+                    let Some(args) = args.as_array() else {
+                        return Err(format!(
+                            "TypeContext.componentEvents.{comp}.{ename} должен быть списком"
+                        ));
+                    };
+                    let mut types = Vec::with_capacity(args.len());
+                    for ty in args {
+                        let Some(ty) = ty.as_str() else {
+                            return Err(format!(
+                                "Тип аргумента события {comp}.{ename} должен быть строкой"
+                            ));
+                        };
+                        types.push(ty.into());
+                    }
+                    context.set_component_event(comp, ename, types);
                 }
             }
         }
@@ -123,6 +508,73 @@ impl TypeContext {
                     types.push(ty.into());
                 }
                 context.set_action(name, types);
+            }
+        }
+        if let Some(enums) = root.get("enums").and_then(V::as_object) {
+            for (name, variants) in enums {
+                let Some(arr) = variants.as_array() else {
+                    return Err(format!("TypeContext.enums.{name} должен быть списком"));
+                };
+                let mut list = Vec::with_capacity(arr.len());
+                for v in arr {
+                    let Some(v) = v.as_str() else {
+                        return Err(format!("Вариант enum {name} должен быть строкой"));
+                    };
+                    list.push(v.into());
+                }
+                context.set_enum(name, list);
+            }
+        }
+        if let Some(structs) = root.get("structs").and_then(V::as_object) {
+            for (name, fields) in structs {
+                let Some(obj) = fields.as_object() else {
+                    return Err(format!("TypeContext.structs.{name} должен быть объектом"));
+                };
+                let mut map = HashMap::with_capacity(obj.len());
+                for (fname, fty) in obj {
+                    let Some(fty) = fty.as_str() else {
+                        return Err(format!("Тип поля {name}.{fname} должен быть строкой"));
+                    };
+                    map.insert(fname.clone(), fty.into());
+                }
+                context.set_struct(name, map);
+            }
+        }
+        if let Some(sc) = root.get("structConstraints").and_then(V::as_object) {
+            for (sname, fields) in sc {
+                let Some(obj) = fields.as_object() else {
+                    return Err(format!(
+                        "TypeContext.structConstraints.{sname} должен быть объектом"
+                    ));
+                };
+                for (fname, constraints) in obj {
+                    context.set_struct_constraint(sname, fname, constraints.clone());
+                }
+            }
+        }
+        for (section, is_i18n) in [("tokens", false), ("i18n", true)] {
+            if let Some(entries) = root.get(section).and_then(V::as_object) {
+                for (key, ty) in entries {
+                    let Some(ty) = ty.as_str() else {
+                        return Err(format!("TypeContext.{section}.{key} должен быть строкой"));
+                    };
+                    if is_i18n {
+                        context.set_i18n(key, ty);
+                    } else {
+                        context.set_token(key, ty);
+                    }
+                }
+            }
+        }
+        if let Some(styles) = root.get("styles") {
+            let Some(arr) = styles.as_array() else {
+                return Err("TypeContext.styles должен быть списком".into());
+            };
+            for s in arr {
+                let Some(name) = s.as_str() else {
+                    return Err("Имя стиля в TypeContext.styles должно быть строкой".into());
+                };
+                context.add_style(name);
             }
         }
         Ok(context)
@@ -517,6 +969,134 @@ fn is_static_literal(val: &V) -> bool {
     matches!(val, V::Bool(_) | V::Number(_) | V::String(_) | V::Array(_))
 }
 
+#[derive(Debug, Default, Clone)]
+struct ConditionFacts {
+    when_true: HashMap<String, Ty>,
+    when_false: HashMap<String, Ty>,
+}
+fn is_nullable(ty: &Ty) -> bool {
+    matches!(ty, Ty::Null) || matches!(ty, Ty::Union(ts) if ts.contains(&Ty::Null))
+}
+fn narrow_non_null(ty: &Ty) -> Option<Ty> {
+    if !is_nullable(ty) {
+        return None;
+    }
+    let nn = non_null(ty.clone());
+    (nn != Ty::Unknown && nn != *ty).then_some(nn)
+}
+fn narrow_by_type(subject: &Ty, target: &Ty) -> Option<Ty> {
+    if !subject.known() || !target.known() {
+        return None;
+    }
+    if let Ty::Union(members) = subject {
+        let kept = members
+            .iter()
+            .filter(|m| {
+                compatible(target, m) != Compatible::No || compatible(m, target) != Compatible::No
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !kept.is_empty() && kept.len() < members.len() {
+            return Some(union(kept));
+        }
+    }
+    None
+}
+fn is_nonempty_named_pattern(pat: &str) -> bool {
+    matches!(
+        pat,
+        "email" | "digits" | "alpha" | "alphanumeric" | "nonempty" | "url" | "hex-color" | "uuid"
+    )
+}
+fn extract_raw_ref_path(value: &V) -> Option<String> {
+    if let Some(raw) = value["expr"].as_str() {
+        let first = raw.as_bytes().first().copied()?;
+        if !(first.is_ascii_alphabetic() || first == b'_')
+            || matches!(raw, "auto" | "content" | "_")
+            || raw.ends_with('*')
+        {
+            return None;
+        }
+        return Some(raw.into());
+    }
+    if value["expression"]["kind"] == "member"
+        && value["expression"]["optional"] != true
+        && value["expression"]["computed"] != true
+        && let Some(prop) = value["expression"]["property"].as_str()
+        && let Some(base) = extract_raw_ref_path(&value["expression"]["object"])
+    {
+        return Some(format!("{base}.{prop}"));
+    }
+    None
+}
+fn merge_and_facts(left: ConditionFacts, right: ConditionFacts) -> ConditionFacts {
+    let mut when_true = left.when_true.clone();
+    when_true.extend(right.when_true);
+    let mut right_false_env = left.when_true;
+    right_false_env.extend(right.when_false);
+    let mut when_false = HashMap::new();
+    for (k, t1) in left.when_false {
+        if let Some(t2) = right_false_env.get(&k) {
+            let joined = union([t1, t2.clone()]);
+            if joined.known() {
+                when_false.insert(k, joined);
+            }
+        }
+    }
+    ConditionFacts {
+        when_true,
+        when_false,
+    }
+}
+fn merge_or_facts(left: ConditionFacts, right: ConditionFacts) -> ConditionFacts {
+    let mut when_false = left.when_false.clone();
+    when_false.extend(right.when_false);
+    let mut right_true_env = left.when_false;
+    right_true_env.extend(right.when_true);
+    let mut when_true = HashMap::new();
+    for (k, t1) in left.when_true {
+        if let Some(t2) = right_true_env.get(&k) {
+            let joined = union([t1, t2.clone()]);
+            if joined.known() {
+                when_true.insert(k, joined);
+            }
+        }
+    }
+    ConditionFacts {
+        when_true,
+        when_false,
+    }
+}
+
+struct MatchSubjectCtx<'a> {
+    subject_ty: &'a Ty,
+    subject_canon: Option<String>,
+    tuple_slots: Vec<(Option<String>, Ty)>,
+    covered_atoms: Vec<String>,
+    covered_tuple_atoms: Vec<Vec<String>>,
+}
+impl<'a> MatchSubjectCtx<'a> {
+    fn new(analyzer: &Analyzer<'_>, subject: &V, subject_ty: &'a Ty) -> Self {
+        let subject_canon = analyzer.extract_canonical_path(subject);
+        let tuple_slots = analyzer.infer_subject_tuple_types(subject);
+        let covered_tuple_atoms = vec![Vec::new(); tuple_slots.len()];
+        Self {
+            subject_ty,
+            subject_canon,
+            tuple_slots,
+            covered_atoms: Vec::new(),
+            covered_tuple_atoms,
+        }
+    }
+    fn record_unguarded(&mut self, branch: &V) {
+        Analyzer::record_unguarded_branch_coverage(
+            branch,
+            &mut self.covered_atoms,
+            &mut self.covered_tuple_atoms,
+        );
+    }
+}
+
 #[derive(Debug)]
 pub struct TypecheckReport {
     pub diagnostics: Vec<V>,
@@ -531,10 +1111,12 @@ struct Analyzer<'a> {
     expressions_total: usize,
     expressions_typed: usize,
     locals: HashMap<String, Ty>,
+    narrowed: HashMap<String, Ty>,
     let_cache: HashMap<String, Ty>,
     dictionary_cache: HashMap<String, Ty>,
     visiting: HashSet<String>,
     expected: Option<Ty>,
+    in_design_override: bool,
 }
 fn contextual_list_element(expected: Option<&Ty>) -> Option<Ty> {
     match expected? {
@@ -580,9 +1162,16 @@ fn contextual_record_value(expected: Option<&Ty>) -> Option<Ty> {
         _ => None,
     }
 }
-fn contextual_struct_name<'a>(doc: &'a V, expected: Option<&'a Ty>) -> Option<&'a str> {
+fn has_struct_in(doc: &V, context: &TypeContext, name: &str) -> bool {
+    doc["structs"].get(name).is_some() || context.structs.contains_key(name)
+}
+fn contextual_struct_name<'a>(
+    doc: &'a V,
+    context: &'a TypeContext,
+    expected: Option<&'a Ty>,
+) -> Option<&'a str> {
     match expected? {
-        Ty::Named(name) if doc["structs"].get(name.as_str()).is_some() => Some(name.as_str()),
+        Ty::Named(name) if has_struct_in(doc, context, name.as_str()) => Some(name.as_str()),
         Ty::Union(ts) => {
             let mut found = None;
             for t in ts {
@@ -590,7 +1179,7 @@ fn contextual_struct_name<'a>(doc: &'a V, expected: Option<&'a Ty>) -> Option<&'
                     continue;
                 }
                 if let Ty::Named(name) = t
-                    && doc["structs"].get(name.as_str()).is_some()
+                    && has_struct_in(doc, context, name.as_str())
                     && found.is_none()
                 {
                     found = Some(name.as_str());
@@ -613,10 +1202,193 @@ impl<'a> Analyzer<'a> {
             expressions_total: 0,
             expressions_typed: 0,
             locals: HashMap::new(),
+            narrowed: HashMap::new(),
             let_cache: HashMap::new(),
             dictionary_cache: HashMap::new(),
             visiting: HashSet::new(),
             expected: None,
+            in_design_override: false,
+        }
+    }
+    fn enum_variants(&self, name: &str) -> Option<Vec<&str>> {
+        if let Some(arr) = self.doc["enums"].get(name).and_then(V::as_array) {
+            return Some(arr.iter().filter_map(V::as_str).collect());
+        }
+        self.context
+            .enums
+            .get(name)
+            .map(|list| list.iter().map(String::as_str).collect())
+    }
+    fn has_enum(&self, name: &str) -> bool {
+        self.doc["enums"].get(name).is_some() || self.context.enums.contains_key(name)
+    }
+    fn struct_field_type(&self, struct_name: &str, field: &str) -> Option<&str> {
+        self.doc["structs"]
+            .get(struct_name)
+            .and_then(|fields| fields.get(field))
+            .and_then(V::as_str)
+            .or_else(|| {
+                self.context
+                    .structs
+                    .get(struct_name)
+                    .and_then(|fields| fields.get(field))
+                    .map(String::as_str)
+            })
+    }
+    fn struct_field_names(&self, struct_name: &str) -> Option<Vec<&str>> {
+        if let Some(fields) = self.doc["structs"].get(struct_name).and_then(V::as_object) {
+            return Some(fields.keys().map(String::as_str).collect());
+        }
+        self.context
+            .structs
+            .get(struct_name)
+            .map(|fields| fields.keys().map(String::as_str).collect())
+    }
+    fn struct_field_constraints(&self, struct_name: &str, field: &str) -> Option<&V> {
+        let local = &self.doc["structConstraints"][struct_name][field];
+        if local.is_object() {
+            return Some(local);
+        }
+        self.context
+            .struct_constraints
+            .get(struct_name)
+            .and_then(|fields| fields.get(field))
+    }
+    fn declared_prop_type_str(&self, name: &str) -> Option<&str> {
+        self.doc["propDefinitions"]
+            .get(name)
+            .and_then(|d| d["type"].as_str())
+            .or_else(|| {
+                let base = self.doc["base"].as_str()?;
+                self.context.property_type(base, name)
+            })
+    }
+    fn declared_prop_constraints(&self, name: &str) -> Option<&V> {
+        let local = &self.doc["propDefinitions"][name]["constraints"];
+        if local.is_object() {
+            return Some(local);
+        }
+        let base = self.doc["base"].as_str()?;
+        self.context
+            .component_prop_constraints
+            .get(base)
+            .and_then(|c| c.get(name))
+    }
+    fn has_prop_def(&self, name: &str) -> bool {
+        self.declared_prop_type_str(name).is_some()
+    }
+    fn has_state_def(&self, name: &str) -> bool {
+        self.doc["stateDefinitions"].get(name).is_some()
+    }
+    fn canonicalize_ref_path(&self, raw: &str) -> Option<String> {
+        let (head, rest) = raw.split_once('.').unwrap_or((raw, ""));
+        if rest.is_empty() {
+            if self.locals.contains_key(head) {
+                return Some(format!("local:{head}"));
+            }
+            if matches!(head, "props" | "state" | "tokens" | "i18n" | "viewport") {
+                return None;
+            }
+            if self.has_state_def(head) {
+                return Some(format!("state.{head}"));
+            }
+            if self.has_prop_def(head) {
+                return Some(format!("props.{head}"));
+            }
+            if self.doc["lets"].get(head).is_some() {
+                return Some(format!("let:{head}"));
+            }
+            return None;
+        }
+        match head {
+            "props" => {
+                let (name, sub_rest) = if rest == "font.size" {
+                    ("fontSize", "")
+                } else if let Some(after) = rest.strip_prefix("font.size.") {
+                    ("fontSize", after)
+                } else {
+                    rest.split_once('.').unwrap_or((rest, ""))
+                };
+                let prefix = if self.has_prop_def(name) {
+                    format!("props.{name}")
+                } else if self.doc["lets"].get(name).is_some() {
+                    format!("let:{name}")
+                } else {
+                    return None;
+                };
+                Some(if sub_rest.is_empty() {
+                    prefix
+                } else {
+                    format!("{prefix}.{sub_rest}")
+                })
+            }
+            "state" => {
+                let (prop_name, _sub_rest) = rest.split_once('.').unwrap_or((rest, ""));
+                self.has_state_def(prop_name)
+                    .then(|| format!("state.{rest}"))
+            }
+            "tokens" | "i18n" | "viewport" => None,
+            _ => {
+                if self.locals.contains_key(head) {
+                    Some(format!("local:{head}.{rest}"))
+                } else if self.has_state_def(head) {
+                    Some(format!("state.{head}.{rest}"))
+                } else if self.has_prop_def(head) {
+                    Some(format!("props.{head}.{rest}"))
+                } else if self.doc["lets"].get(head).is_some() {
+                    Some(format!("let:{head}.{rest}"))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+    fn extract_canonical_path(&self, value: &V) -> Option<String> {
+        let raw = extract_raw_ref_path(value)?;
+        self.canonicalize_ref_path(&raw)
+    }
+    fn apply_narrowing(&mut self, facts: &HashMap<String, Ty>) -> HashMap<String, Ty> {
+        let saved = self.narrowed.clone();
+        for (k, v) in facts {
+            self.narrowed.insert(k.clone(), v.clone());
+        }
+        saved
+    }
+    fn clear_local_narrowing(&mut self, local_name: &str) {
+        let exact = format!("local:{local_name}");
+        let prefix = format!("local:{local_name}.");
+        self.narrowed
+            .retain(|k, _| k != &exact && !k.starts_with(&prefix));
+    }
+    fn record_equality_facts(
+        &self,
+        expr: &V,
+        expr_ty: &Ty,
+        other: &V,
+        other_ty: &Ty,
+        is_eq: bool,
+        facts: &mut ConditionFacts,
+    ) {
+        let Some(canon) = self.extract_canonical_path(expr) else {
+            return;
+        };
+        let (eq_map, neq_map) = if is_eq {
+            (&mut facts.when_true, &mut facts.when_false)
+        } else {
+            (&mut facts.when_false, &mut facts.when_true)
+        };
+        if other.is_null() || *other_ty == Ty::Null {
+            if compatible(&Ty::Null, expr_ty) != Compatible::No {
+                eq_map.insert(canon.clone(), Ty::Null);
+            }
+            if let Some(nn) = narrow_non_null(expr_ty) {
+                neq_map.insert(canon, nn);
+            }
+        } else if !is_nullable(other_ty)
+            && other_ty.known()
+            && let Some(narrowed) = narrow_by_type(expr_ty, other_ty)
+        {
+            eq_map.insert(canon, narrowed);
         }
     }
     fn emit_message(
@@ -723,30 +1495,34 @@ impl<'a> Analyzer<'a> {
         ty
     }
     fn infer(&mut self, value: &V, span: Option<Span>) -> Ty {
+        self.infer_with_facts(value, span).0
+    }
+    fn infer_with_facts(&mut self, value: &V, span: Option<Span>) -> (Ty, ConditionFacts) {
         self.expressions_total += 1;
-        let ty = self.infer_inner(value, span);
+        let (ty, facts) = self.infer_inner(value, span);
         if ty.known() {
             self.expressions_typed += 1;
         }
-        ty
+        (ty, facts)
     }
-    fn infer_inner(&mut self, value: &V, span: Option<Span>) -> Ty {
+    fn infer_inner(&mut self, value: &V, span: Option<Span>) -> (Ty, ConditionFacts) {
         let contextual = self.expected.take();
         if value.is_null() {
-            return Ty::Null;
+            return (Ty::Null, ConditionFacts::default());
         }
         if value.is_boolean() {
-            return Ty::Bool;
+            return (Ty::Bool, ConditionFacts::default());
         }
         if let Some(number) = value.as_f64() {
-            return if number.fract() == 0.0 {
+            let ty = if number.fract() == 0.0 {
                 Ty::Int
             } else {
                 Ty::Number
             };
+            return (ty, ConditionFacts::default());
         }
         if value.is_string() {
-            return Ty::String;
+            return (Ty::String, ConditionFacts::default());
         }
         if let Some(items) = value.as_array() {
             let elem_expected = contextual_list_element(contextual.as_ref());
@@ -763,10 +1539,13 @@ impl<'a> Analyzer<'a> {
                 })
                 .collect::<Vec<_>>();
             self.expected = None;
-            return Ty::List(Box::new(union(types)));
+            return (Ty::List(Box::new(union(types))), ConditionFacts::default());
         }
         if let Some(raw) = value["expr"].as_str() {
-            return self.infer_expr_reference(raw, span);
+            return (
+                self.infer_expr_reference(raw, span),
+                ConditionFacts::default(),
+            );
         }
         if let Some(parts) = value["interpolation"].as_array() {
             let mut prev_span = None;
@@ -790,32 +1569,41 @@ impl<'a> Analyzer<'a> {
                     );
                 }
             }
-            return Ty::String;
+            return (Ty::String, ConditionFacts::default());
         }
         if value.get("match").is_some() {
-            return self.infer_match_value(value, span, contextual);
+            return (
+                self.infer_match_value(value, span, contextual),
+                ConditionFacts::default(),
+            );
         }
         if let Some(expression) = value.get("expression") {
             return self.infer_expression(expression, value, span, contextual);
         }
         if let Some(object) = value.as_object() {
             let doc = self.doc;
-            if let Some(struct_name) = contextual_struct_name(doc, contextual.as_ref())
-                && let Some(fields) = doc["structs"][struct_name].as_object()
+            let context = self.context;
+            if let Some(struct_name) = contextual_struct_name(doc, context, contextual.as_ref())
+                && let Some(mut field_names) = self.struct_field_names(struct_name)
             {
-                let missing_required = fields.iter().any(|(fname, fty)| {
-                    !fty.as_str().unwrap_or("").trim().ends_with('?') && !object.contains_key(fname)
+                let missing_required = field_names.iter().any(|fname| {
+                    !self
+                        .struct_field_type(struct_name, fname)
+                        .unwrap_or("")
+                        .trim()
+                        .ends_with('?')
+                        && !object.contains_key(*fname)
                 });
                 if !missing_required {
                     let mut valid = true;
-                    let expected_keys = {
-                        let mut keys = fields.keys().map(String::as_str).collect::<Vec<_>>();
-                        keys.sort_unstable();
-                        keys.join(" | ")
-                    };
+                    field_names.sort_unstable();
+                    let expected_keys = field_names.join(" | ");
+                    let struct_name_owned = struct_name.to_string();
                     for (key, item) in object {
                         let child = self.child(item, span).or(span);
-                        let field_expected = fields.get(key).and_then(V::as_str).map(parse_type);
+                        let field_expected = self
+                            .struct_field_type(&struct_name_owned, key)
+                            .map(parse_type);
                         self.expected = field_expected.clone();
                         let actual = self.infer(item, child);
                         if let Some(expected_ty) = &field_expected {
@@ -824,16 +1612,19 @@ impl<'a> Analyzer<'a> {
                                 expected_ty,
                                 "incompatible-binding",
                                 child,
-                                format_args!("Поле {struct_name}.{key}"),
+                                format_args!("Поле {struct_name_owned}.{key}"),
                             );
                             valid &= ok;
-                            if ok {
-                                let constraints = &doc["structConstraints"][struct_name][key];
+                            if ok
+                                && let Some(constraints) = self
+                                    .struct_field_constraints(&struct_name_owned, key)
+                                    .cloned()
+                            {
                                 valid &= self.check_static_constraints(
                                     item,
-                                    constraints,
+                                    &constraints,
                                     child,
-                                    &format!("Поле {struct_name}.{key}"),
+                                    &format!("Поле {struct_name_owned}.{key}"),
                                 );
                             }
                         } else {
@@ -842,17 +1633,18 @@ impl<'a> Analyzer<'a> {
                                 expected_keys.clone(),
                                 key.clone(),
                                 child,
-                                &format!("Структура {struct_name}"),
+                                &format!("Структура {struct_name_owned}"),
                             );
                             valid = false;
                         }
                     }
                     self.expected = None;
-                    return if valid {
-                        Ty::Named(struct_name.into())
+                    let ty = if valid {
+                        Ty::Named(struct_name_owned)
                     } else {
                         Ty::Unknown
                     };
+                    return (ty, ConditionFacts::default());
                 }
             }
             let val_expected = contextual_record_value(contextual.as_ref());
@@ -865,16 +1657,19 @@ impl<'a> Analyzer<'a> {
                 })
                 .collect::<Vec<_>>();
             self.expected = None;
-            return Ty::Record(Box::new(union(types)));
+            return (
+                Ty::Record(Box::new(union(types))),
+                ConditionFacts::default(),
+            );
         }
-        Ty::Unknown
+        (Ty::Unknown, ConditionFacts::default())
     }
     fn is_scalar(&self, ty: &Ty) -> bool {
         match ty {
             Ty::Unknown | Ty::Any => true,
             Ty::Union(types) => types.iter().all(|t| self.is_scalar(t)),
             Ty::List(_) | Ty::Map(_) | Ty::Record(_) | Ty::Object => false,
-            Ty::Named(name) => self.doc["enums"].get(name).is_some(),
+            Ty::Named(name) => self.has_enum(name),
             _ => true,
         }
     }
@@ -912,6 +1707,20 @@ impl<'a> Analyzer<'a> {
         self.infer_reference(raw, span)
     }
     fn infer_reference(&mut self, raw: &str, span: Option<Span>) -> Ty {
+        if !self.narrowed.is_empty()
+            && let Some(canon) = self.canonicalize_ref_path(raw)
+        {
+            if let Some(ty) = self.narrowed.get(&canon) {
+                return ty.clone();
+            }
+            for (idx, _) in canon.rmatch_indices('.') {
+                let prefix = &canon[..idx];
+                let suffix = &canon[idx + 1..];
+                if let Some(prefix_ty) = self.narrowed.get(prefix).cloned() {
+                    return self.resolve_member_path(prefix_ty, suffix.split('.'), span);
+                }
+            }
+        }
         let (head, rest) = raw.split_once('.').unwrap_or((raw, ""));
         if rest.is_empty() {
             if let Some(ty) = self.locals.get(head) {
@@ -926,19 +1735,15 @@ impl<'a> Analyzer<'a> {
             {
                 return parse_type(ty);
             }
-            if let Some(ty) = self.doc["propDefinitions"]
-                .get(head)
-                .and_then(|d| d["type"].as_str())
-            {
+            if let Some(ty) = self.declared_prop_type_str(head) {
                 return parse_type(ty);
             }
             if self.doc["lets"].get(head).is_some() {
                 return self.infer_let(head);
             }
-            if let Some(variants) = self.doc["enums"].get(head).and_then(V::as_array) {
+            if let Some(variants) = self.enum_variants(head) {
                 let expected = variants
-                    .iter()
-                    .filter_map(V::as_str)
+                    .into_iter()
                     .map(|v| format!("{head}.{v}"))
                     .collect::<Vec<_>>()
                     .join(" | ");
@@ -961,9 +1766,8 @@ impl<'a> Analyzer<'a> {
                 } else {
                     rest.split_once('.').unwrap_or((rest, ""))
                 };
-                let base = self.doc["propDefinitions"]
-                    .get(name)
-                    .and_then(|d| d["type"].as_str())
+                let base = self
+                    .declared_prop_type_str(name)
                     .map(parse_type)
                     .or_else(|| {
                         if self.doc["lets"].get(name).is_some() {
@@ -1004,13 +1808,12 @@ impl<'a> Analyzer<'a> {
                 if let Some(ty) = self.locals.get(head).cloned() {
                     return self.resolve_member_path(ty, rest.split('.'), span);
                 }
-                if let Some(variants) = self.doc["enums"].get(head).and_then(V::as_array) {
-                    if !rest.contains('.') && variants.iter().any(|v| v.as_str() == Some(rest)) {
+                if let Some(variants) = self.enum_variants(head) {
+                    if !rest.contains('.') && variants.contains(&rest) {
                         return Ty::Named(head.into());
                     }
                     let expected = variants
-                        .iter()
-                        .filter_map(V::as_str)
+                        .into_iter()
                         .map(|v| format!("{head}.{v}"))
                         .collect::<Vec<_>>()
                         .join(" | ");
@@ -1053,11 +1856,9 @@ impl<'a> Analyzer<'a> {
     fn check_struct_field(&mut self, base: &Ty, property: &str, span: Option<Span>) {
         match base {
             Ty::Named(name) => {
-                let doc = self.doc;
-                if let Some(fields) = doc["structs"].get(name).and_then(V::as_object)
-                    && !fields.contains_key(property)
+                if let Some(mut keys) = self.struct_field_names(name)
+                    && !keys.contains(&property)
                 {
-                    let mut keys = fields.keys().map(String::as_str).collect::<Vec<_>>();
                     keys.sort_unstable();
                     self.emit(
                         "unknown-field",
@@ -1076,17 +1877,16 @@ impl<'a> Analyzer<'a> {
                 let mut all_known_structs = true;
                 let mut any_has_field = false;
                 let mut expected_keys = Vec::new();
-                let doc = self.doc;
                 for ty in non_null_types {
                     if let Ty::Named(name) = ty
-                        && let Some(fields) = doc["structs"].get(name).and_then(V::as_object)
+                        && let Some(keys) = self.struct_field_names(name)
                     {
-                        if fields.contains_key(property) {
+                        if keys.contains(&property) {
                             any_has_field = true;
                         }
-                        for k in fields.keys() {
-                            if !expected_keys.contains(&k.as_str()) {
-                                expected_keys.push(k.as_str());
+                        for k in keys {
+                            if !expected_keys.contains(&k) {
+                                expected_keys.push(k);
                             }
                         }
                     } else {
@@ -1096,9 +1896,10 @@ impl<'a> Analyzer<'a> {
                 }
                 if all_known_structs && !any_has_field {
                     expected_keys.sort_unstable();
+                    let expected_str = expected_keys.join(" | ");
                     self.emit(
                         "unknown-field",
-                        expected_keys.join(" | "),
+                        expected_str,
                         property.into(),
                         span,
                         &format!("Поле структуры {}", base.display()),
@@ -1110,10 +1911,8 @@ impl<'a> Analyzer<'a> {
     }
     fn member_type(&self, base: &Ty, property: &str) -> Ty {
         match base {
-            Ty::Named(name) => self.doc["structs"]
-                .get(name)
-                .and_then(|fields| fields.get(property))
-                .and_then(V::as_str)
+            Ty::Named(name) => self
+                .struct_field_type(name, property)
                 .map(parse_type)
                 .unwrap_or(Ty::Unknown),
             Ty::List(item) if property == "length" => {
@@ -1146,6 +1945,28 @@ impl<'a> Analyzer<'a> {
         self.let_cache.insert(name.into(), ty.clone());
         ty
     }
+    fn context_dictionary_type(&self, section: &str, key: &str) -> Ty {
+        let map = if section == "i18n" {
+            &self.context.i18n
+        } else {
+            &self.context.tokens
+        };
+        if let Some(raw) = map.get(key) {
+            return parse_type(raw);
+        }
+        if !key.contains('.') {
+            let suffix = format!(".{key}");
+            let matched = map
+                .iter()
+                .filter(|(k, _)| k.ends_with(&suffix))
+                .map(|(_, v)| parse_type(v))
+                .collect::<Vec<_>>();
+            if !matched.is_empty() {
+                return union(matched);
+            }
+        }
+        Ty::Unknown
+    }
     fn infer_dictionary(&mut self, section: &str, key: &str, cache_key: &str) -> Ty {
         if let Some(ty) = self.dictionary_cache.get(cache_key) {
             return ty.clone();
@@ -1156,7 +1977,7 @@ impl<'a> Analyzer<'a> {
         let doc = self.doc;
         let value = &doc[section][key];
         let ty = if value.is_null() {
-            Ty::Unknown
+            self.context_dictionary_type(section, key)
         } else {
             self.infer_root(value, None)
         };
@@ -1170,14 +1991,14 @@ impl<'a> Analyzer<'a> {
         whole: &V,
         span: Option<Span>,
         expected: Option<Ty>,
-    ) -> Ty {
+    ) -> (Ty, ConditionFacts) {
         match expression["kind"].as_str().unwrap_or("") {
             "conditional" => {
                 let condition = &expression["condition"];
                 let condition_span = self.child(condition, span);
                 let mut prev_span = condition_span;
                 let cond_target = condition_span.or(span);
-                let condition_ty = self.infer(condition, cond_target);
+                let (condition_ty, cond_facts) = self.infer_with_facts(condition, cond_target);
                 self.check(
                     &condition_ty,
                     &Ty::Bool,
@@ -1193,8 +2014,15 @@ impl<'a> Analyzer<'a> {
                         prev_span = child;
                     }
                     let branch_span = child.or(span);
+                    let branch_facts = if key == "then" {
+                        &cond_facts.when_true
+                    } else {
+                        &cond_facts.when_false
+                    };
+                    let saved_narrowed = self.apply_narrowing(branch_facts);
                     self.expected = expected.clone();
                     let ty = self.infer(value, branch_span);
+                    self.narrowed = saved_narrowed;
                     if let Some(expected) = &expected {
                         valid &= self.check(
                             &ty,
@@ -1207,12 +2035,13 @@ impl<'a> Analyzer<'a> {
                     ty
                 });
                 self.expected = None;
-                if valid { union(types) } else { Ty::Unknown }
+                let res = if valid { union(types) } else { Ty::Unknown };
+                (res, ConditionFacts::default())
             }
             "unary" => {
                 let argument = &expression["argument"];
                 let child = self.child(argument, span).or(span);
-                let actual = self.infer(argument, child);
+                let (actual, mut facts) = self.infer_with_facts(argument, child);
                 let operator = expression["operator"].as_str().unwrap_or("");
                 let expected = if operator == "!" {
                     Ty::Bool
@@ -1226,7 +2055,12 @@ impl<'a> Analyzer<'a> {
                     child,
                     format_args!("Оператор {operator}"),
                 );
-                if actual == Ty::Unknown {
+                if operator == "!" {
+                    std::mem::swap(&mut facts.when_true, &mut facts.when_false);
+                } else {
+                    facts = ConditionFacts::default();
+                }
+                let ty = if actual == Ty::Unknown {
                     Ty::Unknown
                 } else if operator == "!" {
                     Ty::Bool
@@ -1234,7 +2068,8 @@ impl<'a> Analyzer<'a> {
                     Ty::Int
                 } else {
                     Ty::Number
-                }
+                };
+                (ty, facts)
             }
             "member" => {
                 let object = &expression["object"];
@@ -1261,8 +2096,17 @@ impl<'a> Analyzer<'a> {
                     if optional && result != Ty::Unknown {
                         result = union([result, Ty::Null]);
                     }
-                    return result;
+                    return (result, ConditionFacts::default());
                 };
+                if !optional
+                    && expression["computed"] != true
+                    && !self.narrowed.is_empty()
+                    && let Some(canon) = self.extract_canonical_path(whole)
+                    && let Some(narrowed_ty) = self.narrowed.get(&canon).cloned()
+                {
+                    self.check_struct_field(&base, property, span);
+                    return (narrowed_ty, ConditionFacts::default());
+                }
                 let mut result = if property == "length" && matches!(base, Ty::String | Ty::List(_))
                 {
                     Ty::Int
@@ -1280,7 +2124,7 @@ impl<'a> Analyzer<'a> {
                 if optional {
                     result = union([result, Ty::Null]);
                 }
-                result
+                (result, ConditionFacts::default())
             }
             "call" => {
                 let name = expression["name"].as_str().unwrap_or("");
@@ -1297,16 +2141,30 @@ impl<'a> Analyzer<'a> {
                     spans.push(arg_span);
                     types.push(self.infer(arg, arg_span));
                 }
-                self.infer_call(name, args, &types, &spans, span)
+                let res = self.infer_call(name, args, &types, &spans, span);
+                let mut facts = ConditionFacts::default();
+                if name == "isEmpty"
+                    && args.len() == 1
+                    && let Some(canon) = self.extract_canonical_path(&args[0])
+                    && let Some(nn) = narrow_non_null(&types[0])
+                {
+                    facts.when_false.insert(canon, nn);
+                } else if name == "isValid"
+                    && (args.len() == 3
+                        || (args.len() == 2
+                            && args[1].as_str().is_some_and(is_nonempty_named_pattern)))
+                    && let Some(canon) = self.extract_canonical_path(&args[0])
+                    && let Some(nn) = narrow_non_null(&types[0])
+                {
+                    facts.when_true.insert(canon, nn);
+                }
+                (res, facts)
             }
             "binary" => self.infer_binary(expression, span),
-            _ => {
-                let _ = whole;
-                Ty::Unknown
-            }
+            _ => (Ty::Unknown, ConditionFacts::default()),
         }
     }
-    fn infer_binary(&mut self, expression: &V, span: Option<Span>) -> Ty {
+    fn infer_binary(&mut self, expression: &V, span: Option<Span>) -> (Ty, ConditionFacts) {
         let operator = expression["operator"].as_str().unwrap_or("");
         let left = &expression["left"];
         let right = &expression["right"];
@@ -1314,41 +2172,65 @@ impl<'a> Analyzer<'a> {
         let right_found = self.child_after(right, span, left_found);
         let left_span = left_found.or(span);
         let right_span = right_found.or(span);
+        if operator == "&&" || operator == "||" {
+            let (a, left_facts) = self.infer_with_facts(left, left_span);
+            let rhs_env = if operator == "&&" {
+                &left_facts.when_true
+            } else {
+                &left_facts.when_false
+            };
+            let saved_narrowed = self.apply_narrowing(rhs_env);
+            let (b, right_facts) = self.infer_with_facts(right, right_span);
+            self.narrowed = saved_narrowed;
+            self.check(
+                &a,
+                &Ty::Bool,
+                "incompatible-operand",
+                left_span,
+                format_args!("Оператор {operator}"),
+            );
+            self.check(
+                &b,
+                &Ty::Bool,
+                "incompatible-operand",
+                right_span,
+                format_args!("Оператор {operator}"),
+            );
+            let facts = if operator == "&&" {
+                merge_and_facts(left_facts, right_facts)
+            } else {
+                merge_or_facts(left_facts, right_facts)
+            };
+            let ty = if a == Ty::Unknown || b == Ty::Unknown {
+                Ty::Unknown
+            } else {
+                Ty::Bool
+            };
+            return (ty, facts);
+        }
         let a = self.infer(left, left_span);
         let b = self.infer(right, right_span);
         match operator {
-            "??" => match a {
-                Ty::Unknown | Ty::Any => Ty::Unknown,
-                Ty::Null => b,
-                Ty::Union(_) => union([non_null(a), b]),
-                _ => a,
-            },
-            "&&" | "||" => {
-                self.check(
-                    &a,
-                    &Ty::Bool,
-                    "incompatible-operand",
-                    left_span,
-                    format_args!("Оператор {operator}"),
-                );
-                self.check(
-                    &b,
-                    &Ty::Bool,
-                    "incompatible-operand",
-                    right_span,
-                    format_args!("Оператор {operator}"),
-                );
-                if a == Ty::Unknown || b == Ty::Unknown {
-                    Ty::Unknown
-                } else {
-                    Ty::Bool
-                }
+            "??" => {
+                let ty = match a {
+                    Ty::Unknown | Ty::Any => Ty::Unknown,
+                    Ty::Null => b,
+                    Ty::Union(_) => union([non_null(a), b]),
+                    _ => a,
+                };
+                (ty, ConditionFacts::default())
             }
-            "==" | "!=" | "===" | "!==" => Ty::Bool,
+            "==" | "!=" | "===" | "!==" => {
+                let is_eq = matches!(operator, "==" | "===");
+                let mut facts = ConditionFacts::default();
+                self.record_equality_facts(left, &a, right, &b, is_eq, &mut facts);
+                self.record_equality_facts(right, &b, left, &a, is_eq, &mut facts);
+                (Ty::Bool, facts)
+            }
             "<" | "<=" | ">" | ">=" => {
                 let numeric = |t: &Ty| matches!(t, Ty::Number | Ty::Int | Ty::Unknown | Ty::Any);
                 let string = |t: &Ty| matches!(t, Ty::String | Ty::Unknown | Ty::Any);
-                if !((numeric(&a) && numeric(&b)) || (string(&a) && string(&b))) {
+                let ty = if !((numeric(&a) && numeric(&b)) || (string(&a) && string(&b))) {
                     self.emit(
                         "incompatible-operand",
                         "Number и Number или String и String".into(),
@@ -1359,7 +2241,8 @@ impl<'a> Analyzer<'a> {
                     Ty::Unknown
                 } else {
                     Ty::Bool
-                }
+                };
+                (ty, ConditionFacts::default())
             }
             ".." | "..=" => {
                 self.check(
@@ -1376,10 +2259,11 @@ impl<'a> Analyzer<'a> {
                     right_span,
                     format_args!("Диапазон"),
                 );
-                Ty::List(Box::new(Ty::Int))
+                (Ty::List(Box::new(Ty::Int)), ConditionFacts::default())
             }
             "+" => {
-                if matches!(a, Ty::Unknown | Ty::Any) || matches!(b, Ty::Unknown | Ty::Any) {
+                let ty = if matches!(a, Ty::Unknown | Ty::Any) || matches!(b, Ty::Unknown | Ty::Any)
+                {
                     Ty::Unknown
                 } else if a == Ty::Int && b == Ty::Int {
                     Ty::Int
@@ -1396,7 +2280,8 @@ impl<'a> Analyzer<'a> {
                         "Оператор +",
                     );
                     Ty::Unknown
-                }
+                };
+                (ty, ConditionFacts::default())
             }
             "-" | "*" | "/" | "%" => {
                 self.check(
@@ -1413,46 +2298,269 @@ impl<'a> Analyzer<'a> {
                     right_span,
                     format_args!("Оператор {operator}"),
                 );
-                if a == Ty::Unknown || b == Ty::Unknown {
+                let ty = if a == Ty::Unknown || b == Ty::Unknown {
                     Ty::Unknown
                 } else if operator != "/" && a == Ty::Int && b == Ty::Int {
                     Ty::Int
                 } else {
                     Ty::Number
+                };
+                (ty, ConditionFacts::default())
+            }
+            _ => (Ty::Unknown, ConditionFacts::default()),
+        }
+    }
+    fn subtract_covered_atoms(&self, subject_ty: &Ty, covered: &[String]) -> Ty {
+        if covered.is_empty() {
+            return subject_ty.clone();
+        }
+        let Ty::Union(members) = subject_ty else {
+            return subject_ty.clone();
+        };
+        let kept = members
+            .iter()
+            .filter(|member| {
+                let mut atoms = Vec::new();
+                if !self.finite_domain_atoms(member, &mut atoms) || atoms.is_empty() {
+                    return true;
+                }
+                !atoms.iter().all(|a| covered.iter().any(|c| c == a))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if kept.is_empty() {
+            subject_ty.clone()
+        } else {
+            union(kept)
+        }
+    }
+    fn infer_subject_tuple_types(&self, subject: &V) -> Vec<(Option<String>, Ty)> {
+        let Some(items) = subject.as_array() else {
+            return Vec::new();
+        };
+        items
+            .iter()
+            .map(|item| {
+                let canon = self.extract_canonical_path(item);
+                let ty = canon
+                    .as_deref()
+                    .and_then(|c| self.lookup_canonical_type(c))
+                    .unwrap_or(Ty::Unknown);
+                (canon, ty)
+            })
+            .collect()
+    }
+    fn lookup_canonical_type(&self, canon: &str) -> Option<Ty> {
+        if let Some(ty) = self.narrowed.get(canon) {
+            return Some(ty.clone());
+        }
+        if let Some(local) = canon.strip_prefix("local:") {
+            let (head, rest) = local.split_once('.').unwrap_or((local, ""));
+            let base = self.locals.get(head)?.clone();
+            return Some(if rest.is_empty() {
+                base
+            } else {
+                rest.split('.').fold(base, |ty, p| self.member_type(&ty, p))
+            });
+        }
+        if let Some(prop) = canon.strip_prefix("props.") {
+            let (head, rest) = prop.split_once('.').unwrap_or((prop, ""));
+            let base = parse_type(self.declared_prop_type_str(head)?);
+            return Some(if rest.is_empty() {
+                base
+            } else {
+                rest.split('.').fold(base, |ty, p| self.member_type(&ty, p))
+            });
+        }
+        if let Some(st) = canon.strip_prefix("state.") {
+            let (head, rest) = st.split_once('.').unwrap_or((st, ""));
+            let base = parse_type(
+                self.doc["stateDefinitions"]
+                    .get(head)
+                    .and_then(|d| d["type"].as_str())?,
+            );
+            return Some(if rest.is_empty() {
+                base
+            } else {
+                rest.split('.').fold(base, |ty, p| self.member_type(&ty, p))
+            });
+        }
+        if let Some(l) = canon.strip_prefix("let:") {
+            let (head, rest) = l.split_once('.').unwrap_or((l, ""));
+            let base = self.let_cache.get(head)?.clone();
+            return Some(if rest.is_empty() {
+                base
+            } else {
+                rest.split('.').fold(base, |ty, p| self.member_type(&ty, p))
+            });
+        }
+        None
+    }
+    fn check_match_arm_header(
+        &mut self,
+        ctx: &MatchSubjectCtx<'_>,
+        branch: &V,
+        match_span: Option<Span>,
+        cursor: &mut Option<Span>,
+        group_guard_fallback: bool,
+    ) -> HashMap<String, Ty> {
+        let remaining_ty = self.subtract_covered_atoms(ctx.subject_ty, &ctx.covered_atoms);
+        let mut arm_narrowing = HashMap::new();
+        let (pat_found, narrowed_subject) = self.check_pattern(
+            &branch["pattern"],
+            ctx.subject_ty,
+            &remaining_ty,
+            match_span,
+            *cursor,
+        );
+        if pat_found.is_some() {
+            *cursor = pat_found;
+        }
+        if let Some(canon) = ctx.subject_canon.as_deref()
+            && let Some(narrowed) = narrowed_subject
+            && narrowed.known()
+            && narrowed != *ctx.subject_ty
+        {
+            arm_narrowing.insert(canon.into(), narrowed);
+        } else if !ctx.tuple_slots.is_empty() {
+            if branch["pattern"]["expr"] == "_" {
+                for (i, (slot_canon, slot_ty)) in ctx.tuple_slots.iter().enumerate() {
+                    if let Some(canon) = slot_canon
+                        && let Some(cov) = ctx.covered_tuple_atoms.get(i)
+                    {
+                        let rem = self.subtract_covered_atoms(slot_ty, cov);
+                        if rem.known() && rem != *slot_ty {
+                            arm_narrowing.insert(canon.clone(), rem);
+                        }
+                    }
+                }
+            } else if let Some(pats) = branch["pattern"].as_array()
+                && pats.len() == ctx.tuple_slots.len()
+            {
+                for (i, ((slot_canon, slot_ty), pat_item)) in
+                    ctx.tuple_slots.iter().zip(pats.iter()).enumerate()
+                {
+                    let Some(canon) = slot_canon else { continue };
+                    let rem = ctx.covered_tuple_atoms.get(i).map_or_else(
+                        || slot_ty.clone(),
+                        |cov| self.subtract_covered_atoms(slot_ty, cov),
+                    );
+                    if let Some(narrowed) = self.narrow_pattern_only(pat_item, &rem)
+                        && narrowed.known()
+                        && narrowed != *slot_ty
+                    {
+                        arm_narrowing.insert(canon.clone(), narrowed);
+                    }
                 }
             }
-            _ => Ty::Unknown,
         }
+        let saved = self.apply_narrowing(&arm_narrowing);
+        if let Some(guard) = branch.get("guard") {
+            let guard_found = if group_guard_fallback && match_span.is_none() {
+                root_span(self.spans, guard, None)
+            } else {
+                self.child_after(guard, match_span, *cursor)
+            };
+            if guard_found.is_some() {
+                *cursor = guard_found;
+            }
+            let guard_span = guard_found.or(match_span);
+            let (guard_ty, guard_facts) = self.infer_with_facts(guard, guard_span);
+            self.check(
+                &guard_ty,
+                &Ty::Bool,
+                "incompatible-condition",
+                guard_span,
+                format_args!("Guard match"),
+            );
+            for (k, v) in guard_facts.when_true {
+                self.narrowed.insert(k, v);
+            }
+        }
+        saved
+    }
+    fn record_unguarded_branch_coverage(
+        branch: &V,
+        covered_atoms: &mut Vec<String>,
+        covered_tuple_atoms: &mut [Vec<String>],
+    ) {
+        if branch.get("guard").is_some() {
+            return;
+        }
+        Self::collect_pattern_atoms(&branch["pattern"], covered_atoms);
+        if !covered_tuple_atoms.is_empty()
+            && let Some(pats) = branch["pattern"].as_array()
+            && pats.len() == covered_tuple_atoms.len()
+        {
+            for i in 0..pats.len() {
+                if pats
+                    .iter()
+                    .enumerate()
+                    .all(|(k, p)| k == i || p["expr"] == "_")
+                {
+                    Self::collect_pattern_atoms(&pats[i], &mut covered_tuple_atoms[i]);
+                }
+            }
+        }
+    }
+    fn narrow_pattern_only(&self, pattern: &V, remaining: &Ty) -> Option<Ty> {
+        if !remaining.known() {
+            return None;
+        }
+        if pattern["expr"] == "_" {
+            return Some(remaining.clone());
+        }
+        if let Some(alts) = pattern["or"].as_array() {
+            let mut types = Vec::with_capacity(alts.len());
+            for alt in alts {
+                types.push(self.narrow_pattern_only(alt, remaining)?);
+            }
+            return Some(union(types));
+        }
+        if pattern.is_null() {
+            return Some(Ty::Null);
+        }
+        if pattern.is_boolean() {
+            return narrow_by_type(remaining, &Ty::Bool).or_else(|| Some(remaining.clone()));
+        }
+        if pattern.is_number()
+            || (pattern["expression"]["kind"] == "binary"
+                && ["..", "..="]
+                    .contains(&pattern["expression"]["operator"].as_str().unwrap_or("")))
+        {
+            return narrow_by_type(&non_null(remaining.clone()), &Ty::Number)
+                .or_else(|| narrow_non_null(remaining));
+        }
+        if pattern.is_string() {
+            return narrow_by_type(&non_null(remaining.clone()), &Ty::String)
+                .or_else(|| narrow_non_null(remaining));
+        }
+        if pattern.get("comparison").is_some() {
+            return narrow_non_null(remaining);
+        }
+        if let Some(raw) = pattern["expr"].as_str()
+            && let Some((head, rest)) = raw.split_once('.')
+            && !rest.contains('.')
+            && self.has_enum(head)
+        {
+            return narrow_by_type(remaining, &Ty::Named(head.into()))
+                .or_else(|| Some(Ty::Named(head.into())));
+        }
+        None
     }
     fn infer_match_value(&mut self, value: &V, span: Option<Span>, expected: Option<Ty>) -> Ty {
         let subject = &value["match"];
         let subject_found = self.child(subject, span);
         let subject_span = subject_found.or(span);
         let subject_ty = self.infer(subject, subject_span);
+        let mut match_ctx = MatchSubjectCtx::new(self, subject, &subject_ty);
         let branches = value["branches"].as_array().map_or(&[][..], Vec::as_slice);
         let mut branch_types = Vec::new();
         let mut valid = true;
         let mut cursor = subject_found;
         for branch in branches {
-            let pat_found = self.check_pattern(&branch["pattern"], &subject_ty, span, cursor);
-            if pat_found.is_some() {
-                cursor = pat_found;
-            }
-            if let Some(guard) = branch.get("guard") {
-                let guard_found = self.child_after(guard, span, cursor);
-                if guard_found.is_some() {
-                    cursor = guard_found;
-                }
-                let guard_span = guard_found.or(span);
-                let guard_ty = self.infer(guard, guard_span);
-                self.check(
-                    &guard_ty,
-                    &Ty::Bool,
-                    "incompatible-condition",
-                    guard_span,
-                    format_args!("Guard match"),
-                );
-            }
+            let saved_narrowed =
+                self.check_match_arm_header(&match_ctx, branch, span, &mut cursor, false);
             let result = &branch["value"];
             let result_found = self.child_after(result, span, cursor);
             if result_found.is_some() {
@@ -1461,6 +2569,7 @@ impl<'a> Analyzer<'a> {
             let result_span = result_found.or(span);
             self.expected = expected.clone();
             let ty = self.infer(result, result_span);
+            self.narrowed = saved_narrowed;
             if let Some(expected) = &expected {
                 valid &= self.check(
                     &ty,
@@ -1471,6 +2580,7 @@ impl<'a> Analyzer<'a> {
                 );
             }
             branch_types.push(ty);
+            match_ctx.record_unguarded(branch);
         }
         self.expected = None;
         self.check_match_exhaustiveness(&subject_ty, branches, span);
@@ -1484,23 +2594,37 @@ impl<'a> Analyzer<'a> {
         &mut self,
         pattern: &V,
         subject: &Ty,
+        remaining: &Ty,
         parent: Option<Span>,
         after: Option<Span>,
-    ) -> Option<Span> {
+    ) -> (Option<Span>, Option<Ty>) {
         let found = self.child_after(pattern, parent, after);
         if pattern["expr"] == "_" {
-            return found;
+            return (found, remaining.known().then(|| remaining.clone()));
         }
         let span = found.or(parent);
         if let Some(alternatives) = pattern["or"].as_array() {
             let mut sub_after = None;
+            let mut narrowed_alts = Vec::with_capacity(alternatives.len());
+            let mut all_narrowed = true;
             for alternative in alternatives {
-                let alt_found = self.check_pattern(alternative, subject, span, sub_after);
+                let (alt_found, alt_ty) =
+                    self.check_pattern(alternative, subject, remaining, span, sub_after);
                 if alt_found.is_some() {
                     sub_after = alt_found;
                 }
+                if let Some(t) = alt_ty {
+                    narrowed_alts.push(t);
+                } else {
+                    all_narrowed = false;
+                }
             }
-            return found;
+            let narrowed = if all_narrowed && !narrowed_alts.is_empty() {
+                Some(union(narrowed_alts))
+            } else {
+                remaining.known().then(|| remaining.clone())
+            };
+            return (found, narrowed);
         }
         if pattern.get("comparison").is_some() {
             let value = &pattern["value"];
@@ -1518,7 +2642,10 @@ impl<'a> Analyzer<'a> {
                     "Сравнение в match",
                 );
             }
-            return found;
+            let narrowed = narrow_by_type(&non_null(remaining.clone()), &actual)
+                .or_else(|| narrow_non_null(remaining))
+                .or_else(|| remaining.known().then(|| remaining.clone()));
+            return (found, narrowed);
         }
         if pattern["expression"]["kind"] == "binary"
             && ["..", "..="].contains(&pattern["expression"]["operator"].as_str().unwrap_or(""))
@@ -1531,11 +2658,14 @@ impl<'a> Analyzer<'a> {
                 span,
                 format_args!("Диапазон в match"),
             );
-            return found;
+            let narrowed = narrow_by_type(&non_null(remaining.clone()), &Ty::Number)
+                .or_else(|| narrow_non_null(remaining))
+                .or_else(|| remaining.known().then(|| remaining.clone()));
+            return (found, narrowed);
         }
         if let Some(items) = pattern.as_array() {
-            let item_subject = match subject {
-                Ty::List(elem) => elem.as_ref().clone(),
+            let extract_list = |ty: &Ty| match ty {
+                Ty::List(elem) => (**elem).clone(),
                 Ty::Union(ts) => {
                     let list_elems = ts
                         .iter()
@@ -1552,6 +2682,8 @@ impl<'a> Analyzer<'a> {
                 }
                 _ => Ty::Unknown,
             };
+            let item_subject = extract_list(subject);
+            let item_remaining = extract_list(remaining);
             if !matches!(subject, Ty::Unknown | Ty::Any | Ty::List(_))
                 && !matches!(subject, Ty::Union(ts) if ts.iter().any(|t| matches!(t, Ty::List(_) | Ty::Unknown | Ty::Any)))
             {
@@ -1565,16 +2697,20 @@ impl<'a> Analyzer<'a> {
             }
             let mut sub_after = None;
             for item in items {
-                let item_found = self.check_pattern(item, &item_subject, span, sub_after);
+                let (item_found, _) =
+                    self.check_pattern(item, &item_subject, &item_remaining, span, sub_after);
                 if item_found.is_some() {
                     sub_after = item_found;
                 }
             }
-            return found;
+            let narrowed = narrow_by_type(remaining, &Ty::List(Box::new(Ty::Any)))
+                .or_else(|| narrow_non_null(remaining))
+                .or_else(|| remaining.known().then(|| remaining.clone()));
+            return (found, narrowed);
         }
         let actual = self.infer(pattern, span);
         if matches!(subject, Ty::Unknown | Ty::Any) || matches!(actual, Ty::Unknown | Ty::Any) {
-            return found;
+            return (found, remaining.known().then(|| remaining.clone()));
         }
         let possible = match subject {
             Ty::Union(types) => types.iter().any(|expected| {
@@ -1595,7 +2731,13 @@ impl<'a> Analyzer<'a> {
                 "Паттерн match",
             );
         }
-        found
+        let narrowed = if pattern.is_null() || actual == Ty::Null {
+            Some(Ty::Null)
+        } else {
+            narrow_by_type(remaining, &actual)
+                .or_else(|| remaining.known().then(|| remaining.clone()))
+        };
+        (found, narrowed)
     }
     fn finite_domain_atoms(&self, ty: &Ty, out: &mut Vec<String>) -> bool {
         match ty {
@@ -1614,10 +2756,10 @@ impl<'a> Analyzer<'a> {
                 true
             }
             Ty::Named(name) => {
-                let Some(variants) = self.doc["enums"].get(name).and_then(V::as_array) else {
+                let Some(variants) = self.enum_variants(name) else {
                     return false;
                 };
-                for v in variants.iter().filter_map(V::as_str) {
+                for v in variants {
                     let atom = format!("{name}.{v}");
                     if !out.iter().any(|x| x == &atom) {
                         out.push(atom);
@@ -2211,15 +3353,85 @@ impl<'a> Analyzer<'a> {
     }
     fn property_type(&self, node: &str, name: &str) -> Option<Ty> {
         if node == self.doc["name"].as_str().unwrap_or("")
-            && let Some(ty) = self.doc["propDefinitions"]
-                .get(name)
-                .and_then(|d| d["type"].as_str())
+            && let Some(ty) = self.declared_prop_type_str(name)
         {
             return Some(parse_type(ty));
         }
         self.context.property_type(node, name).map(parse_type)
     }
+    fn match_group_guarantees_prop(&self, group: &V, prop: &str) -> bool {
+        let Some(branches) = group["branches"].as_array() else {
+            return false;
+        };
+        if branches.is_empty() || !branches.iter().all(|b| b["props"].get(prop).is_some()) {
+            return false;
+        }
+        let mut covered = Vec::new();
+        for branch in branches {
+            if branch.get("guard").is_some() {
+                continue;
+            }
+            if Self::collect_pattern_atoms(&branch["pattern"], &mut covered) {
+                return true;
+            }
+        }
+        let Some(canon) = self.extract_canonical_path(&group["match"]) else {
+            return false;
+        };
+        let Some(subject_ty) = self.lookup_canonical_type(&canon) else {
+            return false;
+        };
+        let mut required = Vec::new();
+        self.finite_domain_atoms(&subject_ty, &mut required)
+            && !required.is_empty()
+            && required.iter().all(|req| covered.iter().any(|c| c == req))
+    }
+    fn node_supplies_prop(&self, node: &V, prop: &str) -> bool {
+        node["props"].get(prop).is_some()
+            || node["bindings"].get(prop).is_some()
+            || node["forward"]
+                .as_array()
+                .is_some_and(|f| f.iter().any(|x| x.as_str() == Some(prop)))
+            || node["matches"].as_array().is_some_and(|groups| {
+                groups
+                    .iter()
+                    .any(|g| self.match_group_guarantees_prop(g, prop))
+            })
+    }
+    fn check_required_component_props(&mut self, node: &V, node_type: &str) {
+        if self.in_design_override || node_type == "Patch" {
+            return;
+        }
+        let Some(required) = self.context.required_component_props.get(node_type) else {
+            return;
+        };
+        if required.is_empty() {
+            return;
+        }
+        let mut missing = required
+            .iter()
+            .filter(|req| !self.node_supplies_prop(node, req))
+            .cloned()
+            .collect::<Vec<_>>();
+        missing.sort_unstable();
+        for req in missing {
+            let expected_ty = self
+                .context
+                .property_type(node_type, &req)
+                .unwrap_or("Any")
+                .to_string();
+            self.emit_message(
+                "missing-required-prop",
+                format!("Отсутствует обязательное свойство {node_type}.{req} ({expected_ty})"),
+                format!("{req}: {expected_ty}"),
+                "∅".into(),
+                node_range(node),
+                &format!("Компонент {node_type}"),
+            );
+        }
+    }
     fn walk_props(&mut self, node: &V, node_type: &str) {
+        self.check_required_component_props(node, node_type);
         self.walk_props_fields(
             &node["props"],
             &node["propertyRanges"],
@@ -2279,30 +3491,15 @@ impl<'a> Analyzer<'a> {
             let subject = &value["match"];
             let subject_found = self.child(subject, match_span);
             let subject_ty = self.infer(subject, subject_found.or(match_span));
+            let mut match_ctx = MatchSubjectCtx::new(self, subject, &subject_ty);
             let branches = value["branches"].as_array().map_or(&[][..], Vec::as_slice);
             let mut cursor = subject_found;
             for branch in branches {
-                let pat_found =
-                    self.check_pattern(&branch["pattern"], &subject_ty, match_span, cursor);
-                if pat_found.is_some() {
-                    cursor = pat_found;
-                }
-                if let Some(guard) = branch.get("guard") {
-                    let guard_found = self.child_after(guard, match_span, cursor);
-                    if guard_found.is_some() {
-                        cursor = guard_found;
-                    }
-                    let guard_span = guard_found.or(match_span);
-                    let guard_ty = self.infer(guard, guard_span);
-                    self.check(
-                        &guard_ty,
-                        &Ty::Bool,
-                        "incompatible-condition",
-                        guard_span,
-                        format_args!("Guard match"),
-                    );
-                }
+                let saved_narrowed =
+                    self.check_match_arm_header(&match_ctx, branch, match_span, &mut cursor, false);
                 self.walk_slot_value(&branch["value"], match_span);
+                self.narrowed = saved_narrowed;
+                match_ctx.record_unguarded(branch);
             }
             self.check_match_exhaustiveness(&subject_ty, branches, match_span);
         } else if value["type"].is_string() {
@@ -2314,13 +3511,24 @@ impl<'a> Analyzer<'a> {
     fn walk_action(&mut self, action: &str, args: &[V], range: Option<Span>) {
         let signature = action
             .strip_prefix("events.")
-            .and_then(|name| self.doc["eventDefinitions"].get(name))
-            .and_then(V::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|arg| arg["type"].as_str())
-                    .collect::<Vec<_>>()
+            .and_then(|name| {
+                self.doc["eventDefinitions"]
+                    .get(name)
+                    .and_then(V::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|arg| arg["type"].as_str())
+                            .collect::<Vec<_>>()
+                    })
+                    .or_else(|| {
+                        let base = self.doc["base"].as_str()?;
+                        self.context
+                            .component_events
+                            .get(base)
+                            .and_then(|ev| ev.get(name))
+                            .map(|types| types.iter().map(String::as_str).collect::<Vec<_>>())
+                    })
             })
             .or_else(|| {
                 action.strip_prefix("actions.").and_then(|name| {
@@ -2383,39 +3591,19 @@ impl<'a> Analyzer<'a> {
             };
             let subject_span = subject_found.or(group_span);
             let subject_ty = self.infer(subject, subject_span);
+            let mut match_ctx = MatchSubjectCtx::new(self, subject, &subject_ty);
             let branches = group["branches"].as_array().map_or(&[][..], Vec::as_slice);
             let mut cursor = subject_found;
             for branch in branches {
-                let pat_found =
-                    self.check_pattern(&branch["pattern"], &subject_ty, group_span, cursor);
-                if pat_found.is_some() {
-                    cursor = pat_found;
-                }
-                if let Some(guard) = branch.get("guard") {
-                    let guard_found = if group_span.is_some() {
-                        self.child_after(guard, group_span, cursor)
-                    } else {
-                        root_span(self.spans, guard, None)
-                    };
-                    if guard_found.is_some() {
-                        cursor = guard_found;
-                    }
-                    let guard_span = guard_found.or(group_span);
-                    let ty = self.infer(guard, guard_span);
-                    self.check(
-                        &ty,
-                        &Ty::Bool,
-                        "incompatible-condition",
-                        guard_span,
-                        format_args!("Guard match"),
-                    );
-                }
+                let saved_narrowed =
+                    self.check_match_arm_header(&match_ctx, branch, group_span, &mut cursor, true);
                 self.walk_props_fields(
                     &branch["props"],
                     &branch["propertyRanges"],
                     &branch["statementRanges"],
                     node_type,
                 );
+                self.narrowed = saved_narrowed;
                 if let Some(stmt_ranges) = branch["statementRanges"].as_object() {
                     for r in stmt_ranges.values().filter_map(ast_range) {
                         if cursor.is_none_or(|c| r.to > c.to) {
@@ -2423,6 +3611,7 @@ impl<'a> Analyzer<'a> {
                         }
                     }
                 }
+                match_ctx.record_unguarded(branch);
             }
             self.check_match_exhaustiveness(&subject_ty, branches, group_span);
         }
@@ -2449,14 +3638,24 @@ impl<'a> Analyzer<'a> {
                         val_span,
                         format_args!("Свойство {node_type}.{name}"),
                     );
-                    if ok && node_type == self_name {
-                        let constraints = &doc["propDefinitions"][name]["constraints"];
-                        self.check_static_constraints(
-                            value,
-                            constraints,
-                            val_span,
-                            &format!("Свойство {node_type}.{name}"),
-                        );
+                    if ok {
+                        let constraints = if node_type == self_name {
+                            self.declared_prop_constraints(name).cloned()
+                        } else {
+                            self.context
+                                .component_prop_constraints
+                                .get(node_type)
+                                .and_then(|c| c.get(name))
+                                .cloned()
+                        };
+                        if let Some(constraints) = constraints {
+                            self.check_static_constraints(
+                                value,
+                                &constraints,
+                                val_span,
+                                &format!("Свойство {node_type}.{name}"),
+                            );
+                        }
                     }
                 } else {
                     self.infer_root(value, range);
@@ -2470,13 +3669,14 @@ impl<'a> Analyzer<'a> {
                 let ty = self.infer_root(&node["value"], node_range(node));
                 if let Some(name) = node["name"].as_str() {
                     self.locals.insert(name.into(), ty);
+                    self.clear_local_narrowing(name);
                 }
             }
             "If" => {
                 let condition = &node["condition"];
                 let span =
                     root_span(self.spans, condition, node_range(node)).or_else(|| node_range(node));
-                let ty = self.infer(condition, span);
+                let (ty, cond_facts) = self.infer_with_facts(condition, span);
                 self.check(
                     &ty,
                     &Ty::Bool,
@@ -2484,8 +3684,16 @@ impl<'a> Analyzer<'a> {
                     span,
                     format_args!("Условие if"),
                 );
+                let saved_then_locals = self.locals.clone();
+                let saved_then = self.apply_narrowing(&cond_facts.when_true);
                 self.walk_nodes(&node["children"]);
+                self.locals = saved_then_locals;
+                self.narrowed = saved_then;
+                let saved_else_locals = self.locals.clone();
+                let saved_else = self.apply_narrowing(&cond_facts.when_false);
                 self.walk_nodes(&node["elseChildren"]);
+                self.locals = saved_else_locals;
+                self.narrowed = saved_else;
             }
             "For" => {
                 let collection = &node["collection"];
@@ -2499,21 +3707,24 @@ impl<'a> Analyzer<'a> {
                     span,
                     format_args!("Коллекция for"),
                 );
-                let saved = self.locals.clone();
+                let saved_locals = self.locals.clone();
+                let saved_narrowed = self.narrowed.clone();
                 if let Some(name) = node["item"].as_str() {
                     let item = match ty {
                         Ty::List(item) => *item,
                         _ => Ty::Unknown,
                     };
                     self.locals.insert(name.into(), item);
+                    self.clear_local_narrowing(name);
                 }
                 if let Some(index) = node["index"].as_str() {
                     self.locals.insert(index.into(), Ty::Int);
+                    self.clear_local_narrowing(index);
                 }
                 if let Some(condition) = node.get("where") {
                     let span = root_span(self.spans, condition, node_range(node))
                         .or_else(|| node_range(node));
-                    let actual = self.infer(condition, span);
+                    let (actual, where_facts) = self.infer_with_facts(condition, span);
                     self.check(
                         &actual,
                         &Ty::Bool,
@@ -2521,6 +3732,9 @@ impl<'a> Analyzer<'a> {
                         span,
                         format_args!("Условие where"),
                     );
+                    for (k, v) in where_facts.when_true {
+                        self.narrowed.insert(k, v);
+                    }
                 }
                 let key = &node["key"];
                 let key_span =
@@ -2534,7 +3748,8 @@ impl<'a> Analyzer<'a> {
                     format_args!("Ключ for"),
                 );
                 self.walk_nodes(&node["children"]);
-                self.locals = saved;
+                self.locals = saved_locals;
+                self.narrowed = saved_narrowed;
                 self.walk_nodes(&node["emptyChildren"]);
             }
             "Match" => {
@@ -2543,30 +3758,21 @@ impl<'a> Analyzer<'a> {
                 let subject_found = self.child(subject, match_span);
                 let subject_span = subject_found.or(match_span);
                 let subject_ty = self.infer(subject, subject_span);
+                let mut match_ctx = MatchSubjectCtx::new(self, subject, &subject_ty);
                 let branches = node["branches"].as_array().map_or(&[][..], Vec::as_slice);
                 let mut cursor = subject_found;
                 for branch in branches {
-                    let pat_found =
-                        self.check_pattern(&branch["pattern"], &subject_ty, match_span, cursor);
-                    if pat_found.is_some() {
-                        cursor = pat_found;
-                    }
-                    if let Some(guard) = branch.get("guard") {
-                        let guard_found = self.child_after(guard, match_span, cursor);
-                        if guard_found.is_some() {
-                            cursor = guard_found;
-                        }
-                        let span = guard_found.or(match_span);
-                        let ty = self.infer(guard, span);
-                        self.check(
-                            &ty,
-                            &Ty::Bool,
-                            "incompatible-condition",
-                            span,
-                            format_args!("Guard match"),
-                        );
-                    }
+                    let saved_locals = self.locals.clone();
+                    let saved_narrowed = self.check_match_arm_header(
+                        &match_ctx,
+                        branch,
+                        match_span,
+                        &mut cursor,
+                        false,
+                    );
                     self.walk_nodes(&branch["children"]);
+                    self.locals = saved_locals;
+                    self.narrowed = saved_narrowed;
                     if let Some(children) = branch["children"].as_array() {
                         for child_node in children.iter().filter_map(node_range) {
                             if cursor.is_none_or(|c| child_node.to > c.to) {
@@ -2574,12 +3780,17 @@ impl<'a> Analyzer<'a> {
                             }
                         }
                     }
+                    match_ctx.record_unguarded(branch);
                 }
                 self.check_match_exhaustiveness(&subject_ty, branches, match_span);
             }
             node_type => {
                 self.walk_props(node, node_type);
+                let saved_locals = self.locals.clone();
+                let saved_narrowed = self.narrowed.clone();
                 self.walk_nodes(&node["children"]);
+                self.locals = saved_locals;
+                self.narrowed = saved_narrowed;
             }
         }
     }
@@ -2608,11 +3819,10 @@ impl<'a> Analyzer<'a> {
                         val_span,
                         format_args!("Default {node_type}.{name}"),
                     );
-                    if ok {
-                        let constraints = &doc["propDefinitions"][name]["constraints"];
+                    if ok && let Some(constraints) = self.declared_prop_constraints(name).cloned() {
                         self.check_static_constraints(
                             value,
-                            constraints,
+                            &constraints,
                             val_span,
                             &format!("Default {node_type}.{name}"),
                         );
@@ -2697,10 +3907,12 @@ impl<'a> Analyzer<'a> {
                 ast_range(shortcut),
             );
         }
+        self.in_design_override = true;
         self.walk_nodes(&doc["entries"]);
         for state in doc["states"].as_array().into_iter().flatten() {
             self.walk_nodes(&state["nodes"]);
         }
+        self.in_design_override = false;
     }
 }
 fn unit_type(raw: &str) -> Option<Ty> {

@@ -201,10 +201,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "themoretheless-tokenizer-core"
+version = "0.8.0"
+
+[[package]]
 name = "themoretheless-tokenizer-forma"
 version = "0.8.0"
 dependencies = [
  "serde_json",
+ "themoretheless-tokenizer-core",
 ]
 
 [[package]]
