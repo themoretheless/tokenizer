@@ -377,12 +377,9 @@ pub fn lint_document_with_context(source: &str, context: &crate::typecheck::Type
             }
         }
     }
-    if doc["uses"].as_array().is_none_or(Vec::is_empty) && doc["base"].is_null() {
+    if context.can_validate_styles(&doc) {
         for (style_name, from, to) in &lint_decls.applies {
-            if !doc["styles"]
-                .as_object()
-                .is_some_and(|s| s.contains_key(style_name))
-            {
+            if !context.has_style_for_doc(&doc, style_name) {
                 warnings.push(json!({
                     "code": "unknown-style",
                     "severity": "error",

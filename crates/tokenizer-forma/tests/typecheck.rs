@@ -205,7 +205,7 @@ fn corpus_has_no_unreviewed_type_diagnostics_and_has_real_coverage() {
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     assert_eq!(
         (typed, total),
-        (1746, 2280),
+        (1775, 2280),
         "Reviewed corpus coverage baseline"
     );
 }
@@ -506,4 +506,353 @@ fn exhaustiveness_enum_variants_struct_fields_arities_int_precision_and_constrai
     let at_ov = ov_src.rfind("val").unwrap();
     assert_eq!(d_ov["from"], ov_src[..at_ov].encode_utf16().count());
     assert_eq!(d_ov["to"], ov_src[..at_ov].encode_utf16().count() + 3);
+}
+
+#[test]
+fn flow_sensitive_type_narrowing_across_control_flow_and_short_circuit_ops() {
+    let valid = r#"
+        enum Tone { Accent, Muted }
+        struct Badge { label: String; count: Int; }
+        struct User { name: String; badge: Badge?; }
+        component NarrowDemo {
+            prop subtitle: String? = null;
+            state label: String? = null;
+            state code: String? = null;
+            state score: Number? = null;
+            state user: User? = null;
+            state mixed: Tone | String = Tone.Accent;
+            state a: Int? = null;
+            state b: Int? = null;
+            state users: List<User?> = [];
+
+            if state.label != null {
+                Text { text: trim(state.label); }
+            } else {
+                Text { text: 'empty'; }
+            }
+
+            if subtitle == null {
+                Text { text: 'none'; }
+            } else {
+                Text { text: upper(subtitle); }
+            }
+
+            if !(state.a == null || state.b == null) {
+                Text { width: state.a + state.b; }
+            }
+
+            if !isEmpty(state.label) {
+                Text { text: lower(state.label); }
+            }
+
+            if isValid(state.code, 'digits') && isValid(state.score, 0, 100) {
+                Text {
+                    text: padStart(state.code, 4, '0');
+                    width: state.score + 10;
+                }
+            }
+
+            if state.user != null && state.user.badge != null {
+                Text {
+                    text: trim(state.user.badge.label);
+                    width: state.user.badge.count + 1;
+                }
+            }
+
+            Text {
+                disabled: state.label == null || trim(state.label) == '';
+                text: props.subtitle != null ? trim(props.subtitle) : 'fallback';
+            }
+
+            Text {
+                text: match state.label {
+                    null => 'none';
+                    _ => trim(state.label);
+                };
+                width: match (state.a, state.b) {
+                    (null, _) => 0px;
+                    (_, null) => 0px;
+                    _ => state.a + state.b;
+                };
+            }
+
+            Text {
+                text: match state.mixed {
+                    Tone.Accent | Tone.Muted => 'tone';
+                    _ => trim(state.mixed);
+                };
+            }
+
+            Text {
+                text: match state.label {
+                    _ if state.label != null => capitalize(state.label);
+                    _ => 'fallback';
+                };
+            }
+
+            Row {
+                match state.label {
+                    null => { show: false; }
+                    _ => { show: trim(state.label) != ''; }
+                }
+                match state.label {
+                    null => Text { text: 'empty'; }
+                    _ => Text { text: trim(state.label); }
+                }
+            }
+
+            for item in state.users where item != null && item.badge != null key item.name {
+                Text {
+                    text: trim(item.badge.label);
+                    width: item.badge.count;
+                }
+            }
+        }
+    "#;
+    let valid_report = report(valid);
+    assert!(
+        valid_report.diagnostics.is_empty(),
+        "{:#?}",
+        valid_report.diagnostics
+    );
+
+    // Guarded `null` branch does NOT exhaust `null` for subsequent branches:
+    let guarded_null = "component A { state flag: Bool = true; state label: String? = null; Text { text: match state.label { null if state.flag => 'a'; _ => trim(state.label); }; } }";
+    let d_guard = incompatible(guarded_null, "incompatible-argument");
+    let at_guard = guarded_null.rfind("state.label").unwrap();
+    assert_eq!(
+        d_guard["from"],
+        guarded_null[..at_guard].encode_utf16().count()
+    );
+    assert_eq!(d_guard["actual"], "String | Null");
+
+    // Narrowing `state.user` from `User?` to `User` exposes real field types and catches mismatches:
+    let narrowed_err = "struct User { age: Int; } component A { state user: User? = null; if state.user != null { Text { text: trim(state.user.age); } } }";
+    let diag = incompatible(narrowed_err, "incompatible-argument");
+    let at = narrowed_err.rfind("state.user.age").unwrap();
+    assert_eq!(diag["from"], narrowed_err[..at].encode_utf16().count());
+    assert_eq!(diag["actual"], "Int");
+
+    // In the `else` branch of `if state.label != null`, `state.label` is narrowed to `Null`:
+    let else_null = "component A { state label: String? = null; if state.label != null { Text { text: state.label; } } else { Text { text: trim(state.label); } } }";
+    let d_else = incompatible(else_null, "incompatible-argument");
+    let at_else = else_null.rfind("state.label").unwrap();
+    assert_eq!(d_else["from"], else_null[..at_else].encode_utf16().count());
+    assert_eq!(d_else["actual"], "Null");
+
+    // `let` shadowing inside a child container resets narrowing for local names:
+    let shadowed = "component A { state raw: String? = null; Frame { let x = state.raw; if x != null { Frame { let x = state.raw; Text { text: trim(x); } } } } }";
+    let d_shadow = incompatible(shadowed, "incompatible-argument");
+    let at_x = shadowed.rfind("x)").unwrap();
+    assert_eq!(d_shadow["from"], shadowed[..at_x].encode_utf16().count());
+}
+
+#[test]
+fn cross_document_modules_inheritance_and_required_props_work() {
+    let theme_module = r#"
+        enum Tone { Accent, Danger, Muted }
+        struct PriceTag {
+            #[range(1, 100)]
+            amount: Number;
+            #[pattern('^[A-Z]{3}$')]
+            currency: String;
+        }
+        struct Product {
+            title: String;
+            tag: PriceTag;
+        }
+        tokens {
+            brand: #ff0088;
+            spacing.md: 12px;
+        }
+        i18n en {
+            greeting: 'Hello';
+        }
+        style card {
+            width: 120px;
+        }
+    "#;
+    let base_card = r#"
+        component BaseCard {
+            required prop title: String;
+            #[range(1, 5)]
+            prop elevation: Int = 1;
+            prop tone: Tone = Tone.Accent;
+            event selected(id: Int);
+            style elevated {
+                height: 48px;
+            }
+            Surface {
+                Text { text: props.title; }
+            }
+        }
+    "#;
+    let primary_card = r#"
+        component PrimaryCard : BaseCard {
+            title: 'Default Primary';
+            Surface {
+                apply elevated;
+                Text { text: props.title; }
+            }
+        }
+    "#;
+
+    let context = TypeContext::from_json(&json!({
+        "modules": {
+            "./theme.forma": theme_module,
+            "./PrimaryCard.forma": primary_card,
+            "./BaseCard.forma": base_card
+        }
+    }))
+    .unwrap();
+
+    let valid_page = r#"
+        use './theme.forma';
+        use './BaseCard.forma';
+        use './PrimaryCard.forma';
+        component StorePage {
+            prop product: Product = {
+                title: 'Tea',
+                tag: { amount: 25, currency: 'USD' }
+            };
+            Surface {
+                apply card;
+                width: tokens.spacing.md;
+                color: tokens.brand;
+                BaseCard {
+                    title: i18n.greeting;
+                    elevation: 3;
+                    tone: match props.product.tag.currency {
+                        'USD' => Tone.Accent;
+                        _ => Tone.Muted;
+                    };
+                }
+                PrimaryCard {
+                    elevation: 2;
+                }
+            }
+        }
+    "#;
+    let ok_lints = lint_document_with_context(valid_page, &context).unwrap();
+    assert_eq!(ok_lints, json!([]), "{ok_lints:#?}");
+
+    // Cross-file enum unknown-variant & non-exhaustive-match:
+    let bad_enum = r#"
+        use './theme.forma';
+        component BadEnum {
+            prop tone: Tone = Tone.Bogus;
+            Text {
+                text: match props.tone {
+                    Tone.Accent => 'a';
+                    Tone.Danger => 'd';
+                };
+            }
+        }
+    "#;
+    let enum_diags = analyze_source(bad_enum, &context).unwrap().diagnostics;
+    assert!(enum_diags.iter().any(|d| d["code"] == "unknown-variant"));
+    assert!(
+        enum_diags
+            .iter()
+            .any(|d| d["code"] == "non-exhaustive-match" && d["expected"] == "Tone.Muted")
+    );
+
+    // Cross-file nested struct constraint & token type mismatch:
+    let bad_struct_and_token = r#"
+        use './theme.forma';
+        component BadProduct {
+            prop product: Product = {
+                title: 'Tea',
+                tag: { amount: 250, currency: 'usd' }
+            };
+            Text {
+                width: tokens.brand;
+                text: props.product.title;
+            }
+        }
+    "#;
+    let st_diags = analyze_source(bad_struct_and_token, &context)
+        .unwrap()
+        .diagnostics;
+    assert!(st_diags.iter().any(|d| d["code"] == "out-of-range"));
+    assert!(st_diags.iter().any(|d| d["code"] == "pattern-mismatch"));
+    assert!(
+        st_diags
+            .iter()
+            .any(|d| d["code"] == "incompatible-binding" && d["actual"] == "Color")
+    );
+
+    // Missing required prop & child static constraint check:
+    let bad_child = r#"
+        use './BaseCard.forma';
+        component Parent {
+            BaseCard {
+                elevation: 99;
+            }
+        }
+    "#;
+    let child_diags = analyze_source(bad_child, &context).unwrap().diagnostics;
+    assert!(
+        child_diags
+            .iter()
+            .any(|d| d["code"] == "missing-required-prop" && d["expected"] == "title: String"),
+        "{child_diags:#?}"
+    );
+    assert!(child_diags.iter().any(|d| d["code"] == "out-of-range"));
+
+    // Unknown style is caught when all `use` modules are registered, but suppressed without context:
+    let bad_style = r#"
+        use './theme.forma';
+        component Styled {
+            Surface { apply nonexistent; }
+        }
+    "#;
+    let style_with_ctx = lint_document_with_context(bad_style, &context).unwrap();
+    assert!(
+        style_with_ctx
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "unknown-style" && d["actual"] == "nonexistent")
+    );
+    let style_without_ctx = lint_document_with_context(bad_style, &TypeContext::default()).unwrap();
+    assert_eq!(style_without_ctx, json!([]));
+
+    // Derived component inherits base props, constraints, events, and styles:
+    let bad_derived = r#"
+        component CustomCard : BaseCard {
+            elevation: 99;
+            Button {
+                apply missingStyle;
+                clicked -> events.selected('not-an-int');
+            }
+        }
+    "#;
+    let derived_lints = lint_document_with_context(bad_derived, &context).unwrap();
+    let arr = derived_lints.as_array().unwrap();
+    assert!(arr.iter().any(|d| d["code"] == "out-of-range"), "{arr:#?}");
+    assert!(
+        arr.iter().any(|d| d["code"] == "incompatible-argument"),
+        "{arr:#?}"
+    );
+    assert!(arr.iter().any(|d| d["code"] == "unknown-style"), "{arr:#?}");
+
+    // Design override files do not require `required prop`s, while still enforcing prop constraints:
+    let design_override = r#"
+        design Compact {
+            BaseCard {
+                key: 'hero';
+                elevation: 99;
+            }
+        }
+    "#;
+    let design_diags = analyze_source(design_override, &context)
+        .unwrap()
+        .diagnostics;
+    assert!(
+        !design_diags
+            .iter()
+            .any(|d| d["code"] == "missing-required-prop")
+    );
+    assert!(design_diags.iter().any(|d| d["code"] == "out-of-range"));
 }
