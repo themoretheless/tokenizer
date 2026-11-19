@@ -5,13 +5,15 @@ mod access;
 mod builtins;
 mod dispatch;
 mod ops;
+mod regions;
 
 use crate::bytecode::opcode::{
     BytecodeClosure, BytecodeFunction, Chunk, StructDescriptor, Upvalue,
 };
 use crate::runtime::memory::{Budget, CoverError};
 use crate::runtime::ops::eval_binary_values;
-use crate::{CancellationToken, ExecutionLimits, RuntimeError, Value};
+use crate::{CancellationToken, ExecutionLimits, RegionStats, RuntimeError, Value};
+use regions::VmRegions;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -41,6 +43,7 @@ pub struct Vm<'c> {
     pub(super) frames: Vec<CallFrame>,
     pub(super) stack: Vec<Value<'static>>,
     pub(super) open_upvalues: Vec<Rc<RefCell<Upvalue>>>,
+    regions: VmRegions,
 }
 
 impl<'c> Vm<'c> {
@@ -60,6 +63,7 @@ impl<'c> Vm<'c> {
             frames: Vec::with_capacity(16),
             stack: Vec::with_capacity(64),
             open_upvalues: Vec::new(),
+            regions: VmRegions::default(),
         }
     }
 
@@ -77,11 +81,17 @@ impl<'c> Vm<'c> {
             frames: Vec::with_capacity(16),
             stack: Vec::with_capacity(64),
             open_upvalues: Vec::new(),
+            regions: VmRegions::default(),
         }
     }
 
     pub fn fuel(&self) -> usize {
         self.fuel
+    }
+
+    /// Aggregated allocation metrics per region name (and anonymous regions).
+    pub fn region_stats(&self) -> &[RegionStats] {
+        &self.regions.stats
     }
 
     #[inline(always)]
@@ -172,13 +182,17 @@ impl<'c> Vm<'c> {
 
     #[inline]
     pub(super) fn unwind_frame(&mut self, exiting: CallFrame) {
+        let exiting_depth = self.frames.len() + 1;
         if !self.open_upvalues.is_empty() {
-            self.close_upvalues(exiting.stack_base);
+            self.close_upvalues_range(exiting.stack_base, usize::MAX);
         }
         if exiting.stack_base > 0 {
             self.stack.truncate(exiting.stack_base - 1);
         } else {
             self.stack.clear();
+        }
+        if self.regions.has_active_or_persistent() {
+            self.regions.unwind_to_frame(exiting_depth);
         }
     }
 
@@ -201,6 +215,16 @@ impl<'c> Vm<'c> {
         closure: &Rc<BytecodeClosure>,
         args: &[Value<'static>],
     ) -> Result<Value<'static>, RuntimeError> {
+        if self.cancel.is_some_and(CancellationToken::is_cancelled) {
+            let span = closure
+                .function
+                .chunk
+                .spans
+                .first()
+                .copied()
+                .unwrap_or(Span::new(0, 0));
+            return Err(self.error(span, "Execution cancelled"));
+        }
         if args.len() != closure.function.arity {
             return Err(self.error(
                 Span::new(0, 0),
@@ -231,9 +255,15 @@ impl<'c> Vm<'c> {
         match self.execute_to_depth(target_depth) {
             Ok(val) => Ok(val),
             Err(e) => {
-                self.close_upvalues(stack_base);
+                let exiting_depth = target_depth + 1;
+                if !self.open_upvalues.is_empty() {
+                    self.close_upvalues_range(stack_base, usize::MAX);
+                }
                 self.frames.truncate(target_depth);
                 self.stack.truncate(callee_slot);
+                if self.regions.has_active_or_persistent() {
+                    self.regions.unwind_to_frame(exiting_depth);
+                }
                 Err(e)
             }
         }
@@ -318,14 +348,24 @@ impl<'c> Vm<'c> {
     }
 
     pub(super) fn close_upvalues(&mut self, from_slot: usize) {
+        self.close_upvalues_range(from_slot, usize::MAX);
+    }
+
+    pub(super) fn close_upvalues_range(&mut self, from_slot: usize, end_slot: usize) {
         let stack = &self.stack;
+        let regions = &mut self.regions;
+        let has_regions = regions.has_active();
         self.open_upvalues.retain(|upval| {
             let mut cell = upval.borrow_mut();
             if let Upvalue::Open(slot) = *cell
                 && slot >= from_slot
+                && slot < end_slot
             {
                 let val = stack.get(slot).cloned().unwrap_or(Value::Null);
                 *cell = Upvalue::Closed(val);
+                if has_regions {
+                    regions.convert_stack_to_upval(slot, upval);
+                }
                 return false;
             }
             true

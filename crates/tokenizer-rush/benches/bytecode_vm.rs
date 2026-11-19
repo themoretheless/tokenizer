@@ -1,38 +1,72 @@
 //! Performance benchmark comparing AST interpreter vs Bytecode VM.
 //! Run with: cargo bench -p themoretheless-tokenizer-rush --bench bytecode_vm
+//! On Unix, set RUSH_BENCH_CPU_TIME=1 to exclude scheduler wait time.
 use std::{hint::black_box, time::Instant};
-use themoretheless_tokenizer_rush::{BytecodeProgram, evaluate};
+use themoretheless_tokenizer_rush::{BytecodeProgram, CancellationToken, Program};
+
+#[cfg(unix)]
+fn thread_cpu_time() -> std::time::Duration {
+    let mut time = std::mem::MaybeUninit::<libc::timespec>::uninit();
+    // clock_gettime initializes the entire timespec on success.
+    assert_eq!(
+        unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, time.as_mut_ptr()) },
+        0
+    );
+    let time = unsafe { time.assume_init() };
+    std::time::Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
+}
 
 fn measure<T>(iterations: usize, mut f: impl FnMut() -> T) -> f64 {
     for _ in 0..5 {
         black_box(f());
     }
     let mut samples = Vec::new();
+    #[cfg(unix)]
+    let cpu_time = std::env::var_os("RUSH_BENCH_CPU_TIME").is_some();
     for _ in 0..7 {
         let start = Instant::now();
+        #[cfg(unix)]
+        let cpu_start = cpu_time.then(thread_cpu_time);
         for _ in 0..iterations {
             black_box(f());
         }
-        samples.push(start.elapsed().as_secs_f64() * 1e6 / iterations as f64);
+        let elapsed = start.elapsed();
+        #[cfg(unix)]
+        let elapsed = cpu_start.map_or(elapsed, |start| thread_cpu_time() - start);
+        samples.push(elapsed.as_secs_f64() * 1e6 / iterations as f64);
     }
     samples.sort_by(f64::total_cmp);
     samples[3] // median in microseconds
 }
 
 fn bench_case(name: &str, source: &str, budget: usize, iters: usize) {
-    let ast_ast_time = measure(iters, || {
-        evaluate(source, budget).expect("ast run succeeds")
-    });
+    let ast = Program::compile(source).expect("AST compile succeeds");
+    let bytecode = BytecodeProgram::compile(source).expect("bytecode compile succeeds");
+    let cancel = CancellationToken::default();
+    let run_ast = || ast.run(budget, &cancel, &[]).expect("AST run succeeds");
+    let run_vm = || bytecode.execute(budget).expect("bytecode run succeeds");
+    assert_eq!(run_ast(), run_vm(), "{name}");
 
-    let bc_prog = BytecodeProgram::compile(source).expect("bytecode compile succeeds");
-    let bc_exec_time = measure(iters, || {
-        bc_prog.execute(budget).expect("bytecode run succeeds")
+    let ast_prepare = measure(iters, || Program::compile(black_box(source)).unwrap());
+    let vm_prepare = measure(iters, || {
+        BytecodeProgram::compile(black_box(source)).unwrap()
     });
-
-    let speedup = ast_ast_time / bc_exec_time;
+    let ast_execute = measure(iters, run_ast);
+    let vm_execute = measure(iters, run_vm);
+    let ast_total = measure(iters, || {
+        Program::compile(black_box(source))
+            .unwrap()
+            .run(budget, &cancel, &[])
+            .unwrap()
+    });
+    let vm_total = measure(iters, || {
+        BytecodeProgram::compile(black_box(source))
+            .unwrap()
+            .execute(budget)
+            .unwrap()
+    });
     println!(
-        "{:<35} | AST: {:>9.2} µs | Bytecode VM: {:>9.2} µs | Speedup: {:>6.2}x",
-        name, ast_ast_time, bc_exec_time, speedup
+        "{name}\t{ast_prepare:.3}\t{vm_prepare:.3}\t{ast_execute:.3}\t{vm_execute:.3}\t{ast_total:.3}\t{vm_total:.3}",
     );
 }
 
@@ -43,8 +77,13 @@ fn main() {
         );
     }
 
-    println!("\n=== Rush Performance: AST Interpreter vs Bytecode VM ===");
-    println!("{:-<95}", "");
+    println!(
+        "scenario\tAST prepare (µs)\tVM prepare (µs)\tAST execute (µs)\tVM execute (µs)\tAST total (µs)\tVM total (µs)"
+    );
+    bench_case("Addition", "2 + 3", 1000, 2000);
+    // Larger bytecode, but a short execution path through it.
+    let cold_branch = format!("if false {{ {} }}; 42", "2 + 3; ".repeat(256));
+    bench_case("Cold branch (256 expressions)", &cold_branch, 500_000, 100);
 
     // 1. Recursive Fibonacci
     let fib_source = r#"
@@ -114,6 +153,4 @@ for i in range_iter(1, 1000) {
 acc
 "#;
     bench_case("5. Arithmetic locals calculation", math_source, 500_000, 50);
-
-    println!("{:-<95}\n", "");
 }

@@ -92,6 +92,36 @@ impl<'s> Runtime<'_, 's> {
                     }
                 }
             }
+            ExprKind::Region {
+                name,
+                strict,
+                budget,
+                body,
+            } => {
+                let budget = self.eval_region_budget(budget.as_deref(), environment)?;
+                let scope = environment
+                    .try_clone()
+                    .map_err(|e| self.environment_error(span, e))?;
+                let region = self.enter_region_full(
+                    budget,
+                    name.as_ref().map(|name| name.text),
+                    *strict,
+                    false,
+                );
+                let result = self.scoped_statements(&body.stmts, scope);
+                let is_early_return = result.is_err() && self.early_return.is_some();
+                let exit = self.exit_region(region, span);
+                if is_early_return {
+                    if let Err(err) = exit {
+                        self.early_return.take();
+                        return Err(err);
+                    }
+                    return result.map(|(v, _)| v);
+                }
+                let (value, _) = result?;
+                exit?;
+                Ok(value)
+            }
 
             ExprKind::String(text) => {
                 self.charge(text.len().saturating_sub(2), span)?;

@@ -852,6 +852,9 @@ impl<'c> Vm<'c> {
                             if !self.open_upvalues.is_empty() {
                                 self.close_upvalues(stack_base);
                             }
+                            if self.regions.has_active_or_persistent() {
+                                self.regions.sweep_exiting_frame(self.frames.len());
+                            }
                             let arg_start = callee_idx + 1;
                             for i in 0..arg_count {
                                 self.stack.swap(stack_base + i, arg_start + i);
@@ -1268,13 +1271,99 @@ impl<'c> Vm<'c> {
                     }
                     self.stack[local_idx] = Value::BytecodeIterator(Rc::new(RefCell::new(iter)));
                 }
-                Opcode::AssertRegionBudget => {
-                    let val = self.stack.pop().unwrap();
-                    if val.as_usize_index().is_none() {
-                        return Err(
-                            self.error(span, "Region budget must be a non-negative integer")
-                        );
+                Opcode::EnterRegion { name_idx, flags } => {
+                    let budget = if (flags & 1) != 0 {
+                        let val = self.stack.pop().unwrap();
+                        let Some(b) = val.as_usize_index() else {
+                            return Err(
+                                self.error(span, "Region budget must be a non-negative integer")
+                            );
+                        };
+                        Some(b)
+                    } else {
+                        None
+                    };
+                    let name = if name_idx == u32::MAX {
+                        None
+                    } else {
+                        Some(
+                            Self::const_str(
+                                &self.frames[frame_idx].closure.function.chunk,
+                                name_idx,
+                            )
+                            .to_owned(),
+                        )
+                    };
+                    let strict = (flags & 2) != 0;
+                    self.regions.enter_region(
+                        budget,
+                        name.as_deref(),
+                        strict,
+                        false,
+                        self.frames.len(),
+                    );
+                }
+                Opcode::ExitRegion => {
+                    self.regions
+                        .exit_region(None)
+                        .map_err(|msg| self.error(span, msg))?;
+                }
+                Opcode::TrackMutLocal(slot) => {
+                    if self.regions.has_active() {
+                        let abs_slot = self.frames[frame_idx].stack_base + slot as usize;
+                        self.regions
+                            .track_local(self.frames.len(), abs_slot)
+                            .map_err(|msg| self.error(span, msg))?;
                     }
+                }
+                Opcode::CloseScope {
+                    first_slot,
+                    end_slot,
+                } => {
+                    let stack_base = self.frames[frame_idx].stack_base;
+                    let start = stack_base + first_slot as usize;
+                    let end = stack_base + end_slot as usize;
+                    if !self.open_upvalues.is_empty() {
+                        self.close_upvalues_range(start, end);
+                    }
+                    let end_clamped = end.min(self.stack.len());
+                    if start < end_clamped {
+                        for slot in &mut self.stack[start..end_clamped] {
+                            *slot = Value::Null;
+                        }
+                    }
+                    if self.regions.has_active_or_persistent() {
+                        self.regions.sweep_scope(self.frames.len(), start, end);
+                    }
+                }
+                Opcode::MoveLocal(slot) => {
+                    let abs_slot = self.frames[frame_idx].stack_base + slot as usize;
+                    let previous = if abs_slot < self.stack.len() {
+                        std::mem::replace(&mut self.stack[abs_slot], Value::Null)
+                    } else {
+                        Value::Null
+                    };
+                    self.regions.bless_vm_value(&previous, &self.stack);
+                    self.stack.push(previous);
+                }
+                Opcode::MoveUpvalue(idx) => {
+                    let cell = self.frames[frame_idx].closure.upvalues[idx as usize].clone();
+                    let previous = {
+                        let mut borrow = cell.borrow_mut();
+                        match &mut *borrow {
+                            Upvalue::Open(s) => {
+                                let slot = *s;
+                                if slot < self.stack.len() {
+                                    std::mem::replace(&mut self.stack[slot], Value::Null)
+                                } else {
+                                    Value::Null
+                                }
+                            }
+                            Upvalue::Closed(v) => std::mem::replace(v, Value::Null),
+                        }
+                    };
+                    self.regions.bless_vm_value(&previous, &self.stack);
+                    self.stack.push(previous);
                 }
                 Opcode::IterNext {
                     iter_slot,
@@ -1305,7 +1394,20 @@ impl<'c> Vm<'c> {
                         }
                         val @ Value::Variant("None" | "Err", _) => {
                             let exiting = self.frames.pop().unwrap();
-                            self.unwind_frame(exiting);
+                            let exiting_depth = self.frames.len() + 1;
+                            if !self.open_upvalues.is_empty() {
+                                self.close_upvalues_range(exiting.stack_base, usize::MAX);
+                            }
+                            if exiting.stack_base > 0 {
+                                self.stack.truncate(exiting.stack_base - 1);
+                            } else {
+                                self.stack.clear();
+                            }
+                            if self.regions.has_active_or_persistent() {
+                                self.regions
+                                    .exit_regions_to_frame(exiting_depth)
+                                    .map_err(|msg| self.error(span, msg))?;
+                            }
                             if self.frames.len() == target_depth {
                                 return Ok(val);
                             }

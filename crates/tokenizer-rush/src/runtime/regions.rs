@@ -1,5 +1,7 @@
-use super::{Environment, Result, Runtime};
+use super::{Binding, Environment, Result, Runtime, SequenceSource, Value, memory};
 use crate::Expr;
+use std::collections::HashSet;
+use std::rc::Rc;
 use themoretheless_tokenizer_core::Span;
 
 /// One active region (arena) frame.
@@ -14,6 +16,13 @@ pub(super) struct RegionFrame {
     pub(super) stats: usize,
     /// True while this frame backs an active persistent arena run.
     pub(super) persistent: bool,
+    /// True for `strict region` blocks and `arena(..., strict = true)`.
+    pub(super) strict: bool,
+    /// True for `arena_run` frames (controls strict escape error message).
+    pub(super) is_arena: bool,
+    /// Cell slots explicitly blessed by `promote(...)` or `move(...)` while
+    /// this strict frame was active.
+    pub(super) blessed: HashSet<usize>,
     /// Cell slots stamped to this region, so exit sweeps only its own cells
     /// instead of scanning the whole table. May hold stale entries (freed or
     /// re-stamped slots); the exit pass re-checks the stamp and liveness.
@@ -89,10 +98,12 @@ impl<'s> Runtime<'_, 's> {
 
     /// Mint a region frame without pushing it: allocates the id, resolves the
     /// stats entry for the name and counts one entry.
-    pub(super) fn mint_region_frame(
+    pub(super) fn mint_region_frame_full(
         &mut self,
         budget: Option<usize>,
         name: Option<&str>,
+        strict: bool,
+        is_arena: bool,
     ) -> RegionFrame {
         self.next_region = self.next_region.checked_add(1).expect("region id overflow");
         let stats = match self
@@ -117,17 +128,121 @@ impl<'s> Runtime<'_, 's> {
             live: 0,
             stats,
             persistent: false,
+            strict,
+            is_arena,
+            blessed: HashSet::new(),
             cells: Vec::new(),
         }
     }
 
+    pub(super) fn mint_region_frame(
+        &mut self,
+        budget: Option<usize>,
+        name: Option<&str>,
+    ) -> RegionFrame {
+        self.mint_region_frame_full(budget, name, false, false)
+    }
+
     /// Open a region (arena) frame; cells allocated inside get its stamp and
     /// count towards the metrics of its name.
-    pub(super) fn enter_region(&mut self, budget: Option<usize>, name: Option<&str>) -> u32 {
-        let frame = self.mint_region_frame(budget, name);
+    pub(super) fn enter_region_full(
+        &mut self,
+        budget: Option<usize>,
+        name: Option<&str>,
+        strict: bool,
+        is_arena: bool,
+    ) -> u32 {
+        let frame = self.mint_region_frame_full(budget, name, strict, is_arena);
         let region = frame.id;
         self.region_stack.push(frame);
         region
+    }
+
+    pub(super) fn enter_region(&mut self, budget: Option<usize>, name: Option<&str>) -> u32 {
+        self.enter_region_full(budget, name, false, false)
+    }
+
+    /// Mark any runtime cells reachable through `value` as explicitly allowed to
+    /// escape currently active `strict` regions via `promote(...)` or `move(...)`.
+    pub(super) fn bless_promoted_value(&mut self, value: &Value<'s>) {
+        if !self.region_stack.iter().any(|frame| frame.strict) {
+            return;
+        }
+        enum Work<'a, 's> {
+            Val(&'a Value<'s>),
+            Env(&'a memory::Shared<Environment<'s>>),
+        }
+        let mut visited: HashSet<(u8, usize)> = HashSet::new();
+        let mut stack = vec![Work::Val(value)];
+        while let Some(item) = stack.pop() {
+            match item {
+                Work::Val(val) => match val {
+                    Value::Function(function) => {
+                        if visited.insert((1, Rc::as_ptr(function) as usize)) {
+                            stack.push(Work::Env(&function.environment));
+                            for sib in function.siblings.iter() {
+                                stack.push(Work::Env(&sib.environment));
+                            }
+                        }
+                    }
+                    Value::Sequence(sequence) => {
+                        if visited.insert((2, Rc::as_ptr(sequence) as usize)) {
+                            if let SequenceSource::List(values) = &sequence.source {
+                                for v in values.iter() {
+                                    stack.push(Work::Val(v));
+                                }
+                            }
+                            if let Some(stages) = &sequence.stages.0 {
+                                for stage in stages.iter() {
+                                    stack.push(Work::Val(&stage.callback));
+                                }
+                            }
+                        }
+                    }
+                    Value::List(items) | Value::Tuple(items) | Value::Variant(_, items) => {
+                        for item in items {
+                            stack.push(Work::Val(item));
+                        }
+                    }
+                    Value::UserData(data) => {
+                        for item in &data.values {
+                            stack.push(Work::Val(item));
+                        }
+                    }
+                    Value::Record(fields) => {
+                        for item in fields.values_slice() {
+                            stack.push(Work::Val(item));
+                        }
+                    }
+                    _ => {}
+                },
+                Work::Env(env) => {
+                    if !visited.insert((3, memory::Shared::as_ptr(env) as usize)) {
+                        continue;
+                    }
+                    if let Some(parent) = &env.parent {
+                        stack.push(Work::Env(parent));
+                    }
+                    for (_, binding) in env.bindings.iter() {
+                        match binding {
+                            Binding::Value(v) => stack.push(Work::Val(v)),
+                            Binding::Cell(id) => {
+                                if id.released.as_ptr() == Rc::as_ptr(&self.released_cells)
+                                    && visited.insert((4, id.index))
+                                {
+                                    for frame in self.region_stack.iter_mut() {
+                                        if frame.strict {
+                                            frame.blessed.insert(id.index);
+                                        }
+                                    }
+                                    stack.push(Work::Val(&self.cells[id.index].0));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Close a region frame: cells no longer referenced after scope release
@@ -139,6 +254,7 @@ impl<'s> Runtime<'_, 's> {
         self.reclaim_cells();
         let parent = self.region_stack.last().map_or(0, |frame| frame.id);
         let mut promoted = 0_usize;
+        let mut unblessed_promoted = 0_usize;
         for index in frame.cells {
             // Stale entries belong to freed or re-stamped slots.
             if self.cell_regions.get(index).copied() != Some(region) {
@@ -147,6 +263,9 @@ impl<'s> Runtime<'_, 's> {
             if let Some(id) = self.cell_ids[index].upgrade() {
                 self.cell_regions[index] = parent;
                 promoted += 1;
+                if !frame.blessed.contains(&index) {
+                    unblessed_promoted += 1;
+                }
                 if let Some(parent_frame) = self.region_stack.last_mut() {
                     parent_frame.cells.push(index);
                 }
@@ -154,16 +273,26 @@ impl<'s> Runtime<'_, 's> {
             }
         }
         self.region_stats[frame.stats].promoted += promoted as u64;
-        if promoted > 0
+        let parent_overflow = if promoted > 0
             && let Some(parent_frame) = self.region_stack.last_mut()
         {
             parent_frame.live += promoted;
-            if parent_frame
+            parent_frame
                 .budget
                 .is_some_and(|budget| parent_frame.live > budget)
-            {
-                return self.error(span, "Region cell budget exceeded");
-            }
+        } else {
+            false
+        };
+        if frame.strict && unblessed_promoted > 0 {
+            let message = if frame.is_arena {
+                "Strict arena cells escaped the run; drop or move() them explicitly"
+            } else {
+                "Value allocated in a strict region escapes; wrap it in promote(...) to allow the escape"
+            };
+            return self.error(span, message);
+        }
+        if parent_overflow {
+            return self.error(span, "Region cell budget exceeded");
         }
         Ok(promoted)
     }

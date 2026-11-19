@@ -109,6 +109,7 @@ impl<'s> Compiler<'s> {
         match &stmt.kind {
             StmtKind::Declaration {
                 name,
+                constant,
                 value,
                 ty,
                 constraint,
@@ -118,10 +119,19 @@ impl<'s> Compiler<'s> {
                 if ty.as_ref().is_some_and(type_annotation_has_int) {
                     self.current().chunk.emit(Opcode::CoerceInt, stmt.span);
                 }
-                let slot = self.current().declare_local(name.text);
+                let slot = if *constant {
+                    self.current().declare_local(name.text)
+                } else {
+                    self.current().declare_mut_local(name.text)
+                };
                 self.current()
                     .chunk
                     .emit(Opcode::StoreLocal(slot), stmt.span);
+                if !*constant {
+                    self.current()
+                        .chunk
+                        .emit(Opcode::TrackMutLocal(slot), stmt.span);
+                }
                 if let Some(constraint) = constraint {
                     self.compile_expr(constraint)?;
                     let msg_idx = self.current().chunk.add_constant(Value::String(format!(
@@ -133,7 +143,7 @@ impl<'s> Compiler<'s> {
                         .emit(Opcode::AssertWhere(msg_idx), constraint.span);
                 }
                 if keep_result {
-                    self.current().chunk.emit(Opcode::Null, stmt.span);
+                    self.current().chunk.emit(Opcode::GetLocal(slot), stmt.span);
                 }
             }
             StmtKind::Function { .. } => {
@@ -146,12 +156,16 @@ impl<'s> Compiler<'s> {
             } => {
                 self.compile_expr(condition)?;
                 let false_jump = self.current().chunk.emit(Opcode::JumpIfFalse(0), stmt.span);
+                self.current().push_scope();
                 self.compile_block(&then_block.stmts, keep_result)?;
+                self.current().pop_scope(then_block.span);
                 let end_jump = self.current().chunk.emit(Opcode::Jump(0), stmt.span);
                 let then_len = self.current().chunk.code.len();
                 self.current().chunk.patch_jump(false_jump, then_len);
                 if let Some(else_b) = else_block {
+                    self.current().push_scope();
                     self.compile_block(&else_b.stmts, keep_result)?;
+                    self.current().pop_scope(else_b.span);
                 } else if keep_result {
                     self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
@@ -173,7 +187,7 @@ impl<'s> Compiler<'s> {
                 let mut fail_jumps = Vec::new();
                 self.compile_pattern_match(pattern, val_slot, &mut fail_jumps)?;
                 self.compile_block(&then_block.stmts, keep_result)?;
-                self.current().pop_scope();
+                self.current().pop_scope(then_block.span);
                 let end_jump = self.current().chunk.emit(Opcode::Jump(0), stmt.span);
                 let else_target = self.current().chunk.code.len();
                 for fj in fail_jumps {
@@ -182,7 +196,7 @@ impl<'s> Compiler<'s> {
                 if let Some(else_b) = else_block {
                     self.current().push_scope();
                     self.compile_block(&else_b.stmts, keep_result)?;
-                    self.current().pop_scope();
+                    self.current().pop_scope(else_b.span);
                 } else if keep_result {
                     self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
@@ -193,11 +207,17 @@ impl<'s> Compiler<'s> {
                 let start_ip = self.current().chunk.code.len();
                 self.compile_expr(condition)?;
                 let exit_jump = self.current().chunk.emit(Opcode::JumpIfFalse(0), stmt.span);
+                let scope_depth = self.current_ref().scope_depth;
+                let region_depth = self.current_ref().region_scopes.len();
                 self.current().loops.push(LoopContext {
                     start_ip,
                     break_jumps: Vec::new(),
+                    scope_depth,
+                    region_depth,
                 });
+                self.current().push_scope();
                 self.compile_block(&body.stmts, false)?;
+                self.current().pop_scope(body.span);
                 self.current().chunk.emit(Opcode::Jump(start_ip), stmt.span);
                 let loop_ctx = self.current().loops.pop().unwrap();
                 let exit_target = self.current().chunk.code.len();
@@ -227,9 +247,13 @@ impl<'s> Compiler<'s> {
                     },
                     stmt.span,
                 );
+                let scope_depth = self.current_ref().scope_depth;
+                let region_depth = self.current_ref().region_scopes.len();
                 self.current().loops.push(LoopContext {
                     start_ip,
                     break_jumps: Vec::new(),
+                    scope_depth,
+                    region_depth,
                 });
                 self.current().push_scope();
                 let binding_slot = self.current().declare_local(binding.text);
@@ -237,7 +261,7 @@ impl<'s> Compiler<'s> {
                     .chunk
                     .emit(Opcode::StoreLocal(binding_slot), binding.span);
                 self.compile_block(&body.stmts, false)?;
-                self.current().pop_scope();
+                self.current().pop_scope(body.span);
                 self.current().chunk.emit(Opcode::Jump(start_ip), stmt.span);
                 let loop_ctx = self.current().loops.pop().unwrap();
                 let exit_target = self.current().chunk.code.len();
@@ -250,9 +274,12 @@ impl<'s> Compiler<'s> {
                 }
             }
             StmtKind::Break => {
-                if self.current().loops.is_empty() {
+                let Some(loop_ctx) = self.current_ref().loops.last() else {
                     return Err(self.error(stmt.span, "break outside of loop"));
-                }
+                };
+                let base_scope_idx = loop_ctx.scope_depth as usize + 1;
+                let region_count = self.current_ref().region_scopes.len() - loop_ctx.region_depth;
+                self.emit_unwind_scopes_and_regions(base_scope_idx, region_count, stmt.span);
                 let jmp = self.current().chunk.emit(Opcode::Jump(0), stmt.span);
                 self.current()
                     .loops
@@ -265,18 +292,24 @@ impl<'s> Compiler<'s> {
                 }
             }
             StmtKind::Continue => {
-                let Some(target) = self.current().loops.last().map(|l| l.start_ip) else {
+                let Some(loop_ctx) = self.current_ref().loops.last() else {
                     return Err(self.error(stmt.span, "continue outside of loop"));
                 };
+                let target = loop_ctx.start_ip;
+                let base_scope_idx = loop_ctx.scope_depth as usize + 1;
+                let region_count = self.current_ref().region_scopes.len() - loop_ctx.region_depth;
+                self.emit_unwind_scopes_and_regions(base_scope_idx, region_count, stmt.span);
                 self.current().chunk.emit(Opcode::Jump(target), stmt.span);
                 if keep_result {
                     self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
             }
             StmtKind::Return(value) => {
+                let region_count = self.current_ref().region_scopes.len();
                 if let Some(val) = value {
                     self.compile_expr(val)?;
-                    if matches!(val.kind, ExprKind::Call { .. })
+                    if region_count == 0
+                        && matches!(val.kind, ExprKind::Call { .. })
                         && let Some(Opcode::Call(argc)) = self.current().chunk.code.last().copied()
                     {
                         *self.current().chunk.code.last_mut().expect("present") =
@@ -287,6 +320,10 @@ impl<'s> Compiler<'s> {
                     }
                 } else {
                     self.current().chunk.emit(Opcode::Null, stmt.span);
+                }
+                if region_count > 0 {
+                    let base_scope_idx = self.current_ref().region_scopes[0] as usize;
+                    self.emit_unwind_scopes_and_regions(base_scope_idx, region_count, stmt.span);
                 }
                 self.current().chunk.emit(Opcode::Return, stmt.span);
             }
@@ -329,14 +366,14 @@ impl<'s> Compiler<'s> {
                     .map(|l| (l.name, l.slot))
                     .collect();
                 let matched_jump = self.current().chunk.emit(Opcode::Jump(0), stmt.span);
-                self.current().pop_scope();
+                self.current().pop_scope(stmt.span);
                 let else_target = self.current().chunk.code.len();
                 for fj in fail_jumps {
                     self.current().chunk.patch_jump(fj, else_target);
                 }
                 self.current().push_scope();
                 self.compile_block(&else_block.stmts, false)?;
-                self.current().pop_scope();
+                self.current().pop_scope(else_block.span);
                 self.current()
                     .chunk
                     .emit(Opcode::MatchError, else_block.span);
@@ -355,11 +392,13 @@ impl<'s> Compiler<'s> {
                         .find(|l| l.name == name)
                     {
                         existing.slot = slot;
+                        existing.mutable = false;
                     } else {
                         self.current().locals.push(super::Local {
                             name,
                             depth: cur_depth,
                             slot,
+                            mutable: false,
                         });
                     }
                 }
@@ -374,16 +413,20 @@ impl<'s> Compiler<'s> {
                     self.current().chunk.emit(Opcode::Null, stmt.span);
                 }
             }
-            StmtKind::Region { budget, body, .. } => {
-                if let Some(budget_expr) = budget {
-                    self.compile_expr(budget_expr)?;
-                    self.current()
-                        .chunk
-                        .emit(Opcode::AssertRegionBudget, budget_expr.span);
-                }
-                self.current().push_scope();
-                self.compile_block(&body.stmts, keep_result)?;
-                self.current().pop_scope();
+            StmtKind::Region {
+                name,
+                strict,
+                budget,
+                body,
+            } => {
+                self.compile_region(
+                    name.as_ref(),
+                    *strict,
+                    budget.as_ref(),
+                    body,
+                    keep_result,
+                    stmt.span,
+                )?;
             }
             StmtKind::Show(expr) | StmtKind::Expr(expr) => {
                 self.compile_expr(expr)?;

@@ -373,6 +373,7 @@ impl<'s> Runtime<'_, 's> {
                 if log_undo {
                     self.commit_cell_undo(index, previous.clone());
                 }
+                self.bless_promoted_value(&previous);
                 Ok(previous)
             }
         }

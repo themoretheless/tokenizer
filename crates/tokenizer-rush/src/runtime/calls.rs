@@ -2,7 +2,7 @@ use super::stmt::Flow;
 use super::{
     Builtin, CallFrame, Closure, Environment, FunctionBody, RecordMap, RecordShape, RegionStats,
     Result, Runtime, RuntimeError, SequenceStage, StageKind, UserData, Value, ValueType,
-    format_value_for_display, json, memory,
+    builtins::range_bounds, format_value_for_display, json, memory,
 };
 use crate::{Expr, ExprKind, Name};
 use std::borrow::Cow;
@@ -539,10 +539,13 @@ impl<'s> Runtime<'_, 's> {
             }
 
             // Explicit region escape hatch: identity at runtime, the promotion
-            // itself is automatic; analysis recognizes the wrapper as intent.
+            // itself is automatic; analysis recognizes the wrapper as intent
+            // and active strict regions bless any cells reachable through it.
             if builtin == Builtin::Promote {
                 let mut arguments = arguments.into_owned();
-                return Ok(arguments.swap_remove(0));
+                let value = arguments.swap_remove(0);
+                self.bless_promoted_value(&value);
+                return Ok(value);
             }
 
             if matches!(builtin, Builtin::TaskAll | Builtin::TaskRace) {
@@ -661,7 +664,7 @@ impl<'s> Runtime<'_, 's> {
                             if self.cell_regions.get(cell).copied() == Some(frame.id) {
                                 self.cell_regions[cell] = 0;
                                 if self.cell_ids[cell].upgrade().is_some() {
-                                    self.cells[cell] = (Value::Null, None);
+                                    self.cells[cell].0 = Value::Null;
                                 }
                             }
                         }
@@ -715,7 +718,11 @@ impl<'s> Runtime<'_, 's> {
                         };
                     frame.budget = budget;
                     frame.persistent = true;
-                    let parked_live = frame.live;
+                    frame.strict = strict;
+                    frame.is_arena = true;
+                    frame.blessed.clear();
+                    let parked_set: std::collections::HashSet<usize> =
+                        frame.cells.iter().copied().collect();
                     let region = frame.id;
                     self.region_stack.push(frame);
                     self.skip_call_region = true;
@@ -732,8 +739,14 @@ impl<'s> Runtime<'_, 's> {
                     });
                     frame.live = frame.cells.len();
                     let overflow = frame.budget.is_some_and(|budget| frame.live > budget);
-                    let leaked = strict && frame.live > parked_live;
+                    let leaked = strict
+                        && frame
+                            .cells
+                            .iter()
+                            .any(|idx| !parked_set.contains(idx) && !frame.blessed.contains(idx));
+                    frame.blessed.clear();
                     self.persistent_regions.push((name.clone(), frame));
+                    let value = result?;
                     if overflow {
                         return self.error(span, "Region cell budget exceeded");
                     }
@@ -743,23 +756,19 @@ impl<'s> Runtime<'_, 's> {
                             "Strict arena retained new cells; drop them before the run ends",
                         );
                     }
-                    return result;
+                    return Ok(value);
                 }
-                let region = self.enter_region(budget, Some(name));
+                let region = self.enter_region_full(budget, Some(name), strict, true);
                 // The callback's own implicit call region would intercept its
                 // scratch cells before the arena sees them; the arena frame
                 // replaces it for exactly this one call.
                 self.skip_call_region = true;
                 let result = self.call(callback.clone(), Cow::Borrowed(&[]), span);
                 self.skip_call_region = false;
-                let promoted = self.exit_region(region, span)?;
-                if strict && promoted > 0 {
-                    return self.error(
-                        span,
-                        "Strict arena cells escaped the run; drop or move() them explicitly",
-                    );
-                }
-                return result;
+                let exit = self.exit_region(region, span);
+                let value = result?;
+                exit?;
+                return Ok(value);
             }
 
             if matches!(
@@ -944,29 +953,10 @@ impl<'s> Runtime<'_, 's> {
                 return Ok(Value::List(values));
             }
             if matches!(builtin, Builtin::Range | Builtin::RangeIter) {
-                let (start, end, step) = match arguments.as_ref() {
-                    [s, e] if s.as_f64().is_some() && e.as_f64().is_some() => {
-                        (s.as_f64().unwrap(), e.as_f64().unwrap(), 1.0)
-                    }
-                    [s, e, st]
-                        if s.as_f64().is_some()
-                            && e.as_f64().is_some()
-                            && st.as_f64().is_some() =>
-                    {
-                        (
-                            s.as_f64().unwrap(),
-                            e.as_f64().unwrap(),
-                            st.as_f64().unwrap(),
-                        )
-                    }
-                    _ => return self.error(span, "range expects start, end and optional step"),
+                let (start, end, step) = match range_bounds(arguments.as_ref()) {
+                    Ok(bounds) => bounds,
+                    Err(message) => return self.error(span, message),
                 };
-                if step == 0.0 {
-                    return self.error(span, "Range step must be nonzero");
-                }
-                if !start.is_finite() || !end.is_finite() || !step.is_finite() {
-                    return self.error(span, "Range arguments must be finite");
-                }
                 if builtin == Builtin::RangeIter {
                     return Ok(Value::Range { start, end, step });
                 }

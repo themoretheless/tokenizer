@@ -25,10 +25,60 @@ fn region_executes_body_and_yields_last_value() {
 }
 
 #[test]
-fn region_is_a_statement_not_an_expression() {
-    assert!(!parse("let x = region { 1 }").is_valid());
+fn region_works_as_both_statement_and_expression() {
+    // Region blocks work in expression position (including strict and budgeted forms).
+    assert_eq!(
+        evaluate("let x = region scratch (64) { mut t = 40; t + 2 }\nx", 400).unwrap(),
+        Value::Number(42.0)
+    );
+    assert_eq!(
+        evaluate("let y = strict region (8) { mut t = 10; t * 2 }\ny", 400).unwrap(),
+        Value::Number(20.0)
+    );
+    assert_eq!(
+        evaluate("let sum = region { 20 } + region { 22 }\nsum", 400).unwrap(),
+        Value::Number(42.0)
+    );
+    assert_eq!(
+        evaluate("(region { 20 } + region { 22 })", 400).unwrap(),
+        Value::Number(42.0)
+    );
+    let formatted = format_source("let x=strict region s (8) { mut t=1\nt }").unwrap();
+    assert_eq!(
+        formatted,
+        "let x = strict region s (8) {\n    mut t = 1;\n    t;\n};\n"
+    );
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+
+    // Strict region expressions reject escaping closures unless promote()d.
+    let escape = analyze("let f = strict region { mut n = 1; () => n }");
+    assert!(!escape.is_valid(), "{:?}", escape.diagnostics);
+    assert!(
+        escape.diagnostics.iter().any(|d| d.code == "region-escape"),
+        "{:?}",
+        escape.diagnostics
+    );
+    let promoted = analyze("let f = strict region { mut n = 1; promote(() => n) }");
+    assert!(
+        promoted.is_valid() && promoted.diagnostics.is_empty(),
+        "{:?}",
+        promoted.diagnostics
+    );
+
+    // `?` inside an expression-position region propagates cleanly to enclosing try/fn.
+    assert_eq!(
+        evaluate("try { let v = region { Some(40)? + 2 }; Some(v) }", 400).unwrap(),
+        Value::Variant("Some", vec![Value::Number(42.0)])
+    );
+    assert_eq!(
+        evaluate("try { let v = region { None()? + 2 }; Some(v) }", 400).unwrap(),
+        Value::Variant("None", vec![])
+    );
+
     assert!(!parse("region").is_valid());
     assert!(!parse("region scratch").is_valid());
+    assert!(!parse("let x = region").is_valid());
+    assert!(!parse("let x = region scratch").is_valid());
     assert!(analyze("region scratch { let t = 1 }").is_valid());
 }
 
@@ -1001,4 +1051,311 @@ fn arena_run_callback_escapes_lint_statically() {
         "{:?}",
         result.diagnostics
     );
+}
+
+#[test]
+fn strict_region_enforced_at_runtime_including_indirect_escapes() {
+    // Indirect escape through a helper function bypasses local assignment lint,
+    // so runtime strict-region enforcement catches it unless blessed by promote().
+    let indirect_fail = evaluate(
+        "mut keep = () => 0\nfn leak(cb) { keep = cb }\nstrict region r { mut n = 1\nleak(() => n) }",
+        400,
+    )
+    .unwrap_err();
+    assert!(
+        indirect_fail.message.contains("strict region"),
+        "{indirect_fail:?}"
+    );
+    assert_eq!(
+        evaluate(
+            "mut keep = () => 0\nfn leak(cb) { keep = cb }\nstrict region r { mut n = 41\nleak(promote(() => n + 1)) }\nkeep()",
+            400,
+        )
+        .unwrap(),
+        Value::Number(42.0)
+    );
+    // Ephemeral closures inside a strict region do not promote and need no promote().
+    assert_eq!(
+        evaluate(
+            "strict region r { mut tmp = 10\nmap([1, 2], x => x + tmp) }",
+            400,
+        )
+        .unwrap(),
+        Value::List(vec![Value::Number(11.0), Value::Number(12.0)])
+    );
+    // Non-final local closures inside a strict region die before region exit.
+    assert_eq!(
+        evaluate("strict region r { mut n = 1\nlet f = () => n }\n42", 400).unwrap(),
+        Value::Number(42.0)
+    );
+    // Strict region inside a coroutine also enforces runtime escape checks across yield.
+    let program = Program::compile(
+        "mut keep = () => 0\nfn leak(cb) { keep = cb }\nfn work() { strict region r { mut t = 1\nyield t\nleak(() => t) } }",
+    )
+    .unwrap();
+    let token = CancellationToken::default();
+    let mut script = program
+        .instantiate(ExecutionLimits::new(10_000), &token, &[], &[], &[], &[])
+        .unwrap();
+    let task = script
+        .spawn_coroutine("work", &[], ExecutionLimits::new(10_000))
+        .unwrap();
+    assert_eq!(
+        script
+            .resume_coroutine(task, ExecutionLimits::new(10_000))
+            .unwrap(),
+        themoretheless_tokenizer_rush::CoroutineState::Yielded(Value::Number(1.0))
+    );
+    let err = script
+        .resume_coroutine(task, ExecutionLimits::new(10_000))
+        .unwrap_err();
+    assert!(err.message.contains("strict region"), "{err:?}");
+}
+
+#[test]
+fn strict_arena_const_aliases_lint_and_reset_preserves_contracts() {
+    // Const aliases preserve strictness for static arena-escape diagnostics.
+    for source in [
+        "const a = arena(\"s\", null, false, true)\nmut keep = () => 0\nfn body() { mut n = 1\nkeep = () => n }\narena_run(a, body)",
+        "const a = arena(\"s\", null, false, true)\nconst b = a\nmut keep = () => 0\nfn body() { mut n = 1\nkeep = () => n }\narena_run(b, body)",
+    ] {
+        let result = analyze(source);
+        assert!(!result.is_valid(), "accepted: {source}");
+        assert!(
+            result.diagnostics.iter().any(|d| d.code == "arena-escape"),
+            "{source}: {:?}",
+            result.diagnostics
+        );
+    }
+
+    // arena_reset empties the cell value to null while keeping its ValueType contract.
+    assert_eq!(
+        evaluate(
+            "const a = arena(\"cache\", null, true)\nmut set_ok = () => 0\nfn first() { mut n: int = 7\nset_ok = () => n = 10 }\narena_run(a, first)\narena_reset(a)\nset_ok()",
+            1000,
+        )
+        .unwrap(),
+        Value::Int(10)
+    );
+    assert!(
+        evaluate(
+            "const a = arena(\"cache\", null, true)\nmut set_bad = () => 0\nfn first() { mut n: int = 7\nset_bad = () => n = 1.5 }\narena_run(a, first)\narena_reset(a)\nset_bad()",
+            1000,
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn move_analysis_is_flow_sensitive() {
+    for valid in [
+        // Moving in a diverging branch leaves the binding intact after `if`.
+        "fn f(c: bool) { mut x = 10\nif c { let y = move(x)\nreturn y }\nreturn x }\nf(false)",
+        // Revival on both branches restores availability after `if`.
+        "mut x = 10\nmut y = move(x)\nif true { x = 1 } else { x = 2 }\nx + y",
+        // Revival inside a loop before the next iteration.
+        "mut a = 1\nfor i in range_iter(0, 3) { mut b = move(a)\na = b + 1 }\na",
+        // Moving right before breaking does not affect a next iteration.
+        "mut a = 1\nfor i in range_iter(0, 3) { mut b = move(a)\nbreak }\n1",
+        // Uncalled function bodies do not taint the enclosing scope.
+        "mut a = 1\nfn taker() { return move(a) }\na",
+        // Moves inside a transactional `try { ... }` block that can roll back remain valid afterward.
+        "mut x = [1]\nlet r = try { let t = move(x)\nlet fail: Option[int] = None()\nSome(fail?) }\nx = x\nx",
+    ] {
+        let result = analyze(valid);
+        assert!(
+            result.is_valid() && result.diagnostics.is_empty(),
+            "{valid}: {:?}",
+            result.diagnostics
+        );
+    }
+
+    for invalid in [
+        // Moved in one non-diverging branch, then read after `if`.
+        "mut x = 10\nif true { mut y = move(x) }\nx",
+        // RHS of reassignment reads moved `a` before `a` is revived.
+        "mut a = 1\nmut b = move(a)\na = a + 1",
+        // Field write reads moved root binding.
+        "mut r = { x: 1 }\nmut c = move(r)\nr.x = 2",
+        // Moved inside loop without revival before next iteration.
+        "mut a = 1\nfor i in range_iter(0, 3) { mut b = move(a) }",
+        // Moved right before `break`, then read after loop.
+        "mut a = 1\nfor i in range_iter(0, 3) { mut b = move(a)\nbreak }\na",
+        // Moves inside an infallible `try { ... Some(...) }` stay moved after the block.
+        "mut x = [1]\nlet r = try { let t = move(x)\nSome(t) }\nx",
+        // Reading a moved binding inside `try { ... }` before rollback still fails analysis.
+        "mut x = [1]\nlet r = try { let t = move(x)\nlet u = x\nNone() }",
+    ] {
+        let result = analyze(invalid);
+        assert!(!result.is_valid(), "accepted: {invalid}");
+        assert!(
+            result.diagnostics.iter().any(|d| d.code == "moved-value"),
+            "{invalid}: {:?}",
+            result.diagnostics
+        );
+    }
+}
+
+mod bytecode_regions {
+    use themoretheless_tokenizer_rush::{BytecodeProgram, Value, evaluate_bytecode};
+
+    #[test]
+    fn regions_budgets_and_stats_parity() {
+        assert_eq!(
+            evaluate_bytecode("let x = region r (64) { mut t = 40; t + 2 }\nx", 400).unwrap(),
+            Value::Number(42.0)
+        );
+        assert_eq!(
+            evaluate_bytecode(
+                "mut s = 0\nregion r (1) { for i in range_iter(0, 50) { mut t = i\ns += t % 3 } }\ns",
+                50_000
+            )
+            .unwrap(),
+            Value::Number(49.0)
+        );
+        let overflow = evaluate_bytecode("region r (1) { mut a = 1\nmut b = 2 }", 400).unwrap_err();
+        assert_eq!(overflow.message, "Region cell budget exceeded");
+
+        let promo_overflow = evaluate_bytecode(
+            "region outer (1) { mut f = () => 0\nregion inner { mut n = 5\nf = promote(() => n) } }",
+            400,
+        )
+        .unwrap_err();
+        assert_eq!(promo_overflow.message, "Region cell budget exceeded");
+
+        let program = BytecodeProgram::compile(
+            "mut g = () => 0\n\
+             for i in range_iter(0, 5) { region scratch { mut a = i\nmut b = a * 2 } }\n\
+             region lift { mut n = 7\ng = () => n }\n\
+             g()",
+        )
+        .unwrap();
+        let mut vm = themoretheless_tokenizer_rush::bytecode::Vm::new(10_000);
+        assert_eq!(vm.run(&program.chunk).unwrap(), Value::Number(7.0));
+        let stats = vm.region_stats();
+        let scratch = stats
+            .iter()
+            .find(|s| s.name.as_deref() == Some("scratch"))
+            .unwrap();
+        assert_eq!(scratch.entries, 5);
+        assert_eq!(scratch.allocated, 10);
+        assert_eq!(scratch.peak_live, 2);
+        assert!(scratch.reused_slots >= 8, "{scratch:?}");
+        assert_eq!(scratch.promoted, 0);
+        let lift = stats
+            .iter()
+            .find(|s| s.name.as_deref() == Some("lift"))
+            .unwrap();
+        assert_eq!(lift.promoted, 1);
+    }
+
+    #[test]
+    fn strict_regions_promote_and_move_in_bytecode() {
+        assert!(
+            evaluate_bytecode(
+                "mut g = () => 0\nstrict region r { mut n = 1\ng = () => n }",
+                400,
+            )
+            .is_err()
+        );
+        assert!(evaluate_bytecode("let f = strict region { mut n = 1; () => n }", 400).is_err());
+        assert!(
+            evaluate_bytecode(
+                "fn f() { strict region r { mut n = 1\nreturn () => n } }\nf()",
+                400,
+            )
+            .is_err()
+        );
+        assert!(
+            evaluate_bytecode(
+                "mut keep = () => 0\nfn leak(cb) { keep = cb }\nstrict region r { mut n = 1\nleak(() => n) }",
+                400,
+            )
+            .is_err()
+        );
+        assert_eq!(
+            evaluate_bytecode(
+                "mut g = () => 0\nstrict region r { mut n = 40\ng = promote(() => n += 2) }\ng()\ng()",
+                400,
+            )
+            .unwrap(),
+            Value::Number(44.0)
+        );
+        assert_eq!(
+            evaluate_bytecode(
+                "mut keep = 0\nstrict region r { mut tmp = 41\nkeep = move(tmp) + 1 }\nkeep",
+                400,
+            )
+            .unwrap(),
+            Value::Number(42.0)
+        );
+        // Closures over a moved upvalue observe null until revived.
+        assert_eq!(
+            evaluate_bytecode(
+                "mut a = 1\nlet get = () => a\nlet take = () => move(a)\nlet v = take()\n[v, get()]",
+                400,
+            )
+            .unwrap(),
+            Value::List(vec![Value::Number(1.0), Value::Null])
+        );
+        // Per-iteration `mut` closure capture isolates cells across loop iterations.
+        assert_eq!(
+            evaluate_bytecode(
+                "mut a = () => 0\nmut b = () => 0\nfor i in range_iter(0, 5) { mut n = i\nif i == 1 { a = () => n }\nif i == 3 { b = () => n } }\na() * 100 + b()",
+                2000,
+            )
+            .unwrap(),
+            Value::Number(103.0)
+        );
+        // `while` loops and `continue` also close per-iteration cells and exit inner regions.
+        assert_eq!(
+            evaluate_bytecode(
+                "mut i = 0\nmut g = () => 0\nregion outer (2) { while i < 4 { i += 1\nif i % 2 == 0 { continue }\nregion inner (1) { mut n = i * 10\ng = () => n } } }\ng()",
+                2000,
+            )
+            .unwrap(),
+            Value::Number(30.0)
+        );
+    }
+
+    #[test]
+    fn arenas_and_try_propagate_in_bytecode() {
+        assert_eq!(
+            evaluate_bytecode(
+                "const a = arena(\"frame\")\nmut keep = () => 0\nfn body() { mut n = 21\nkeep = () => n\nreturn n * 2 }\nconst r = arena_run(a, body)\nr + keep()",
+                2000,
+            )
+            .unwrap(),
+            Value::Number(63.0)
+        );
+        assert!(
+            evaluate_bytecode(
+                "const a = arena(\"s\", null, false, true)\nmut keep = () => 0\nfn body() { mut n = 7\nkeep = () => n\nreturn 1 }\narena_run(a, body)",
+                2000,
+            )
+            .is_err()
+        );
+        assert_eq!(
+            evaluate_bytecode(
+                "const a = arena(\"cache\", null, true)\nmut get = () => 0\nmut bump = () => 0\nfn first() { mut n = 40\nget = () => n\nbump = () => n += 2 }\narena_run(a, first)\nfn second() { return bump() }\narena_run(a, second)\nlet before = arena_stats(a).live\narena_reset(a)\n[get(), arena_stats(a).live, before]",
+                2000,
+            )
+            .unwrap(),
+            Value::List(vec![Value::Null, Value::Number(0.0), Value::Number(1.0)])
+        );
+        assert!(
+            evaluate_bytecode(
+                "const a = arena(\"cache\", null, true, true)\nmut keep = () => 0\nfn body() { mut n = 1\nkeep = () => n }\narena_run(a, body)",
+                2000,
+            )
+            .is_err()
+        );
+        assert!(
+            evaluate_bytecode(
+                "fn f() { strict region r { mut n = 1\nlet _ = Err(() => n)?\nreturn Ok(1) } }\nf()",
+                400,
+            )
+            .is_err()
+        );
+    }
 }

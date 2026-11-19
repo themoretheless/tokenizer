@@ -2,6 +2,7 @@ use super::{BlockExits, Checker, NameReference, Shape, UserDefinition};
 use crate::{Block, Expr, ExprKind, Name, RecordUpdateEntry, Stmt, StmtKind, ValueType};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
+use themoretheless_tokenizer_core::Span;
 
 impl<'s> Checker<'s> {
     pub(super) fn statements(&mut self, statements: &[Stmt<'s>]) {
@@ -489,6 +490,12 @@ impl<'s> Checker<'s> {
             }
             ExprKind::TryBlock(body) => {
                 Self::body_calls_suspending(&body.stmts, scopes, suspending)
+            }
+            ExprKind::Region { budget, body, .. } => {
+                budget
+                    .as_ref()
+                    .is_some_and(|b| Self::expr_calls_suspending(b, scopes, suspending))
+                    || Self::body_calls_suspending(&body.stmts, scopes, suspending)
             }
             ExprKind::Index { object, index } => {
                 Self::expr_calls_suspending(object, scopes, suspending)
@@ -997,11 +1004,15 @@ impl<'s> Checker<'s> {
                     .record_cell_leaks
                     .replace((name.span.start, self.region_depth));
                 let saved_try = std::mem::take(&mut self.try_blocks);
+                let saved_moved = std::mem::take(&mut self.moved);
+                let saved_loops = std::mem::take(&mut self.loop_moved);
                 self.region_depth += 1;
                 self.region_strict.push(false);
                 self.statements(&body.stmts);
                 self.region_strict.pop();
                 self.region_depth -= 1;
+                self.loop_moved = saved_loops;
+                self.moved = saved_moved;
                 self.try_blocks = saved_try;
                 self.record_cell_leaks = previous_recording;
                 let mut returns = self.inferred_returns.pop().unwrap();
@@ -1093,7 +1104,11 @@ impl<'s> Checker<'s> {
                 } else {
                     Shape::Unknown
                 };
+                let strict_arena = *constant && self.is_strict_arena_expr(value);
                 self.declare(name, *constant, statement.span.end);
+                if strict_arena {
+                    self.strict_arenas.insert(name.span.start);
+                }
                 if suspending {
                     self.suspending_functions.insert(name.span.start);
                 }
@@ -1188,7 +1203,9 @@ impl<'s> Checker<'s> {
             } => {
                 self.expr(value);
                 let shape = self.shape(value);
+                let before = self.moved.clone();
                 self.block(else_block);
+                self.moved = before;
                 if BlockExits::inspect(&else_block.stmts).next {
                     self.error(
                         else_block.span,
@@ -1205,10 +1222,11 @@ impl<'s> Checker<'s> {
                 else_block,
             } => {
                 self.condition(condition);
+                let before = self.moved.clone();
                 self.block(then_block);
-                if let Some(block) = else_block {
-                    self.block(block);
-                }
+                let then_next = BlockExits::inspect(&then_block.stmts).next;
+                let then_moved = std::mem::replace(&mut self.moved, before.clone());
+                self.merge_branch_moved(before, then_next, then_moved, else_block.as_ref());
             }
             StmtKind::IfLet {
                 pattern,
@@ -1218,6 +1236,7 @@ impl<'s> Checker<'s> {
             } => {
                 self.expr(value);
                 let shape = self.shape(value);
+                let before = self.moved.clone();
                 self.scopes.push(HashMap::new());
                 self.scope_spans.push(then_block.span);
                 self.match_bindings(pattern, then_block.span.start);
@@ -1225,13 +1244,21 @@ impl<'s> Checker<'s> {
                 self.statements(&then_block.stmts);
                 self.scopes.pop();
                 self.scope_spans.pop();
-                if let Some(block) = else_block {
-                    self.block(block);
-                }
+                let then_next = BlockExits::inspect(&then_block.stmts).next;
+                let then_moved = std::mem::replace(&mut self.moved, before.clone());
+                self.merge_branch_moved(before, then_next, then_moved, else_block.as_ref());
             }
             StmtKind::While { condition, body } => {
+                let before_loop = self.moved.clone();
                 self.condition(condition);
+                let after_cond = self.moved.clone();
+                self.loop_moved.push((Vec::new(), Vec::new()));
                 self.block(body);
+                self.finish_loop(
+                    body,
+                    &before_loop,
+                    (!matches!(condition.kind, ExprKind::Bool(true))).then_some(after_cond),
+                );
             }
             StmtKind::For {
                 binding,
@@ -1248,6 +1275,7 @@ impl<'s> Checker<'s> {
                         .unwrap_or(Shape::Unknown),
                     _ => Shape::Unknown,
                 };
+                let before_loop = self.moved.clone();
                 self.scopes.push(HashMap::new());
                 self.scope_spans.push(body.span);
                 self.declare(binding, true, body.span.start);
@@ -1264,11 +1292,23 @@ impl<'s> Checker<'s> {
                 ) {
                     self.binding_shapes.insert(binding.span.start, element);
                 }
+                self.loop_moved.push((Vec::new(), Vec::new()));
                 self.statements(&body.stmts);
                 self.scopes.pop();
                 self.scope_spans.pop();
+                self.finish_loop(body, &before_loop, Some(before_loop.clone()));
             }
-            StmtKind::Break | StmtKind::Continue | StmtKind::Error => {}
+            StmtKind::Break => {
+                if let Some((breaks, _)) = self.loop_moved.last_mut() {
+                    breaks.push(self.moved.clone());
+                }
+            }
+            StmtKind::Continue => {
+                if let Some((_, continues)) = self.loop_moved.last_mut() {
+                    continues.push(self.moved.clone());
+                }
+            }
+            StmtKind::Error => {}
             StmtKind::Region {
                 strict,
                 budget,
@@ -1292,5 +1332,69 @@ impl<'s> Checker<'s> {
                 self.region_depth -= 1;
             }
         }
+    }
+
+    fn merge_branch_moved(
+        &mut self,
+        before: HashMap<usize, Span>,
+        then_next: bool,
+        then_moved: HashMap<usize, Span>,
+        else_block: Option<&Block<'s>>,
+    ) {
+        let (else_next, else_moved) = if let Some(block) = else_block {
+            self.block(block);
+            let next = BlockExits::inspect(&block.stmts).next;
+            (next, std::mem::take(&mut self.moved))
+        } else {
+            (true, before.clone())
+        };
+        let mut merged = HashMap::new();
+        if then_next {
+            merged.extend(then_moved);
+        }
+        if else_next {
+            merged.extend(else_moved);
+        }
+        self.moved = if then_next || else_next {
+            merged
+        } else {
+            before
+        };
+    }
+
+    fn finish_loop(
+        &mut self,
+        body: &Block<'s>,
+        before_loop: &HashMap<usize, Span>,
+        post_base: Option<HashMap<usize, Span>>,
+    ) {
+        let (breaks, mut continues) = self.loop_moved.pop().unwrap();
+        if BlockExits::inspect(&body.stmts).next {
+            continues.push(std::mem::take(&mut self.moved));
+        }
+        let mut end_of_iter = HashMap::new();
+        for state in continues {
+            end_of_iter.extend(state);
+        }
+        for (&def_start, &move_span) in &end_of_iter {
+            if def_start < body.span.start && !before_loop.contains_key(&def_start) {
+                self.error(
+                    move_span,
+                    "moved-value",
+                    "Binding moved inside loop is not reassigned before the next iteration",
+                );
+            }
+        }
+        let mut post_loop = match post_base {
+            Some(mut base) => {
+                base.extend(end_of_iter);
+                base
+            }
+            None => HashMap::new(),
+        };
+        for state in breaks {
+            post_loop.extend(state);
+        }
+        self.moved = post_loop;
     }
 }

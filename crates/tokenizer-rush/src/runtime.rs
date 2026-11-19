@@ -268,6 +268,12 @@ impl<'s> Program<'s> {
                 | ExprKind::Unary { value: inner, .. }
                 | ExprKind::Member { object: inner, .. } => visit_expr(inner, pending),
                 ExprKind::TryBlock(body) => pending.push(&body.stmts),
+                ExprKind::Region { budget, body, .. } => {
+                    if let Some(budget) = budget {
+                        visit_expr(budget, pending);
+                    }
+                    pending.push(&body.stmts);
+                }
                 ExprKind::If {
                     condition: scrutinee,
                     then_value,
@@ -575,7 +581,17 @@ impl<'s> Program<'s> {
     pub fn compile(source: &'s str) -> Result<Self> {
         Self::compile_parsed(crate::parse(source))
     }
-    fn compile_parsed(mut parsed: crate::Parse<'s>) -> Result<Self> {
+
+    /// Prepare bytecode for a standalone file that needs only scalar operations.
+    ///
+    /// A caller must use the interpreter for programs requiring host inputs,
+    /// module linking, or interpreter-specific execution limits and reporting.
+    pub fn scalar_bytecode(&self) -> Option<crate::BytecodeProgram> {
+        crate::BytecodeProgram::compile_scalar_file(&self.parsed.module.items, &self.contracts)
+    }
+
+    /// Compile a previously parsed or analyzed source, including runtime type checks.
+    pub fn compile_parsed(mut parsed: crate::Parse<'s>) -> Result<Self> {
         let source = parsed.source;
         let (references, contracts) = crate::analysis::compile_analysis(&mut parsed);
         if !parsed.is_valid() {

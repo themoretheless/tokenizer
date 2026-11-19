@@ -1,5 +1,5 @@
 use super::pattern::extract_pattern_name;
-use super::{Compiler, VariableResolution, try_eval_const};
+use super::{Compiler, MoveTarget, VariableResolution, try_eval_const};
 use crate::bytecode::opcode::{Opcode, RecordShapeDescriptor};
 use crate::{
     Builtin, Expr, ExprKind, InterpolationPart, RecordMap, RecordUpdateEntry, RuntimeError, Value,
@@ -372,7 +372,7 @@ impl<'s> Compiler<'s> {
                 let mut fail_jumps = Vec::new();
                 self.compile_pattern_match(pattern, val_slot, &mut fail_jumps)?;
                 self.compile_expr(then_value)?;
-                self.current().pop_scope();
+                self.current().pop_scope(then_value.span);
                 let end_jump = self.current().chunk.emit(Opcode::Jump(0), span);
                 let else_target = self.current().chunk.code.len();
                 for fj in fail_jumps {
@@ -412,6 +412,40 @@ impl<'s> Compiler<'s> {
                 self.current().chunk.emit(Opcode::MakeClosure(fn_idx), span);
             }
             ExprKind::Call { callee, arguments } => {
+                if let ExprKind::Name(name) = &callee.kind
+                    && name.text == "move"
+                    && matches!(
+                        self.resolve_variable(name.text),
+                        VariableResolution::Global(_)
+                    )
+                {
+                    let [target] = arguments.as_slice() else {
+                        return Err(self.error(span, "move requires exactly one argument"));
+                    };
+                    let ExprKind::Name(target_name) = &target.kind else {
+                        return Err(self.error(target.span, "move requires a mutable binding name"));
+                    };
+                    match self.resolve_move_target(target_name.text) {
+                        MoveTarget::Local(slot) => {
+                            self.current().chunk.emit(Opcode::MoveLocal(slot), span);
+                        }
+                        MoveTarget::Upvalue(idx) => {
+                            self.current().chunk.emit(Opcode::MoveUpvalue(idx), span);
+                        }
+                        MoveTarget::Immutable => {
+                            return Err(
+                                self.error(target_name.span, "move requires a mutable binding")
+                            );
+                        }
+                        MoveTarget::Unknown => {
+                            return Err(self.error(
+                                target_name.span,
+                                format!("Unknown name: {}", target_name.text),
+                            ));
+                        }
+                    }
+                    return Ok(());
+                }
                 if let ExprKind::Name(name) = &callee.kind
                     && let VariableResolution::Builtin(builtin) = self.resolve_variable(name.text)
                 {
@@ -614,7 +648,7 @@ impl<'s> Compiler<'s> {
                     for fj in fail_jumps {
                         self.current().chunk.patch_jump(fj, next_arm_target);
                     }
-                    self.current().pop_scope();
+                    self.current().pop_scope(arm.span);
                 }
 
                 self.current().chunk.emit(Opcode::MatchError, span);
@@ -630,6 +664,14 @@ impl<'s> Compiler<'s> {
                 return Err(
                     self.error(span, "try blocks are not supported in bytecode compilation")
                 );
+            }
+            ExprKind::Region {
+                name,
+                strict,
+                budget,
+                body,
+            } => {
+                self.compile_region(name.as_ref(), *strict, budget.as_deref(), body, true, span)?;
             }
             _ => {
                 return Err(self.error(span, "Expression not supported in bytecode compilation"));

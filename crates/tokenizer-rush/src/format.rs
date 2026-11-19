@@ -389,21 +389,7 @@ impl<'s> Writer<'s> {
                 budget,
                 body,
             } => {
-                if *strict {
-                    self.text("strict ");
-                }
-                self.text("region");
-                if let Some(name) = name {
-                    self.text(" ");
-                    self.name(name);
-                }
-                if let Some(budget) = budget {
-                    self.text(" (");
-                    self.expr(budget, 1);
-                    self.text(")");
-                }
-                self.text(" ");
-                self.block(body);
+                self.format_region(name.as_ref(), *strict, budget.as_ref(), body);
             }
             StmtKind::Show(value) => {
                 self.text("show ");
@@ -493,12 +479,12 @@ impl<'s> Writer<'s> {
             .iter()
             .take_while(|c| c.span.start < expression.span.end)
             .any(|c| {
-                let inside_try_block = matches!(
+                let inside_block_expr = matches!(
                     &expression.kind,
-                    ExprKind::TryBlock(body)
+                    ExprKind::TryBlock(body) | ExprKind::Region { body, .. }
                         if c.span.start >= body.span.start && c.span.end <= body.span.end
                 );
-                !inside_try_block
+                !inside_block_expr
                     && c.span.start >= expression.span.start
                     && c.span.end <= expression.span.end
                     && (c.line || c.text.contains('\n'))
@@ -519,6 +505,14 @@ impl<'s> Writer<'s> {
             ExprKind::TryBlock(body) => {
                 self.text("try ");
                 self.block(body);
+            }
+            ExprKind::Region {
+                name,
+                strict,
+                budget,
+                body,
+            } => {
+                self.format_region(name.as_ref(), *strict, budget.as_deref(), body);
             }
             ExprKind::Unary { operator, value } => {
                 self.text(operator);
@@ -729,6 +723,29 @@ impl<'s> Writer<'s> {
         if parens {
             self.text(")");
         }
+    }
+    fn format_region(
+        &mut self,
+        name: Option<&Name<'s>>,
+        strict: bool,
+        budget: Option<&Expr<'s>>,
+        body: &Block<'s>,
+    ) {
+        if strict {
+            self.text("strict ");
+        }
+        self.text("region");
+        if let Some(name) = name {
+            self.text(" ");
+            self.name(name);
+        }
+        if let Some(budget) = budget {
+            self.text(" (");
+            self.expr(budget, 1);
+            self.text(")");
+        }
+        self.text(" ");
+        self.block(body);
     }
     fn items(&mut self, items: &[Expr<'s>]) {
         for (i, item) in items.iter().enumerate() {

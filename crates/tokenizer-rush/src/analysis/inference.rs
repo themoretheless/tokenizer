@@ -410,6 +410,12 @@ impl<'s> Checker<'s> {
             ExprKind::TryBlock(body) => {
                 self.constrain_body(&body.stmts, expected, parameters);
             }
+            ExprKind::Region { budget, body, .. } => {
+                if let Some(budget) = budget {
+                    self.constrain(budget, Some(ValueType::Number), parameters);
+                }
+                self.constrain_body(&body.stmts, expected, parameters);
+            }
             _ => {}
         }
     }

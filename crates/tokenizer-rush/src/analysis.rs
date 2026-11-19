@@ -361,9 +361,11 @@ fn inspect_inner(
         region_depth: 0,
         region_strict: Vec::new(),
         binding_regions: HashMap::new(),
+        strict_arenas: HashSet::new(),
         record_cell_leaks: None,
         cell_leaking_functions: HashSet::new(),
         moved: HashMap::new(),
+        loop_moved: Vec::new(),
         hoisted_declarations: HashSet::new(),
     };
     checker.statements(&parsed.module.items);
@@ -528,6 +530,9 @@ pub(crate) fn module_interfaces(modules: &[(&str, &crate::Program<'_>)]) -> Modu
     output
 }
 
+type MovedState = HashMap<usize, Span>;
+type LoopMoved = (Vec<MovedState>, Vec<MovedState>);
+
 #[derive(Clone)]
 struct UserDefinition {
     span: Span,
@@ -574,6 +579,8 @@ struct Checker<'s> {
     region_depth: usize,
     region_strict: Vec<bool>,
     binding_regions: HashMap<usize, usize>,
+    /// Definition start offsets of immutable bindings initialized from strict `arena(...)`.
+    strict_arenas: HashSet<usize>,
     /// While analyzing a function body: (function name span start, region
     /// depth at entry). Escape checks record the function as cell-leaking
     /// instead of reporting, so `arena_run` call sites can lint the callback.
@@ -583,6 +590,8 @@ struct Checker<'s> {
     cell_leaking_functions: HashSet<usize>,
     /// Bindings emptied by `move(...)`; a read is an error until reassigned.
     moved: HashMap<usize, Span>,
+    /// Per-enclosing-loop `(break_states, continue_states)` snapshots for flow-sensitive `move`.
+    loop_moved: Vec<LoopMoved>,
     /// Pre-declared `import` / `struct` / `enum` / `fn` definition start offsets in the active scope.
     hoisted_declarations: HashSet<usize>,
 }

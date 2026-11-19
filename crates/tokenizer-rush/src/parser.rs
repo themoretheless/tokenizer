@@ -19,6 +19,9 @@ fn expr_bytes(expr: &Expr<'_>) -> usize {
     let kind = match &expr.kind {
         ExprKind::Try(inner) => expr_bytes(inner),
         ExprKind::TryBlock(body) => block_bytes(body),
+        ExprKind::Region { budget, body, .. } => {
+            budget.as_deref().map_or(0, expr_bytes) + block_bytes(body)
+        }
         ExprKind::If {
             condition,
             then_value,
@@ -770,7 +773,11 @@ impl<'s> Parser<'s> {
                 }
                 StmtKind::Yield(self.required_expr(false))
             }
-            "strict" if self.text_at(1) == "region" => {
+            "strict"
+                if self.tokens.get(self.pos + 1).is_some_and(|t| !t.newline)
+                    && self.text_at(1) == "region" =>
+            {
+                self.roles.push((token.raw.span, "keyword"));
                 self.bump();
                 self.region_stmt(token.indent, true)
             }
@@ -1413,6 +1420,64 @@ impl<'s> Parser<'s> {
                 kind: ExprKind::TryBlock(body),
             };
         }
+        if text == "region"
+            || (text == "strict"
+                && self.tokens.get(self.pos + 1).is_some_and(|t| !t.newline)
+                && self.text_at(1) == "region")
+        {
+            let strict = text == "strict";
+            if strict {
+                self.roles.push((span, "keyword"));
+                self.bump();
+            }
+            self.bump();
+            let name = if !self.newline()
+                && self.peek().is_some_and(|t| {
+                    matches!(t.raw.kind, SyntaxKind::Identifier | SyntaxKind::TypeIdent)
+                }) {
+                Some(self.name("region"))
+            } else {
+                None
+            };
+            let budget = if !self.newline() && self.at("(") {
+                self.bump();
+                let budget = self.required_expr(false);
+                self.expect(")");
+                Some(Box::new(budget))
+            } else {
+                None
+            };
+            let block_start = self.span().start;
+            let outer_functions = std::mem::replace(&mut self.functions, 0);
+            let outer_loops = std::mem::replace(&mut self.loops, 0);
+            let outer_async = std::mem::replace(&mut self.async_fns, 0);
+            let body = if self.eat("{") {
+                let stmts = self.sequence(Some("}"), None);
+                self.expect("}");
+                Block {
+                    span: Span::new(block_start, self.end().max(block_start)),
+                    stmts: std::rc::Rc::new(stmts),
+                }
+            } else {
+                self.error("expected-block", "Expected a brace block after region");
+                Block {
+                    span: Span::new(block_start, block_start),
+                    stmts: std::rc::Rc::new(vec![]),
+                }
+            };
+            self.async_fns = outer_async;
+            self.loops = outer_loops;
+            self.functions = outer_functions;
+            return Expr {
+                span: Span::new(span.start, self.end().max(span.start)),
+                kind: ExprKind::Region {
+                    name,
+                    strict,
+                    budget,
+                    body,
+                },
+            };
+        }
         if matches!(text, "-" | "+" | "!" | "not" | "~") {
             self.bump();
             let value = if !multiline && self.newline() {
@@ -1994,23 +2059,51 @@ impl<'s> Parser<'s> {
     }
 }
 
+fn offset_block_spans(body: &mut Block<'_>, offset: usize) {
+    body.span.start += offset;
+    body.span.end += offset;
+    if let Some(stmts) = std::rc::Rc::get_mut(&mut body.stmts) {
+        for stmt in stmts {
+            stmt.span.start += offset;
+            stmt.span.end += offset;
+            match &mut stmt.kind {
+                StmtKind::Expr(sub) | StmtKind::Show(sub) => offset_expr_spans(sub, offset),
+                StmtKind::Declaration {
+                    name,
+                    value,
+                    constraint,
+                    ..
+                } => {
+                    name.span.start += offset;
+                    name.span.end += offset;
+                    offset_expr_spans(value, offset);
+                    if let Some(c) = constraint {
+                        offset_expr_spans(c, offset);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 fn offset_expr_spans(expr: &mut Expr<'_>, offset: usize) {
     expr.span.start += offset;
     expr.span.end += offset;
     match &mut expr.kind {
         ExprKind::Try(sub) => offset_expr_spans(sub, offset),
-        ExprKind::TryBlock(body) => {
-            body.span.start += offset;
-            body.span.end += offset;
-            if let Some(stmts) = std::rc::Rc::get_mut(&mut body.stmts) {
-                for stmt in stmts {
-                    stmt.span.start += offset;
-                    stmt.span.end += offset;
-                    if let StmtKind::Expr(sub) = &mut stmt.kind {
-                        offset_expr_spans(sub, offset);
-                    }
-                }
+        ExprKind::TryBlock(body) => offset_block_spans(body, offset),
+        ExprKind::Region {
+            name, budget, body, ..
+        } => {
+            if let Some(name) = name {
+                name.span.start += offset;
+                name.span.end += offset;
             }
+            if let Some(budget) = budget {
+                offset_expr_spans(budget, offset);
+            }
+            offset_block_spans(body, offset);
         }
         ExprKind::If {
             condition,
