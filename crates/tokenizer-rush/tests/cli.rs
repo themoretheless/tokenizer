@@ -1,6 +1,134 @@
 use std::process::Command;
 
 #[test]
+fn default_file_runner_executes_scalar_bytecode() {
+    use themoretheless_tokenizer_rush::{CancellationToken, ExecutionLimits, Program, Value};
+
+    let source = "mut sum = 0
+for i in range_iter(0, 2000) {
+    if i < 1000 { let sum = 99; sum } else { sum += i }
+}
+sum";
+    let program = Program::compile(source).unwrap();
+    let bytecode = program
+        .scalar_bytecode()
+        .expect("eligible standalone script");
+    let limits = ExecutionLimits::new(1_000_000);
+    let cancel = CancellationToken::default();
+    let interpreted = program.run(limits.steps, &cancel, &[]).unwrap();
+    let compiled = bytecode.execute_with_limits(limits, Some(&cancel)).unwrap();
+    assert!(matches!(interpreted, Value::Number(1_499_500.0)));
+    assert!(matches!(compiled, Value::Number(1_499_500.0)));
+
+    let path = std::env::temp_dir().join(format!("rush-cli-bytecode-{}.r", std::process::id()));
+    std::fs::write(&path, source).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .arg(&path)
+        .output()
+        .unwrap();
+    let explicit_limits = Command::new(env!("CARGO_BIN_EXE_rush"))
+        .arg(&path)
+        .args(["--steps", "1000000"])
+        .output()
+        .unwrap();
+    std::fs::remove_file(&path).unwrap();
+    for output in [&output, &explicit_limits] {
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert_eq!(output.stdout, explicit_limits.stdout);
+
+    cancel.cancel();
+    assert_eq!(
+        bytecode
+            .execute_with_limits(limits, Some(&cancel))
+            .unwrap_err()
+            .message,
+        "Execution cancelled"
+    );
+}
+
+#[test]
+fn automatic_bytecode_leaves_interpreter_specific_semantics_to_the_interpreter() {
+    use themoretheless_tokenizer_rush::Program;
+
+    for source in [
+        "import sys; sys.args()",
+        "try { Ok(3) }",
+        "async fn job() { return 3 }; job()",
+        "region scratch (3) { 42 }",
+        "mut x = 1.0; x = 2i; x",
+        "let x: int = 3; x",
+        "radius + 1",
+        "fn recursive(n: number) -> number { return recursive(n - 1) }; recursive(2)",
+        "fn read() -> number { return external }; read()",
+        "fn identity(n: number) -> number { return n }; identity(2i)",
+    ] {
+        let program = Program::compile(source).unwrap_or_else(|err| panic!("{source}: {err:?}"));
+        assert!(program.scalar_bytecode().is_none(), "{source}");
+    }
+}
+
+#[test]
+fn default_file_runner_calls_scalar_functions_inside_loops() {
+    use themoretheless_tokenizer_rush::{CancellationToken, Program, Value};
+
+    let source = "fn square(x: number) -> number { return x * x }
+fn term(x: number) -> number {
+    if x < 10 { return square(x) }
+    return square(x) + 1
+}
+
+mut sum = 0
+for i in range_iter(0, 100) { sum += term(i) }
+sum";
+    let program = Program::compile(source).unwrap();
+    let bytecode = program
+        .scalar_bytecode()
+        .expect("eligible scalar functions");
+    let expected = program
+        .run(1_000_000, &CancellationToken::default(), &[])
+        .unwrap();
+    assert_eq!(expected, Value::Number(328_440.0));
+    assert_eq!(bytecode.execute(1_000_000).unwrap(), expected);
+
+    let path = std::env::temp_dir().join(format!(
+        "rush-cli-bytecode-functions-{}.r",
+        std::process::id()
+    ));
+    std::fs::write(&path, source).unwrap();
+    let run = |options: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_rush"))
+            .arg(&path)
+            .args(options)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    assert_eq!(run(&[]), run(&["--steps", "1000000"]));
+    std::fs::remove_file(&path).unwrap();
+}
+
+#[test]
+fn automatic_bytecode_uses_inferred_scalar_function_contracts() {
+    use themoretheless_tokenizer_rush::{Program, Value};
+
+    let program = Program::compile("fn next(x) { return x + 1 }; next(5)").unwrap();
+    let bytecode = program
+        .scalar_bytecode()
+        .expect("fully inferred scalar function");
+    assert_eq!(bytecode.execute(1000).unwrap(), Value::Number(6.0));
+}
+
+#[test]
 fn file_runner_exports_parameterized_flower_and_reports_errors() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/scripts/flower.r");
     let output = Command::new(env!("CARGO_BIN_EXE_rush"))

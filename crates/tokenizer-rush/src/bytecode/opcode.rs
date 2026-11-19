@@ -309,8 +309,19 @@ pub enum Opcode {
     StoreLocal(u32),
     /// Pop top-of-stack and store directly into captured upvalue at closure index (fused SetUpvalue + Pop).
     StoreUpvalue(u32),
-    /// Pop and assert region budget is a non-negative integer.
-    AssertRegionBudget,
+    /// Open a region (arena) frame. `name_idx == u32::MAX` denotes an anonymous region.
+    /// `flags & 1 != 0` pops and validates a budget integer; `flags & 2 != 0` marks strict.
+    EnterRegion { name_idx: u32, flags: u8 },
+    /// Close the innermost active region frame, sweeping dead cells and promoting survivors.
+    ExitRegion,
+    /// Register a newly initialized `mut` local slot in the innermost active region frame.
+    TrackMutLocal(u32),
+    /// Close upvalues and clear stack slots in `first_slot..end_slot` on lexical scope exit.
+    CloseScope { first_slot: u32, end_slot: u32 },
+    /// Empty a mutable local slot (replacing it with `null`) and push its previous value.
+    MoveLocal(u32),
+    /// Empty a mutable upvalue cell (replacing it with `null`) and push its previous value.
+    MoveUpvalue(u32),
     /// Pop boolean condition and fail with constant string message if `false`.
     AssertWhere(u32),
     /// Register a nominal struct contract (and optional top-of-stack validator closure if `has_validator`).

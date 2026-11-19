@@ -492,7 +492,10 @@ impl<'s> Coroutine<'s> {
                         StmtKind::Break => self.loop_control(true, runtime, statement.span)?,
                         StmtKind::Continue => self.loop_control(false, runtime, statement.span)?,
                         StmtKind::Region {
-                            name, budget, body, ..
+                            name,
+                            strict,
+                            budget,
+                            body,
                         } => {
                             let budget =
                                 runtime.eval_region_budget(budget.as_ref(), environment)?;
@@ -502,7 +505,8 @@ impl<'s> Coroutine<'s> {
                                 .map_err(|e| runtime.environment_error(statement.span, e))?;
                             let body_statements = body.stmts.clone();
                             let span = statement.span;
-                            let region = runtime.enter_region(budget, region_name);
+                            let region =
+                                runtime.enter_region_full(budget, region_name, *strict, false);
                             self.push(Frame::Region { region, span }, runtime, span)?;
                             let frame = Frame::Block {
                                 statements: body_statements,

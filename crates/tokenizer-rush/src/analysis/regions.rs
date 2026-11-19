@@ -133,19 +133,27 @@ impl<'s> Checker<'s> {
 }
 
 impl<'s> Checker<'s> {
-    /// True when the expression is literally `arena(name, .., true)` — the
-    /// only case where arena strictness is statically known at the call site.
-    pub(super) fn is_strict_arena_literal(&self, expression: &Expr<'s>) -> bool {
-        let ExprKind::Call { callee, arguments } = &expression.kind else {
-            return false;
-        };
-        let is_arena = matches!(&callee.kind, ExprKind::Name(name)
-            if name.text == "arena"
-                && !self.scopes.iter().any(|scope| scope.contains_key(name.text)));
-        is_arena
-            && matches!(
-                arguments.get(3).map(|a| &a.kind),
-                Some(ExprKind::Bool(true))
-            )
+    /// True when the expression is literally `arena(name, .., true)` or an
+    /// immutable binding initialized from one.
+    pub(super) fn is_strict_arena_expr(&self, expression: &Expr<'s>) -> bool {
+        match &expression.kind {
+            ExprKind::Call { callee, arguments } => {
+                let is_arena = matches!(&callee.kind, ExprKind::Name(name)
+                    if name.text == "arena"
+                        && !self.scopes.iter().any(|scope| scope.contains_key(name.text)));
+                is_arena
+                    && matches!(
+                        arguments.get(3).map(|a| &a.kind),
+                        Some(ExprKind::Bool(true))
+                    )
+            }
+            ExprKind::Name(name) => self
+                .scopes
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name.text))
+                .is_some_and(|binding| binding.0 && self.strict_arenas.contains(&binding.1.start)),
+            _ => false,
+        }
     }
 }

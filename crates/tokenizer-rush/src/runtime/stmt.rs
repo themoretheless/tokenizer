@@ -968,7 +968,7 @@ impl<'s> Runtime<'_, 's> {
                 }
                 StmtKind::Region {
                     name,
-                    strict: _,
+                    strict,
                     budget,
                     body,
                 } => {
@@ -976,10 +976,28 @@ impl<'s> Runtime<'_, 's> {
                     let scope = environment
                         .try_clone()
                         .map_err(|e| self.environment_error(statement.span, e))?;
-                    let region = self.enter_region(budget, name.as_ref().map(|name| name.text));
-                    let result = self.scoped_statements(&body.stmts, scope);
-                    self.exit_region(region, statement.span)?;
+                    let region = self.enter_region_full(
+                        budget,
+                        name.as_ref().map(|name| name.text),
+                        *strict,
+                        false,
+                    );
+                    let mut result = self.scoped_statements(&body.stmts, scope);
+                    let is_last = idx + 1 == statements.len();
+                    if !is_last && matches!(result, Ok((_, Flow::Next))) {
+                        result = Ok((Value::Null, Flow::Next));
+                    }
+                    let is_early_return = result.is_err() && self.early_return.is_some();
+                    let exit = self.exit_region(region, statement.span);
+                    if is_early_return {
+                        if let Err(err) = exit {
+                            self.early_return.take();
+                            return Err(err);
+                        }
+                        return result;
+                    }
                     let result = result?;
+                    exit?;
                     if result.1 != Flow::Next {
                         return Ok(result);
                     }

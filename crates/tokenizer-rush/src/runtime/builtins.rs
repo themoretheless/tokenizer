@@ -374,12 +374,38 @@ pub(crate) fn build_arena_descriptor<'s>(
     ]))
 }
 
+/// Decode the shared arguments of eager and lazy ranges.
+pub(crate) fn range_bounds(args: &[Value<'_>]) -> Result<(f64, f64, f64), &'static str> {
+    const ARGUMENTS: &str = "range expects start, end and optional step";
+    let [start, end, rest @ ..] = args else {
+        return Err(ARGUMENTS);
+    };
+    let start = start.as_f64().ok_or(ARGUMENTS)?;
+    let end = end.as_f64().ok_or(ARGUMENTS)?;
+    let step = match rest {
+        [] => 1.0,
+        [step] => step.as_f64().ok_or(ARGUMENTS)?,
+        _ => return Err(ARGUMENTS),
+    };
+    if step == 0.0 {
+        return Err("Range step must be nonzero");
+    }
+    if !start.is_finite() || !end.is_finite() || !step.is_finite() {
+        return Err("Range arguments must be finite");
+    }
+    Ok((start, end, step))
+}
+
 /// Evaluate pure, callback-free builtins shared across Bytecode VM and AST runtime.
 pub(crate) fn eval_pure_builtin<'s>(
     builtin: Builtin,
     args: &[Value<'s>],
 ) -> Result<Value<'s>, String> {
     match builtin {
+        Builtin::RangeIter => {
+            let (start, end, step) = range_bounds(args)?;
+            Ok(Value::Range { start, end, step })
+        }
         Builtin::Trim => {
             let [Value::String(s)] = args else {
                 return Err("trim requires a string".into());

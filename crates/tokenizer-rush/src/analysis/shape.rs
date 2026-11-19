@@ -633,6 +633,27 @@ impl<'s> Checker<'s> {
                 Some(crate::StmtKind::Expr(last) | crate::StmtKind::Show(last)) => self.shape(last),
                 _ => Shape::Typed(ValueType::Null),
             },
+            ExprKind::Region { body, .. } => {
+                if let Some(shape) = self
+                    .expression_shapes
+                    .get(&(expression.span.start, expression.span.end))
+                {
+                    return shape.clone();
+                }
+                match body.stmts.last().map(|stmt| &stmt.kind) {
+                    Some(
+                        crate::StmtKind::Expr(last)
+                        | crate::StmtKind::Show(last)
+                        | crate::StmtKind::Declaration { value: last, .. }
+                        | crate::StmtKind::Destructure { value: last, .. }
+                        | crate::StmtKind::LetElse { value: last, .. },
+                    ) => self.shape(last),
+                    Some(crate::StmtKind::If { .. } | crate::StmtKind::IfLet { .. }) => {
+                        Shape::Unknown
+                    }
+                    _ => Shape::Typed(ValueType::Null),
+                }
+            }
             ExprKind::Name(name) => self
                 .scopes
                 .iter()

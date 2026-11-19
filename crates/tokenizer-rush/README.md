@@ -6,7 +6,8 @@ including in both host token layers. An optional binding analysis pass checks
 duplicate declarations and immutable bindings. The experimental evaluator below
 executes a functional subset with runtime contracts and portable graphics values.
 A compact [language contract](../../docs/rush-language-spec.md) defines executable semantics.
-Complete type inference and a whole-runtime memory limit remain planned.
+Whole-program Hindley-Milner type inference remains planned; `ExecutionLimits::max_heap_bytes`,
+`ExecutionLimits::max_allocated_bytes`, and `InputLimits::max_ast_bytes` provide opt-in memory bounds.
 `Program::compile` runs the existing static call/type analysis before execution,
 including function bodies and unselected branches. Known incompatible annotations,
 arguments, returns, conditions and operations fail at load time. Unknown host or
@@ -155,21 +156,24 @@ region scratch {
 ```
 
 A `region [name] { ... }` block allocates its mutable cells in a lexically
-scoped arena. When the block exits — normally, via `break` / `continue`, or
-via `return` — every cell still owned by the region is reclaimed in one bulk
-sweep instead of one-by-one reference counting. Values still reachable from
-outside (assigned to outer bindings, captured by escaping closures, or
-returned through outer cells) are promoted to the parent region and stay
-alive. Regions nest; an inner sweep never touches the outer arena. A static
-escape analysis that rejects dangling references at compile time is planned
-but not enforced yet.
+scoped arena and can be used both as a statement and as a brace-delimited
+expression (`let result = region scratch { ... }`). When the block exits —
+normally, via `break` / `continue`, via `return`, or on `?` propagation — every
+cell still owned by the region is reclaimed in one bulk sweep instead of
+one-by-one reference counting. Values still reachable from outside (assigned to
+outer bindings, captured by escaping closures, or returned through the block or
+function result) are promoted to the parent region and stay alive. Regions nest;
+an inner sweep never touches the outer arena. Full compile-time lifetime
+inference that prevents all dangling-cell reads without runtime `null` traps
+remains planned.
 
 Analysis emits a non-fatal `region-escape` lint wherever a value that can
 **carry captured cells** — a closure, or a container/unknown shape that may
-hold one — leaves the region implicitly: assignment to an outer binding or
-`return`. Pure scalar copies (`keep = tmp + 1`, `return count`) move values,
-not cells, and are never reported; the runtime promotes the cells only when
-something actually captures them, and the lint marks exactly those spots.
+hold one — leaves the region implicitly: assignment to an outer binding,
+`return`, or the tail value of a `region` expression. Pure scalar copies
+(`keep = tmp + 1`, `return count`) move values, not cells, and are never
+reported; the runtime promotes the cells only when something actually captures
+them, and the lint marks exactly those spots.
 
 ```text
 strict region scratch {
@@ -180,14 +184,16 @@ strict region scratch {
 }
 ```
 
-A `strict region` opts into the future semantics today: implicit escapes of
-cell-carrying values become hard `region-escape` errors, and the only way out
-is the explicit `promote(value)` wrapper (identity at runtime — promotion
-itself is always automatic). Compound assignments (`s += ...`) are exempt:
-they write a freshly computed value into an existing outer cell, so no region
-data can flow out. Strictness is per region and composes — data of a strict
-region cannot escape even through a surrounding lax region, while lax-region
-data passing under a strict one keeps the non-fatal lint.
+A `strict region` enforces strict escape rules both statically and at runtime:
+implicit escapes of cell-carrying values become hard `region-escape` compile
+errors, and any runtime escape (including indirect escapes through helper
+functions) fails with `Value allocated in a strict region escapes` unless the
+value was explicitly blessed by `promote(value)` or relocated via `move(binding)`.
+Compound assignments (`s += ...`) are exempt: they write a freshly computed
+value into an existing outer cell, so no region data can flow out. Strictness
+is per region and composes — data of a strict region cannot escape even through
+a surrounding lax region, while lax-region data passing under a strict one keeps
+the non-fatal lint.
 
 ```text
 region scratch (1024) {
@@ -237,10 +243,12 @@ keep = move(tmp)   // tmp's cell is now empty; reading tmp is an error
 ```
 
 `move(binding)` relocates without promoting: it takes the value out of a
-mutable binding's cell and leaves the cell empty. Analysis treats it as an
-explicit relocation (no `region-escape` even in strict regions) and tracks
-the emptied binding — a later read fails with `moved-value`, a double move is
-rejected, and a plain reassignment (`tmp = fresh()`) revives the cell.
+mutable binding's cell, blesses reachable cells for active strict regions, and
+leaves the cell empty (`null`). Analysis tracks `move` flow-sensitively across
+branches, loops (`break`/`continue`), plain reassignments (evaluating the RHS
+before reviving the target binding), and isolated function/lambda bodies — a
+later read or loop re-entry without revival fails with `moved-value`, a double
+move is rejected, and a plain reassignment (`tmp = fresh()`) revives the cell.
 Closures that captured the binding observe the empty (`null`) cell; a user
 binding named `move` shadows the form.
 
@@ -302,26 +310,35 @@ arena_reset(cache)                   // holders observe null, budget frees up
 ```
 
 `arena_reset(handle)` retires the parked frame: every surviving cell is
-emptied in place, so closures holding them observe `null` — exactly like a
-`move()` — and the arena starts empty on the next run. Resetting a scratch
-arena is a harmless no-op.
+emptied in place (preserving its type contract, if any), so closures holding
+them observe `null` — exactly like a `move()` — and the arena starts empty on
+the next run. Resetting a scratch arena is a harmless no-op.
 
 Finally, `arena(name, budget?, persistent?, strict?)` with `strict = true`
 turns retention into an error, mirroring `strict region` blocks: a scratch
-run fails with `Strict arena cells escaped the run` if any cell would
+run fails with `Strict arena cells escaped the run` if any unblessed cell would
 promote out, and a persistent run fails with `Strict arena retained new
-cells` if its parked live count grew during the run (mutating already-parked
-cells stays legal). Use strict arenas for hot paths that must not leak
-allocations into longer-lived scopes.
+cells` if any new unblessed cell remained parked during the run (mutating
+already-parked cells stays legal). Use strict arenas for hot paths that must
+not leak allocations into longer-lived scopes.
 
 Analysis knows about arena runs too: a callback whose body can let captured
 cells escape its implicit per-call region (an outer assignment or a returned
 closure) is reported at the `arena_run` site with the `arena-escape` lint —
 a hard error when the descriptor is a statically visible strict
-`arena(name, .., true)` literal. Ordinary calls of the same function stay
+`arena(name, .., true)` literal or an immutable alias (`const a = arena(..., true)`)
+to one. Ordinary calls of the same function stay
 clean: escaping a call region is only suspicious when a region was meant to
 bound it. Escapes through explicit `region` blocks inside the callback keep
 reporting as `region-escape` exactly as before.
+
+The built-in Bytecode VM supports the same region and arena model: `region` /
+`strict region` blocks and expressions, live-cell budgets, `promote(...)`,
+`move(...)`, `arena` / `arena_run` (scratch, persistent, and strict) /
+`arena_stats` / `arena_reset`, per-iteration `mut` upvalue isolation, and
+`Vm::region_stats()`. Note that region budgets count live mutable cells rather
+than arbitrary heap bytes; pair them with `ExecutionLimits::max_heap_bytes` and
+`ExecutionLimits::max_allocated_bytes` when bounding total memory.
 
 ## Rust API and compatibility
 
@@ -516,8 +533,9 @@ Numeric sources and transformations retain only the range description, callbacks
 and current item. `iter(list)` retains its already allocated input. `collect`
 bounds the number of output items, not their byte size; closures, nested values,
 and source lists may retain additional memory. Budget and cancellation checks
-also apply to rejected filter candidates. Host sources can provide resource-owning iterators as described below. A
-whole-runtime memory limit remains planned.
+also apply to rejected filter candidates. Host sources can provide resource-owning iterators as described below.
+Peak and cumulative reservation memory can be bounded with `ExecutionLimits::max_heap_bytes`
+and `ExecutionLimits::max_allocated_bytes`.
 
 `range(start, end, step)` generates a list, excluding `end`; `step` defaults to 1
 and can be negative. Zero steps and floating-point steps that cannot advance are
@@ -558,7 +576,8 @@ while scripts see identity-comparable aliases (described below).
 Cancellation is checked at statement/expression boundaries, function calls and
 each generated range element. A cancelled token stays cancelled; create a new
 one for another run. Cancellation does not interrupt a single polygon operation
-or allocation in progress, and there is no hard memory limit yet.
+or allocation in progress; memory usage is bounded through `ExecutionLimits::max_heap_bytes`,
+`ExecutionLimits::max_allocated_bytes`, and `ScriptInstance::set_memory_limit` (retained-data budget).
 
 ### Run a script file
 
@@ -1246,6 +1265,16 @@ in its child process. Values must be nonnegative integers; depth above 64, missi
 values and repeated options are errors. `--check` rejects execution-limit options
 because it does not execute code. Exhaustion reports the script/module source
 location and exits unsuccessfully without printing a result.
+
+For a plain `rush script.r` invocation, Rush automatically uses its built-in
+bytecode VM for standalone scalar expressions, branches, compatible loops and
+top-level scalar functions with verified argument and return types. Function
+declarations precede executable statements, and calls between these functions
+target earlier declarations. Recursive calls and captures use the interpreter.
+Programs that need modules, host functions, coroutine execution or other
+interpreter features use the interpreter. Explicit execution limit flags and
+region reports also select the interpreter. Both engines ship in the same
+executable, including `rush.exe` on Windows.
 
 
 `ExecutionLimits::max_collection_items` currently bounds list/tuple/record literals, eager `range`,

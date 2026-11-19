@@ -8,10 +8,13 @@
 pub mod compiler;
 pub mod iterator;
 pub mod opcode;
+mod scalar_file;
 pub mod vm;
 
 use crate::bytecode::compiler::Compiler;
 use crate::{CancellationToken, ExecutionLimits, RuntimeError, Value};
+use std::ops::{Deref, DerefMut};
+use std::rc::Rc;
 
 pub use iterator::{
     BytecodeIterator, BytecodeSequence, BytecodeSequenceSource, BytecodeSequenceStage,
@@ -21,9 +24,45 @@ pub use opcode::{BytecodeClosure, BytecodeFunction, Chunk, Opcode, Upvalue, Upva
 pub use vm::Vm;
 
 /// Compiled bytecode program ready for execution.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct BytecodeProgram {
-    pub chunk: Chunk,
+    entry: Rc<BytecodeClosure>,
+}
+
+impl From<Chunk> for BytecodeProgram {
+    fn from(chunk: Chunk) -> Self {
+        Self {
+            entry: Rc::new(BytecodeClosure {
+                function: Rc::new(BytecodeFunction {
+                    name: Some("<main>".into()),
+                    arity: 0,
+                    chunk,
+                    upvalue_descriptors: Vec::new(),
+                }),
+                upvalues: Vec::new(),
+            }),
+        }
+    }
+}
+
+impl Deref for BytecodeProgram {
+    type Target = BytecodeFunction;
+
+    fn deref(&self) -> &BytecodeFunction {
+        &self.entry.function
+    }
+}
+
+impl DerefMut for BytecodeProgram {
+    fn deref_mut(&mut self) -> &mut BytecodeFunction {
+        Rc::make_mut(&mut Rc::make_mut(&mut self.entry).function)
+    }
+}
+
+impl PartialEq for BytecodeProgram {
+    fn eq(&self, other: &Self) -> bool {
+        self.chunk == other.chunk
+    }
 }
 
 impl BytecodeProgram {
@@ -39,18 +78,30 @@ impl BytecodeProgram {
                 location: None,
             });
         }
+        Self::compile_items(&parsed.module.items)
+    }
+
+    pub(crate) fn compile_items(items: &[crate::Stmt<'_>]) -> Result<Self, RuntimeError> {
         let mut compiler = Compiler::new();
-        compiler.compile_module(&parsed.module.items)?;
-        let top_fn = compiler.pop_state();
-        Ok(Self {
-            chunk: top_fn.chunk,
-        })
+        compiler.compile_module(items)?;
+        Ok(Self::from(compiler.pop_state().chunk))
+    }
+
+    pub(crate) fn compile_scalar_file(
+        items: &[crate::Stmt<'_>],
+        contracts: &std::collections::HashMap<usize, crate::analysis::FunctionContract>,
+    ) -> Option<Self> {
+        if scalar_file::supports(items, contracts) {
+            Self::compile_items(items).ok()
+        } else {
+            None
+        }
     }
 
     /// Execute the compiled bytecode program with a step budget limit.
     pub fn execute(&self, budget: usize) -> Result<Value<'static>, RuntimeError> {
         let mut vm = Vm::new(budget);
-        vm.run(&self.chunk)
+        vm.run_closure(&self.entry, &[])
     }
 
     /// Execute the compiled bytecode program with explicit `ExecutionLimits` and optional `CancellationToken`.
@@ -60,7 +111,7 @@ impl BytecodeProgram {
         cancel: Option<&CancellationToken>,
     ) -> Result<Value<'static>, RuntimeError> {
         let mut vm = Vm::with_limits(limits, cancel);
-        vm.run(&self.chunk)
+        vm.run_closure(&self.entry, &[])
     }
 }
 
@@ -73,6 +124,15 @@ pub fn evaluate_bytecode(source: &str, budget: usize) -> Result<Value<'static>, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editing_a_cloned_chunk_preserves_prepared_code() {
+        let program = BytecodeProgram::compile("2 + 3").unwrap();
+        let mut edited = program.clone();
+        edited.chunk.constants[0] = Value::Number(7.0);
+        assert_eq!(program.execute(100).unwrap(), Value::Number(5.0));
+        assert_eq!(edited.execute(100).unwrap(), Value::Number(7.0));
+    }
 
     #[test]
     fn bytecode_get_returns_option_and_supports_tuple() {

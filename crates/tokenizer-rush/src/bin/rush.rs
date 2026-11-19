@@ -320,25 +320,9 @@ fn run() -> Result<(), String> {
                 .collect::<Vec<_>>()
                 .join("\n"));
         }
-        module_programs.push(Program::compile(contents).map_err(|error| {
+        module_programs.push(Program::compile_parsed(parsed).map_err(|error| {
             diagnostic(module_path, contents, error.span.start, &error.message)
         })?);
-    }
-    let sys = themoretheless_tokenizer_rush::sys::SysHost::with_args(sys_limits, script_arguments);
-    let sys_program = Program::compile(themoretheless_tokenizer_rush::sys::MODULE_SOURCE)
-        .map_err(|e| format!("sys: {}", e.message))?;
-    let hosts: Vec<_> = sys
-        .registrations
-        .iter()
-        .map(|r| r.function.clone())
-        .collect();
-    let mut modules = module_sources
-        .iter()
-        .zip(&module_programs)
-        .map(|((name, _, _), program)| (name.as_str(), program))
-        .collect::<Vec<_>>();
-    if !registered.contains("sys") {
-        modules.push(("sys", &sys_program));
     }
     let inputs = arguments
         .iter()
@@ -366,13 +350,44 @@ fn run() -> Result<(), String> {
             return Err(format!("Invalid or duplicate input parameter: {name}"));
         }
     }
-    if check_only {
-        let checked = Program::compile(&source)
+    let program = Program::compile_parsed(parsed)
+        .map_err(|error| diagnostic(&path, &source, error.span.start, &error.message))?;
+    if !check_only
+        && !strict
+        && !region_report
+        && limit_options.is_empty()
+        && inputs.is_empty()
+        && module_sources.is_empty()
+        && let Some(bytecode) = program.scalar_bytecode()
+    {
+        let token = CancellationToken::default();
+        let _signals = signal_cancellation(&token);
+        let value = bytecode
+            .execute_with_limits(limits, Some(&token))
             .map_err(|error| diagnostic(&path, &source, error.span.start, &error.message))?;
+        return if quiet { Ok(()) } else { write_output(value) };
+    }
+    let sys = themoretheless_tokenizer_rush::sys::SysHost::with_args(sys_limits, script_arguments);
+    let sys_program = Program::compile(themoretheless_tokenizer_rush::sys::MODULE_SOURCE)
+        .map_err(|e| format!("sys: {}", e.message))?;
+    let hosts: Vec<_> = sys
+        .registrations
+        .iter()
+        .map(|r| r.function.clone())
+        .collect();
+    let mut modules = module_sources
+        .iter()
+        .zip(&module_programs)
+        .map(|((name, _, _), program)| (name.as_str(), program))
+        .collect::<Vec<_>>();
+    if !registered.contains("sys") {
+        modules.push(("sys", &sys_program));
+    }
+    if check_only {
         (if strict {
-            checked.validate_strict_modules(&modules)
+            program.validate_strict_modules(&modules)
         } else {
-            checked.validate_modules(&modules)
+            program.validate_modules(&modules)
         })
         .map_err(|error| {
             if let Some(module) = &error.module
@@ -417,8 +432,6 @@ fn run() -> Result<(), String> {
         println!("{path}: checks passed");
         return Ok(());
     }
-    let program = Program::compile(&source)
-        .map_err(|error| diagnostic(&path, &source, error.span.start, &error.message))?;
     if strict {
         program.validate_strict_modules(&modules).map_err(|error| {
             if let Some(module) = &error.module

@@ -194,7 +194,7 @@ impl<'s> Checker<'s> {
                 let strict = position
                     .checked_sub(1)
                     .and_then(|index| arguments.get(index))
-                    .is_some_and(|descriptor| self.is_strict_arena_literal(descriptor));
+                    .is_some_and(|descriptor| self.is_strict_arena_expr(descriptor));
                 self.region_depth += 1;
                 self.region_strict.push(strict);
                 self.expr(argument);
@@ -221,7 +221,7 @@ impl<'s> Checker<'s> {
                 let strict = position
                     .checked_sub(1)
                     .and_then(|index| arguments.get(index))
-                    .is_some_and(|descriptor| self.is_strict_arena_literal(descriptor));
+                    .is_some_and(|descriptor| self.is_strict_arena_expr(descriptor));
                 let message = "Callback may leak captured cells out of the arena run; drop or move() them before the run ends";
                 if strict {
                     self.error(callback.span, "arena-escape", message);
@@ -476,10 +476,13 @@ impl<'s> Checker<'s> {
                             ),
                         }
                     }
+                } else if let Some(current) = self.try_blocks.last_mut() {
+                    current.push((expr.span, Shape::Unknown));
                 }
                 self.expr(value);
             }
             ExprKind::TryBlock(body) => {
+                let before_moved = self.moved.clone();
                 self.try_blocks.push(Vec::new());
                 self.region_depth += 1;
                 self.region_strict.push(false);
@@ -491,6 +494,21 @@ impl<'s> Checker<'s> {
                     Some(crate::StmtKind::Expr(last) | crate::StmtKind::Show(last)) => Some(last),
                     _ => None,
                 };
+                let guaranteed_commit = propagated.is_empty()
+                    && tail_expr.is_some_and(|last| {
+                        matches!(
+                            &last.kind,
+                            ExprKind::Call { callee, arguments }
+                                if arguments.len() == 1
+                                    && matches!(
+                                        self.known_builtin(callee),
+                                        Some(Builtin::Some | Builtin::Ok)
+                                    )
+                        )
+                    });
+                if !guaranteed_commit {
+                    self.moved = before_moved;
+                }
                 let tail_shape =
                     tail_expr.map_or(Shape::Typed(ValueType::Null), |last| self.shape(last));
                 let tail_family = tail_expr.map_or(Err(()), |last| self.try_family(last));
@@ -547,14 +565,79 @@ impl<'s> Checker<'s> {
                 self.expression_shapes
                     .insert((expr.span.start, expr.span.end), tail_shape);
             }
+            ExprKind::Region {
+                strict,
+                budget,
+                body,
+                ..
+            } => {
+                if let Some(budget) = budget {
+                    self.expr(budget);
+                    if self.calls && self.shape(budget).rejects(&ValueType::Number) {
+                        self.error(
+                            budget.span,
+                            "region-budget",
+                            "Region budget must be a number",
+                        );
+                    }
+                }
+                let outer_level = self.region_depth;
+                self.region_depth += 1;
+                self.region_strict.push(*strict);
+                self.scopes.push(HashMap::new());
+                self.scope_spans.push(body.span);
+                self.statements(&body.stmts);
+                let tail_expr = match body.stmts.last().map(|stmt| &stmt.kind) {
+                    Some(
+                        crate::StmtKind::Expr(last)
+                        | crate::StmtKind::Show(last)
+                        | crate::StmtKind::Declaration { value: last, .. }
+                        | crate::StmtKind::Destructure { value: last, .. }
+                        | crate::StmtKind::LetElse { value: last, .. },
+                    ) => Some(last),
+                    _ => None,
+                };
+                let tail_shape = match body.stmts.last().map(|stmt| &stmt.kind) {
+                    Some(
+                        crate::StmtKind::Expr(last)
+                        | crate::StmtKind::Show(last)
+                        | crate::StmtKind::Declaration { value: last, .. }
+                        | crate::StmtKind::Destructure { value: last, .. }
+                        | crate::StmtKind::LetElse { value: last, .. },
+                    ) => self.shape(last),
+                    Some(crate::StmtKind::If { .. } | crate::StmtKind::IfLet { .. }) => {
+                        Shape::Unknown
+                    }
+                    _ => Shape::Typed(ValueType::Null),
+                };
+                if let Some(tail) = tail_expr
+                    && !self.is_promote_call(tail)
+                    && !self.is_move_call(tail)
+                {
+                    self.check_escape(
+                        tail,
+                        outer_level,
+                        "Region expression result may capture cells allocated inside the region; they will be promoted to an outer region",
+                    );
+                }
+                self.scopes.pop();
+                self.scope_spans.pop();
+                self.region_strict.pop();
+                self.region_depth -= 1;
+                self.expression_shapes
+                    .insert((expr.span.start, expr.span.end), tail_shape);
+            }
             ExprKind::If {
                 condition,
                 then_value,
                 else_value,
             } => {
                 self.condition(condition);
+                let before = self.moved.clone();
                 self.expr(then_value);
+                let then_moved = std::mem::replace(&mut self.moved, before);
                 self.expr(else_value);
+                self.moved.extend(then_moved);
             }
             ExprKind::IfLet {
                 pattern,
@@ -564,6 +647,7 @@ impl<'s> Checker<'s> {
             } => {
                 self.expr(value);
                 let shape = self.shape(value);
+                let before = self.moved.clone();
                 self.scopes.push(HashMap::new());
                 self.scope_spans.push(then_value.span);
                 self.match_bindings(pattern, then_value.span.start);
@@ -572,8 +656,10 @@ impl<'s> Checker<'s> {
                 let left = self.shape(then_value);
                 self.scopes.pop();
                 self.scope_spans.pop();
+                let then_moved = std::mem::replace(&mut self.moved, before);
                 self.expr(else_value);
                 let right = self.shape(else_value);
+                self.moved.extend(then_moved);
                 let result = if left == right {
                     left
                 } else {
@@ -588,12 +674,16 @@ impl<'s> Checker<'s> {
                 self.return_types.push(None);
                 self.inferred_returns.push(Vec::new());
                 let saved_try = std::mem::take(&mut self.try_blocks);
+                let saved_moved = std::mem::take(&mut self.moved);
+                let saved_loops = std::mem::take(&mut self.loop_moved);
                 self.scopes.push(HashMap::new());
                 self.scope_spans.push(body.span);
                 for parameter in parameters {
                     self.pattern(parameter, body.span.start);
                 }
                 self.expr(body);
+                self.loop_moved = saved_loops;
+                self.moved = saved_moved;
                 self.try_blocks = saved_try;
                 self.return_types.pop();
                 self.inferred_returns.pop();
@@ -738,7 +828,9 @@ impl<'s> Checker<'s> {
                     }
                     self.expr(&binary);
                 } else {
-                    // Plain reassignment revives a moved binding's cell.
+                    self.expr(value);
+                    // Plain reassignment to a binding name revives a moved cell;
+                    // member/index writes read the root binding and must not revive it.
                     if let ExprKind::Name(name) = &target.kind {
                         let id = self
                             .scopes
@@ -751,7 +843,6 @@ impl<'s> Checker<'s> {
                         }
                     }
                     self.expr(target);
-                    self.expr(value);
                 }
                 // Compound assignment writes a freshly computed value into an
                 // existing outer cell; no region data or cell can flow out.
@@ -1213,8 +1304,11 @@ impl<'s> Checker<'s> {
                 self.expr(value);
                 self.check_exhaustiveness(value, arms);
                 let shape = self.shape(value);
+                let before = self.moved.clone();
+                let mut merged = HashMap::new();
                 let mut results = Vec::new();
                 for arm in arms {
+                    self.moved = before.clone();
                     self.scopes.push(HashMap::new());
                     self.scope_spans.push(arm.span);
                     self.match_bindings(&arm.pattern, arm.pattern.span.end);
@@ -1226,7 +1320,9 @@ impl<'s> Checker<'s> {
                     results.push(self.shape(&arm.value));
                     self.scopes.pop();
                     self.scope_spans.pop();
+                    merged.extend(std::mem::take(&mut self.moved));
                 }
+                self.moved = if arms.is_empty() { before } else { merged };
                 let result = if results.iter().all(|shape| Some(shape) == results.first()) {
                     results.first().cloned().unwrap_or(Shape::Unknown)
                 } else {

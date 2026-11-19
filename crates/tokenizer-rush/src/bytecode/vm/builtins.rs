@@ -3,7 +3,7 @@ use crate::bytecode::iterator::{
     BytecodeIterator, BytecodeSequence, BytecodeSequenceSource, BytecodeSequenceStage,
     BytecodeStageKind,
 };
-use crate::runtime::builtins::eval_pure_builtin;
+use crate::runtime::builtins::{eval_pure_builtin, range_bounds};
 use crate::runtime::memory::Cover;
 use crate::runtime::ops::is_truthy;
 use crate::{Builtin, RecordMap, RuntimeError, Value};
@@ -19,7 +19,6 @@ pub(super) const fn is_higher_order_builtin(b: Builtin) -> bool {
             | Builtin::Filter
             | Builtin::Fold
             | Builtin::Range
-            | Builtin::RangeIter
             | Builtin::Iter
             | Builtin::Collect
             | Builtin::FlatMap
@@ -28,6 +27,10 @@ pub(super) const fn is_higher_order_builtin(b: Builtin) -> bool {
             | Builtin::Zip
             | Builtin::GroupBy
             | Builtin::FoldBy
+            | Builtin::Promote
+            | Builtin::ArenaRun
+            | Builtin::ArenaStats
+            | Builtin::ArenaReset
     )
 }
 
@@ -325,37 +328,9 @@ impl<'c> Vm<'c> {
                 }
                 Ok(Value::Record(RecordMap::from(groups)))
             }
-            Builtin::Range | Builtin::RangeIter => {
-                let (start, end, step) = match args {
-                    [a, b] => {
-                        let (Some(start), Some(end)) = (a.as_f64(), b.as_f64()) else {
-                            return Err(
-                                self.error(span, "range expects start, end and optional step")
-                            );
-                        };
-                        (start, end, 1.0)
-                    }
-                    [a, b, c] => {
-                        let (Some(start), Some(end), Some(step)) =
-                            (a.as_f64(), b.as_f64(), c.as_f64())
-                        else {
-                            return Err(
-                                self.error(span, "range expects start, end and optional step")
-                            );
-                        };
-                        (start, end, step)
-                    }
-                    _ => return Err(self.error(span, "range expects start, end and optional step")),
-                };
-                if step == 0.0 {
-                    return Err(self.error(span, "Range step must be nonzero"));
-                }
-                if !start.is_finite() || !end.is_finite() || !step.is_finite() {
-                    return Err(self.error(span, "Range arguments must be finite"));
-                }
-                if builtin == Builtin::RangeIter {
-                    return Ok(Value::Range { start, end, step });
-                }
+            Builtin::Range => {
+                let (start, end, step) =
+                    range_bounds(args).map_err(|message| self.error(span, message))?;
                 let est = ((end - start) / step).ceil();
                 let cap = if est.is_finite() && est > 0.0 {
                     (est as usize).min(self.fuel.saturating_add(1)).min(65_536)
@@ -442,6 +417,85 @@ impl<'c> Vm<'c> {
                     }
                 }
                 Ok(Value::List(output))
+            }
+            Builtin::Promote => {
+                let [val] = args else {
+                    return Err(self.error(span, "promote requires one argument"));
+                };
+                self.regions.bless_vm_value(val, &self.stack);
+                Ok(val.clone())
+            }
+            Builtin::ArenaRun | Builtin::ArenaStats | Builtin::ArenaReset => {
+                let Some(descriptor) = args.first() else {
+                    return Err(self.error(span, "an arena record from arena(...) is required"));
+                };
+                let Value::Record(fields) = descriptor else {
+                    return Err(self.error(span, "an arena record from arena(...) is required"));
+                };
+                let Some(Value::String(name)) = fields.get("name") else {
+                    return Err(self.error(span, "arena record requires a name string"));
+                };
+                if builtin == Builtin::ArenaStats {
+                    if args.len() != 1 {
+                        return Err(self.error(span, "arena_stats requires one argument"));
+                    }
+                    return Ok(Value::Record(self.regions.arena_stats_record(name)));
+                }
+                if builtin == Builtin::ArenaReset {
+                    if args.len() != 1 {
+                        return Err(self.error(span, "arena_reset requires one argument"));
+                    }
+                    if self.regions.is_active_persistent(name) {
+                        return Err(self.error(span, "cannot reset an active persistent arena"));
+                    }
+                    self.regions.reset_persistent(name);
+                    return Ok(Value::Null);
+                }
+                if args.len() != 2 {
+                    return Err(self.error(span, "arena_run requires an arena and a callable"));
+                }
+                let callback = &args[1];
+                if !matches!(callback, Value::BytecodeFunction(_) | Value::Builtin(_)) {
+                    return Err(self.error(span, "arena_run requires a callable"));
+                }
+                let budget = match fields.get("budget") {
+                    None | Some(Value::Null) => None,
+                    Some(v) => match v.as_usize_index() {
+                        Some(b) => Some(b),
+                        None => {
+                            return Err(
+                                self.error(span, "arena budget must be a non-negative integer")
+                            );
+                        }
+                    },
+                };
+                let strict = matches!(fields.get("strict"), Some(Value::Bool(true)));
+                if matches!(fields.get("persistent"), Some(Value::Bool(true))) {
+                    if self.regions.is_active_persistent(name) {
+                        return Err(self.error(span, "persistent arena is already active"));
+                    }
+                    let (id, parked_set) = self.regions.enter_persistent_arena(
+                        name,
+                        budget,
+                        strict,
+                        self.frames.len(),
+                    );
+                    let result = self.invoke_callable(callback, &[], span);
+                    let exit =
+                        self.regions
+                            .exit_persistent_arena(name.clone(), id, &parked_set, strict);
+                    let value = result?;
+                    exit.map_err(|msg| self.error(span, msg))?;
+                    return Ok(value);
+                }
+                let region =
+                    self.regions
+                        .enter_region(budget, Some(name), strict, true, self.frames.len());
+                let result = self.invoke_callable(callback, &[], span);
+                let exit = self.regions.exit_region(Some(region));
+                let value = result?;
+                exit.map_err(|msg| self.error(span, msg))?;
+                Ok(value)
             }
             other => eval_pure_builtin(other, args).map_err(|msg| self.error(span, msg)),
         }
